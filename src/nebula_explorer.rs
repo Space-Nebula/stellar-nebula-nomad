@@ -1,8 +1,10 @@
-use soroban_sdk::{contracttype, Env, String};
+use soroban_sdk::contracttype;
 
+/// Placeholder for nebula scan result (see issue #1).
 #[derive(Clone)]
 #[contracttype]
-
-
-/// Scan a nebula region using ledger-seeded procedural generation
+pub struct NebulaScan {
+    pub region_id: u64,
+    pub density: u32,
+}
 
