@@ -4,8 +4,8 @@ use soroban_sdk::testutils::{Address as _, Events, Ledger, LedgerInfo};
 use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, Val, Vec};
 use stellar_nebula_nomad::{
     Blueprint, BlueprintError, BlueprintRarity, CellType, NebulaNomadContract,
-    NebulaNomadContractClient, NebulaCell, NebulaLayout, ProfileError, ProgressUpdate, Rarity,
-    Session, SessionError, GRID_SIZE, TOTAL_CELLS,
+    NebulaNomadContractClient, NebulaCell, NebulaLayout, ProfileError, ProgressUpdate, Referral,
+    ReferralError, Rarity, Session, SessionError, GRID_SIZE, TOTAL_CELLS,
 };
 
 fn setup_env() -> (Env, NebulaNomadContractClient<'static>, Address) {
@@ -569,4 +569,93 @@ fn test_batch_craft_exceeds_limit_panics() {
     recipes.push_back(r.clone());
     recipes.push_back(r); // 3 > MAX_BATCH_CRAFT — must panic
     client.batch_craft_blueprints(&player, &recipes);
+}
+
+// ─── referral system (issue #19) ──────────────────────────────────────────────
+
+#[test]
+fn test_register_referral_success() {
+    let (env, client, referrer) = setup_env();
+    let new_nomad = Address::generate(&env);
+    let id = client.register_referral(&referrer, &new_nomad);
+    assert_eq!(id, 1);
+}
+
+#[test]
+fn test_get_referral_stores_correct_data() {
+    let (env, client, referrer) = setup_env();
+    let new_nomad = Address::generate(&env);
+    client.register_referral(&referrer, &new_nomad);
+    let referral = client.get_referral(&new_nomad);
+    assert_eq!(referral.referrer, referrer);
+    assert_eq!(referral.new_nomad, new_nomad);
+    assert!(!referral.claimed);
+    assert!(!referral.first_scan_done);
+}
+
+#[test]
+#[should_panic]
+fn test_register_referral_self_panics() {
+    let (env, client, player) = setup_env();
+    client.register_referral(&player, &player); // self-referral — must panic
+}
+
+#[test]
+#[should_panic]
+fn test_register_referral_duplicate_panics() {
+    let (env, client, referrer) = setup_env();
+    let new_nomad = Address::generate(&env);
+    client.register_referral(&referrer, &new_nomad);
+    client.register_referral(&referrer, &new_nomad); // already referred — must panic
+}
+
+#[test]
+fn test_mark_first_scan_and_claim_reward() {
+    let (env, client, referrer) = setup_env();
+    let new_nomad = Address::generate(&env);
+    client.register_referral(&referrer, &new_nomad);
+    client.mark_first_scan(&new_nomad);
+    let reward = client.claim_referral_reward(&referrer, &new_nomad);
+    assert_eq!(reward, 100);
+}
+
+#[test]
+#[should_panic]
+fn test_claim_reward_before_first_scan_panics() {
+    let (env, client, referrer) = setup_env();
+    let new_nomad = Address::generate(&env);
+    client.register_referral(&referrer, &new_nomad);
+    client.claim_referral_reward(&referrer, &new_nomad); // scan not done — must panic
+}
+
+#[test]
+#[should_panic]
+fn test_claim_reward_twice_panics() {
+    let (env, client, referrer) = setup_env();
+    let new_nomad = Address::generate(&env);
+    client.register_referral(&referrer, &new_nomad);
+    client.mark_first_scan(&new_nomad);
+    client.claim_referral_reward(&referrer, &new_nomad);
+    client.claim_referral_reward(&referrer, &new_nomad); // already claimed — must panic
+}
+
+#[test]
+fn test_referral_claimed_flag_set_after_claim() {
+    let (env, client, referrer) = setup_env();
+    let new_nomad = Address::generate(&env);
+    client.register_referral(&referrer, &new_nomad);
+    client.mark_first_scan(&new_nomad);
+    client.claim_referral_reward(&referrer, &new_nomad);
+    let referral = client.get_referral(&new_nomad);
+    assert!(referral.claimed);
+    assert!(referral.first_scan_done);
+}
+
+#[test]
+fn test_referral_emits_registered_event() {
+    let (env, client, referrer) = setup_env();
+    let new_nomad = Address::generate(&env);
+    client.register_referral(&referrer, &new_nomad);
+    let events = env.events().all();
+    assert!(!events.is_empty());
 }

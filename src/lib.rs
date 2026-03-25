@@ -5,6 +5,7 @@ use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Symbol, Vec};
 mod blueprint_factory;
 mod nebula_explorer;
 mod player_profile;
+mod referral_system;
 mod resource_minter;
 mod session_manager;
 mod ship_registry;
@@ -14,6 +15,7 @@ pub use nebula_explorer::{
     NebulaLayout, Rarity, GRID_SIZE, TOTAL_CELLS,
 };
 pub use blueprint_factory::{Blueprint, BlueprintError, BlueprintRarity};
+pub use referral_system::{Referral, ReferralError};
 pub use player_profile::{PlayerProfile, ProfileError, ProgressUpdate};
 pub use resource_minter::Resource;
 pub use session_manager::{Session, SessionError};
@@ -147,6 +149,36 @@ impl NebulaNomadContract {
     /// Retrieve a blueprint by ID.
     pub fn get_blueprint(env: Env, blueprint_id: u64) -> Result<Blueprint, BlueprintError> {
         blueprint_factory::get_blueprint(&env, blueprint_id)
+    }
+
+    // ─── Referral System ──────────────────────────────────────────────────────
+
+    /// Record an on-chain referral from `referrer` for `new_nomad`.
+    pub fn register_referral(
+        env: Env,
+        referrer: Address,
+        new_nomad: Address,
+    ) -> Result<u64, ReferralError> {
+        referral_system::register_referral(&env, referrer, new_nomad)
+    }
+
+    /// Mark that `nomad` has completed their first scan, unlocking the reward.
+    pub fn mark_first_scan(env: Env, nomad: Address) -> Result<(), ReferralError> {
+        referral_system::mark_first_scan(&env, nomad)
+    }
+
+    /// Claim the essence referral reward. One-time, capped at 10 claims/day.
+    pub fn claim_referral_reward(
+        env: Env,
+        referrer: Address,
+        new_nomad: Address,
+    ) -> Result<i128, ReferralError> {
+        referral_system::claim_referral_reward(&env, referrer, new_nomad)
+    }
+
+    /// Retrieve a referral record by the new nomad's address.
+    pub fn get_referral(env: Env, new_nomad: Address) -> Result<Referral, ReferralError> {
+        referral_system::get_referral(&env, new_nomad)
     }
 }
 
