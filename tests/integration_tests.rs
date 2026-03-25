@@ -1,19 +1,18 @@
 #![cfg(test)]
 
 use soroban_sdk::testutils::{Address as _, Events, Ledger, LedgerInfo};
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{vec, Address, BytesN, Env, IntoVal, Val, Vec};
 use stellar_nebula_nomad::{
-    BondStatus, NebulaNomadContract, NebulaNomadContractClient, NomadBond, YieldDelegation,
+    CellType, NebulaNomadContract, NebulaNomadContractClient, NebulaCell, NebulaLayout, Rarity,
+    GRID_SIZE, TOTAL_CELLS,
 };
 
-// ── Test Helpers ─────────────────────────────────────────────────────────────
-
-fn setup_env() -> (Env, NebulaNomadContractClient<'static>) {
+fn setup_env() -> (Env, NebulaNomadContractClient<'static>, Address) {
     let env = Env::default();
     env.mock_all_auths();
     env.ledger().set(LedgerInfo {
         protocol_version: 22,
-        sequence_number: 500,
+        sequence_number: 100,
         timestamp: 1_700_000_000,
         network_id: [0u8; 32],
         base_reserve: 10,
@@ -23,467 +22,260 @@ fn setup_env() -> (Env, NebulaNomadContractClient<'static>) {
     });
     let contract_id = env.register_contract(None, NebulaNomadContract);
     let client = NebulaNomadContractClient::new(&env, &contract_id);
-    (env, client)
+    let player = Address::generate(&env);
+    (env, client, player)
 }
 
-fn two_players(env: &Env) -> (Address, Address) {
-    (Address::generate(env), Address::generate(env))
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// create_bond
-// ═══════════════════════════════════════════════════════════════════════════
+// ─── generate_nebula_layout ───────────────────────────────────────────────
 
 #[test]
-fn test_create_bond_returns_pending() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    let bond = client.create_bond(&alice, &1, &bob);
-    assert_eq!(bond.bond_id, 1);
-    assert_eq!(bond.initiator, alice);
-    assert_eq!(bond.partner, bob);
-    assert_eq!(bond.ship_id, 1);
-    assert_eq!(bond.status, BondStatus::Pending);
-    assert_eq!(bond.created_at, 1_700_000_000);
+fn test_generate_layout_dimensions() {
+    let (env, client, player) = setup_env();
+    let seed = BytesN::from_array(&env, &[1u8; 32]);
+    let layout = client.generate_nebula_layout(&seed, &player);
+    assert_eq!(layout.width, GRID_SIZE);
+    assert_eq!(layout.height, GRID_SIZE);
+    assert_eq!(layout.cells.len(), TOTAL_CELLS);
 }
 
 #[test]
-fn test_create_bond_increments_ids() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-    let charlie = Address::generate(&env);
-
-    let b1 = client.create_bond(&alice, &1, &bob);
-    let b2 = client.create_bond(&alice, &2, &charlie);
-    assert_eq!(b1.bond_id, 1);
-    assert_eq!(b2.bond_id, 2);
+fn test_generate_layout_has_energy() {
+    let (env, client, player) = setup_env();
+    let seed = BytesN::from_array(&env, &[42u8; 32]);
+    let layout = client.generate_nebula_layout(&seed, &player);
+    assert!(layout.total_energy > 0);
 }
 
 #[test]
-#[should_panic(expected = "cannot bond with yourself")]
-fn test_create_bond_self_bond_panics() {
-    let (env, client) = setup_env();
-    let alice = Address::generate(&env);
-    client.create_bond(&alice, &1, &alice);
+fn test_generate_layout_deterministic() {
+    let (env, client, player) = setup_env();
+    let seed = BytesN::from_array(&env, &[7u8; 32]);
+    let layout1 = client.generate_nebula_layout(&seed, &player);
+    let layout2 = client.generate_nebula_layout(&seed, &player);
+    assert_eq!(layout1.total_energy, layout2.total_energy);
+    assert_eq!(layout1.seed, layout2.seed);
+    assert_eq!(layout1.timestamp, layout2.timestamp);
 }
 
 #[test]
-fn test_create_bond_emits_event() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-    client.create_bond(&alice, &1, &bob);
+fn test_different_seeds_produce_different_layouts() {
+    let (env, client, player) = setup_env();
+    let seed_a = BytesN::from_array(&env, &[1u8; 32]);
+    let seed_b = BytesN::from_array(&env, &[2u8; 32]);
+    let layout_a = client.generate_nebula_layout(&seed_a, &player);
+    let layout_b = client.generate_nebula_layout(&seed_b, &player);
+    assert_ne!(layout_a.total_energy, layout_b.total_energy);
+}
+
+#[test]
+fn test_layout_changes_with_ledger_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, NebulaNomadContract);
+    let client = NebulaNomadContractClient::new(&env, &contract_id);
+    let player = Address::generate(&env);
+    let seed = BytesN::from_array(&env, &[5u8; 32]);
+
+    env.ledger().set(LedgerInfo {
+        protocol_version: 22,
+        sequence_number: 100,
+        timestamp: 1_000_000,
+        network_id: [0u8; 32],
+        base_reserve: 10,
+        min_temp_entry_ttl: 100,
+        min_persistent_entry_ttl: 1000,
+        max_entry_ttl: 10_000,
+    });
+    let layout1 = client.generate_nebula_layout(&seed, &player);
+
+    env.ledger().set(LedgerInfo {
+        protocol_version: 22,
+        sequence_number: 200,
+        timestamp: 2_000_000,
+        network_id: [0u8; 32],
+        base_reserve: 10,
+        min_temp_entry_ttl: 100,
+        min_persistent_entry_ttl: 1000,
+        max_entry_ttl: 10_000,
+    });
+    let layout2 = client.generate_nebula_layout(&seed, &player);
+
+    assert_ne!(layout1.total_energy, layout2.total_energy);
+}
+
+#[test]
+fn test_layout_cell_coordinates() {
+    let (env, client, player) = setup_env();
+    let seed = BytesN::from_array(&env, &[10u8; 32]);
+    let layout = client.generate_nebula_layout(&seed, &player);
+
+    for i in 0..layout.cells.len() {
+        let cell = layout.cells.get(i).unwrap();
+        assert!(cell.x < GRID_SIZE);
+        assert!(cell.y < GRID_SIZE);
+    }
+}
+
+#[test]
+fn test_layout_records_timestamp() {
+    let (env, client, player) = setup_env();
+    let seed = BytesN::from_array(&env, &[3u8; 32]);
+    let layout = client.generate_nebula_layout(&seed, &player);
+    assert_eq!(layout.timestamp, 1_700_000_000);
+}
+
+#[test]
+fn test_zero_seed_works() {
+    let (env, client, player) = setup_env();
+    let seed = BytesN::from_array(&env, &[0u8; 32]);
+    let layout = client.generate_nebula_layout(&seed, &player);
+    assert_eq!(layout.cells.len(), TOTAL_CELLS);
+}
+
+// ─── calculate_rarity_tier ────────────────────────────────────────────────
+
+fn make_layout(env: &Env, rare_count: u32, energy_per_cell: u32) -> NebulaLayout {
+    let mut cells = Vec::new(env);
+    let mut total_energy = 0u32;
+    for i in 0..TOTAL_CELLS {
+        let (cell_type, energy) = if i < rare_count {
+            (CellType::Wormhole, 60 + energy_per_cell)
+        } else {
+            (CellType::Empty, energy_per_cell)
+        };
+        total_energy += energy;
+        cells.push_back(NebulaCell {
+            x: i % GRID_SIZE,
+            y: i / GRID_SIZE,
+            cell_type,
+            energy,
+        });
+    }
+    NebulaLayout {
+        width: GRID_SIZE,
+        height: GRID_SIZE,
+        cells,
+        seed: BytesN::from_array(env, &[0u8; 32]),
+        timestamp: 0,
+        total_energy,
+    }
+}
+
+#[test]
+fn test_rarity_common() {
+    let (env, client, _) = setup_env();
+    let layout = make_layout(&env, 0, 0);
+    let rarity = client.calculate_rarity_tier(&layout);
+    assert_eq!(rarity, Rarity::Common);
+}
+
+#[test]
+fn test_rarity_uncommon() {
+    let (env, client, _) = setup_env();
+    // 5 rare cells × 10 = 50, energy_density ≈ 0 → score 50 → Uncommon
+    let layout = make_layout(&env, 5, 0);
+    let rarity = client.calculate_rarity_tier(&layout);
+    assert_eq!(rarity, Rarity::Uncommon);
+}
+
+#[test]
+fn test_rarity_rare() {
+    let (env, client, _) = setup_env();
+    // 10 rare cells × 10 = 100 → score 100 → Rare
+    let layout = make_layout(&env, 10, 0);
+    let rarity = client.calculate_rarity_tier(&layout);
+    assert_eq!(rarity, Rarity::Rare);
+}
+
+#[test]
+fn test_rarity_epic() {
+    let (env, client, _) = setup_env();
+    // 15 rare cells × 10 = 150 → score 150 → Epic
+    let layout = make_layout(&env, 15, 0);
+    let rarity = client.calculate_rarity_tier(&layout);
+    assert_eq!(rarity, Rarity::Epic);
+}
+
+#[test]
+fn test_rarity_legendary() {
+    let (env, client, _) = setup_env();
+    // 20 rare cells × 10 = 200 → score 200 → Legendary
+    let layout = make_layout(&env, 20, 0);
+    let rarity = client.calculate_rarity_tier(&layout);
+    assert_eq!(rarity, Rarity::Legendary);
+}
+
+#[test]
+fn test_rarity_energy_density_contributes() {
+    let (env, client, _) = setup_env();
+    // 4 rare cells × 10 = 40, with high energy per cell to push into Uncommon
+    // energy_per_cell = 10 → total = 256 * 10 = 2560, density = 10 → score = 50
+    let layout = make_layout(&env, 4, 10);
+    let rarity = client.calculate_rarity_tier(&layout);
+    assert_eq!(rarity, Rarity::Uncommon);
+}
+
+#[test]
+fn test_rarity_from_generated_layout() {
+    let (env, client, player) = setup_env();
+    let seed = BytesN::from_array(&env, &[99u8; 32]);
+    let layout = client.generate_nebula_layout(&seed, &player);
+    let rarity = client.calculate_rarity_tier(&layout);
+    // Should be one of the valid rarity tiers
+    assert!(
+        rarity == Rarity::Common
+            || rarity == Rarity::Uncommon
+            || rarity == Rarity::Rare
+            || rarity == Rarity::Epic
+            || rarity == Rarity::Legendary
+    );
+}
+
+// ─── scan_nebula (end-to-end + event emission) ───────────────────────────
+
+#[test]
+fn test_scan_nebula_returns_layout_and_rarity() {
+    let (env, client, player) = setup_env();
+    let seed = BytesN::from_array(&env, &[50u8; 32]);
+    let (layout, rarity) = client.scan_nebula(&seed, &player);
+    assert_eq!(layout.width, GRID_SIZE);
+    assert_eq!(layout.height, GRID_SIZE);
+    assert_eq!(layout.cells.len(), TOTAL_CELLS);
+    assert!(
+        rarity == Rarity::Common
+            || rarity == Rarity::Uncommon
+            || rarity == Rarity::Rare
+            || rarity == Rarity::Epic
+            || rarity == Rarity::Legendary
+    );
+}
+
+#[test]
+fn test_scan_nebula_emits_event() {
+    let (env, client, player) = setup_env();
+    let seed = BytesN::from_array(&env, &[77u8; 32]);
+    let _result = client.scan_nebula(&seed, &player);
 
     let events = env.events().all();
-    assert!(!events.is_empty(), "expected bond created event");
-}
+    assert!(!events.is_empty(), "Expected NebulaScanned event to be emitted");
 
-// ═══════════════════════════════════════════════════════════════════════════
-// accept_bond
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn test_accept_bond_activates() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    let bond = client.accept_bond(&bob, &1);
-    assert_eq!(bond.status, BondStatus::Active);
+    // Verify the last event has the correct topics
+    let last = events.get(events.len() - 1).unwrap();
+    let (_contract_addr, topics, _data) = last;
+    assert_eq!(topics.len(), 2);
 }
 
 #[test]
-#[should_panic(expected = "only the designated partner can accept")]
-fn test_accept_bond_wrong_partner_panics() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-    let charlie = Address::generate(&env);
+fn test_scan_nebula_consistency_with_individual_calls() {
+    let (env, client, player) = setup_env();
+    let seed = BytesN::from_array(&env, &[33u8; 32]);
 
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&charlie, &1);
-}
+    let layout = client.generate_nebula_layout(&seed, &player);
+    let rarity = client.calculate_rarity_tier(&layout);
 
-#[test]
-#[should_panic(expected = "bond is not pending")]
-fn test_accept_bond_already_active_panics() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
+    let (scan_layout, scan_rarity) = client.scan_nebula(&seed, &player);
 
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.accept_bond(&bob, &1); // second accept
-}
-
-#[test]
-#[should_panic(expected = "bond not found")]
-fn test_accept_bond_nonexistent_panics() {
-    let (env, client) = setup_env();
-    let bob = Address::generate(&env);
-    client.accept_bond(&bob, &99);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// delegate_yield
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn test_delegate_yield_sets_config() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-
-    let del = client.delegate_yield(&alice, &1, &50);
-    assert_eq!(del.bond_id, 1);
-    assert_eq!(del.delegator, alice);
-    assert_eq!(del.beneficiary, bob);
-    assert_eq!(del.percentage, 50);
-    assert_eq!(del.total_yielded, 0);
-}
-
-#[test]
-fn test_delegate_yield_partner_to_initiator() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-
-    let del = client.delegate_yield(&bob, &1, &30);
-    assert_eq!(del.delegator, bob);
-    assert_eq!(del.beneficiary, alice);
-    assert_eq!(del.percentage, 30);
-}
-
-#[test]
-#[should_panic(expected = "percentage must be 1-100")]
-fn test_delegate_yield_zero_panics() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &0);
-}
-
-#[test]
-#[should_panic(expected = "percentage must be 1-100")]
-fn test_delegate_yield_over_100_panics() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &101);
-}
-
-#[test]
-#[should_panic(expected = "bond is not active")]
-fn test_delegate_yield_pending_bond_panics() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.delegate_yield(&alice, &1, &50); // bond still pending
-}
-
-#[test]
-#[should_panic(expected = "caller is not part of this bond")]
-fn test_delegate_yield_outsider_panics() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-    let charlie = Address::generate(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&charlie, &1, &50);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// accrue_essence + claim_yield (the core yield flow)
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn test_accrue_essence() {
-    let (env, client) = setup_env();
-    let alice = Address::generate(&env);
-
-    client.accrue_essence(&alice, &1000);
-    assert_eq!(client.get_essence_balance(&alice), 1000);
-}
-
-#[test]
-fn test_accrue_essence_accumulates() {
-    let (env, client) = setup_env();
-    let alice = Address::generate(&env);
-
-    client.accrue_essence(&alice, &500);
-    client.accrue_essence(&alice, &300);
-    assert_eq!(client.get_essence_balance(&alice), 800);
-}
-
-#[test]
-fn test_claim_yield_transfers_correct_amount() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    // Bond + activate + delegate 50%
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &50);
-
-    // Alice earns 1000 essence
-    client.accrue_essence(&alice, &1000);
-
-    // Bob claims 50% of Alice's balance → 500
-    let claimed = client.claim_yield(&bob, &1);
-    assert_eq!(claimed, 500);
-    assert_eq!(client.get_essence_balance(&alice), 500);
-    assert_eq!(client.get_essence_balance(&bob), 500);
-}
-
-#[test]
-fn test_claim_yield_updates_total_yielded() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &25);
-    client.accrue_essence(&alice, &400);
-
-    client.claim_yield(&bob, &1);
-    let del = client.get_yield_delegation(&1);
-    assert_eq!(del.total_yielded, 100); // 25% of 400
-}
-
-#[test]
-fn test_claim_yield_zero_balance_returns_zero() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &50);
-
-    // No essence accrued — claim returns 0
-    let claimed = client.claim_yield(&bob, &1);
-    assert_eq!(claimed, 0);
-}
-
-#[test]
-fn test_claim_yield_multiple_claims() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &50);
-
-    client.accrue_essence(&alice, &1000);
-    let c1 = client.claim_yield(&bob, &1); // 50% of 1000 = 500
-    assert_eq!(c1, 500);
-
-    let c2 = client.claim_yield(&bob, &1); // 50% of 500 = 250
-    assert_eq!(c2, 250);
-
-    assert_eq!(client.get_essence_balance(&alice), 250);
-    assert_eq!(client.get_essence_balance(&bob), 750);
-}
-
-#[test]
-#[should_panic(expected = "only the beneficiary can claim yield")]
-fn test_claim_yield_non_beneficiary_panics() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-    let charlie = Address::generate(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &50);
-    client.accrue_essence(&alice, &1000);
-
-    client.claim_yield(&charlie, &1); // charlie is not the beneficiary
-}
-
-#[test]
-#[should_panic(expected = "only the beneficiary can claim yield")]
-fn test_claim_yield_delegator_cannot_claim_own_delegation() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &50);
-    client.accrue_essence(&alice, &1000);
-
-    client.claim_yield(&alice, &1); // Alice delegated, she can't claim her own
-}
-
-#[test]
-fn test_claim_yield_emits_event() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &50);
-    client.accrue_essence(&alice, &1000);
-    client.claim_yield(&bob, &1);
-
-    let events = env.events().all();
-    assert!(events.len() >= 1, "expected yield claimed event");
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// dissolve_bond
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn test_dissolve_bond_by_initiator() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    let bond = client.dissolve_bond(&alice, &1);
-    assert_eq!(bond.status, BondStatus::Dissolved);
-}
-
-#[test]
-fn test_dissolve_bond_by_partner() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    let bond = client.dissolve_bond(&bob, &1);
-    assert_eq!(bond.status, BondStatus::Dissolved);
-}
-
-#[test]
-#[should_panic(expected = "only bonded parties can dissolve")]
-fn test_dissolve_bond_outsider_panics() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-    let charlie = Address::generate(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.dissolve_bond(&charlie, &1);
-}
-
-#[test]
-#[should_panic(expected = "bond is already dissolved")]
-fn test_dissolve_bond_twice_panics() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.dissolve_bond(&alice, &1);
-    client.dissolve_bond(&alice, &1); // second dissolve
-}
-
-#[test]
-#[should_panic(expected = "bond is not active")]
-fn test_claim_yield_after_dissolve_panics() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &50);
-    client.accrue_essence(&alice, &1000);
-    client.dissolve_bond(&alice, &1);
-
-    client.claim_yield(&bob, &1); // bond dissolved — claim blocked
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Read-only views
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn test_get_bond() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    let bond = client.get_bond(&1);
-    assert_eq!(bond.initiator, alice);
-    assert_eq!(bond.partner, bob);
-}
-
-#[test]
-fn test_get_yield_delegation() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    client.accept_bond(&bob, &1);
-    client.delegate_yield(&alice, &1, &75);
-
-    let del = client.get_yield_delegation(&1);
-    assert_eq!(del.percentage, 75);
-}
-
-#[test]
-fn test_get_essence_balance_default_zero() {
-    let (env, client) = setup_env();
-    let unknown = Address::generate(&env);
-    assert_eq!(client.get_essence_balance(&unknown), 0);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Full end-to-end flow
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn test_full_bonding_flow() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    // 1. Alice proposes bond with Bob on ship #42
-    let bond = client.create_bond(&alice, &42, &bob);
-    assert_eq!(bond.status, BondStatus::Pending);
-
-    // 2. Bob accepts
-    let bond = client.accept_bond(&bob, &bond.bond_id);
-    assert_eq!(bond.status, BondStatus::Active);
-
-    // 3. Alice delegates 40% of yields to Bob
-    let del = client.delegate_yield(&alice, &bond.bond_id, &40);
-    assert_eq!(del.percentage, 40);
-
-    // 4. Alice earns 2000 cosmic essence from exploration
-    client.accrue_essence(&alice, &2000);
-    assert_eq!(client.get_essence_balance(&alice), 2000);
-
-    // 5. Bob claims his 40% → 800
-    let claimed = client.claim_yield(&bob, &bond.bond_id);
-    assert_eq!(claimed, 800);
-    assert_eq!(client.get_essence_balance(&alice), 1200);
-    assert_eq!(client.get_essence_balance(&bob), 800);
-
-    // 6. Alice dissolves the bond
-    let bond = client.dissolve_bond(&alice, &bond.bond_id);
-    assert_eq!(bond.status, BondStatus::Dissolved);
-
-    // 7. Balances remain — only future claims are blocked
-    assert_eq!(client.get_essence_balance(&alice), 1200);
-    assert_eq!(client.get_essence_balance(&bob), 800);
-}
-
-#[test]
-fn test_dissolve_pending_bond() {
-    let (env, client) = setup_env();
-    let (alice, bob) = two_players(&env);
-
-    client.create_bond(&alice, &1, &bob);
-    // Initiator dissolves before partner accepts
-    let bond = client.dissolve_bond(&alice, &1);
-    assert_eq!(bond.status, BondStatus::Dissolved);
+    assert_eq!(layout.total_energy, scan_layout.total_energy);
+    assert_eq!(rarity, scan_rarity);
 }
 

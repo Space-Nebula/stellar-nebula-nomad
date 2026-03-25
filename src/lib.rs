@@ -1,13 +1,15 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Env};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env};
 
 mod nebula_explorer;
-pub mod nomad_bonding;
 mod resource_minter;
 mod ship_registry;
 
-pub use nomad_bonding::{BondStatus, DataKey, NomadBond, YieldDelegation};
+pub use nebula_explorer::{
+    calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
+    NebulaLayout, Rarity, GRID_SIZE, TOTAL_CELLS,
+};
 pub use resource_minter::Resource;
 pub use ship_registry::Ship;
 
@@ -16,60 +18,41 @@ pub struct NebulaNomadContract;
 
 #[contractimpl]
 impl NebulaNomadContract {
-    // ── Bonding System ────────────────────────────────────────────────
-
-    /// Create a multi-sig bond between the caller and a partner,
-    /// linked to the given ship.
-    pub fn create_bond(env: Env, initiator: Address, ship_id: u64, partner: Address) -> NomadBond {
-        nomad_bonding::create_bond(&env, &initiator, ship_id, &partner)
-    }
-
-    /// The designated partner accepts a pending bond.
-    pub fn accept_bond(env: Env, partner: Address, bond_id: u64) -> NomadBond {
-        nomad_bonding::accept_bond(&env, &partner, bond_id)
-    }
-
-    /// Set up passive yield delegation on an active bond.
-    /// `percentage` is 1–100.
-    pub fn delegate_yield(
+    /// Generate a 16×16 procedural nebula map using ledger-seeded PRNG.
+    ///
+    /// Combines the supplied `seed` with on-chain ledger sequence and
+    /// timestamp. The player must authorize the call.
+    pub fn generate_nebula_layout(
         env: Env,
-        delegator: Address,
-        bond_id: u64,
-        percentage: u32,
-    ) -> YieldDelegation {
-        nomad_bonding::delegate_yield(&env, &delegator, bond_id, percentage)
+        seed: BytesN<32>,
+        player: Address,
+    ) -> NebulaLayout {
+        player.require_auth();
+        nebula_explorer::generate_nebula_layout(&env, &seed, &player)
     }
 
-    /// Award cosmic essence to a player (game-logic entry point).
-    pub fn accrue_essence(env: Env, player: Address, amount: u64) {
-        nomad_bonding::accrue_essence(&env, &player, amount);
+    /// Calculate the rarity tier of a nebula layout using on-chain
+    /// verifiable math (no off-chain RNG).
+    pub fn calculate_rarity_tier(env: Env, layout: NebulaLayout) -> Rarity {
+        nebula_explorer::calculate_rarity_tier(&env, &layout)
     }
 
-    /// Beneficiary claims their delegated yield share.
-    pub fn claim_yield(env: Env, claimer: Address, bond_id: u64) -> u64 {
-        nomad_bonding::claim_yield(&env, &claimer, bond_id)
-    }
+    /// Full scan: generates layout, calculates rarity, and emits a
+    /// `NebulaScanned` event containing the layout hash.
+    pub fn scan_nebula(
+        env: Env,
+        seed: BytesN<32>,
+        player: Address,
+    ) -> (NebulaLayout, Rarity) {
+        player.require_auth();
 
-    /// Either bonded party dissolves the bond.
-    pub fn dissolve_bond(env: Env, caller: Address, bond_id: u64) -> NomadBond {
-        nomad_bonding::dissolve_bond(&env, &caller, bond_id)
-    }
+        let layout = nebula_explorer::generate_nebula_layout(&env, &seed, &player);
+        let rarity = nebula_explorer::calculate_rarity_tier(&env, &layout);
+        let layout_hash = nebula_explorer::compute_layout_hash(&env, &layout);
 
-    // ── Read-only views ───────────────────────────────────────────────
+        nebula_explorer::emit_nebula_scanned(&env, &player, &layout_hash, &rarity);
 
-    /// View bond details.
-    pub fn get_bond(env: Env, bond_id: u64) -> NomadBond {
-        nomad_bonding::get_bond(&env, bond_id)
-    }
-
-    /// View yield delegation for a bond.
-    pub fn get_yield_delegation(env: Env, bond_id: u64) -> YieldDelegation {
-        nomad_bonding::get_yield_delegation(&env, bond_id)
-    }
-
-    /// View a player's cosmic essence balance.
-    pub fn get_essence_balance(env: Env, player: Address) -> u64 {
-        nomad_bonding::get_essence_balance(&env, &player)
+        (layout, rarity)
     }
 }
 
