@@ -5,6 +5,7 @@ use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
 mod nebula_explorer;
 mod player_profile;
 mod resource_minter;
+mod session_manager;
 mod ship_registry;
 
 pub use nebula_explorer::{
@@ -13,6 +14,7 @@ pub use nebula_explorer::{
 };
 pub use player_profile::{PlayerProfile, ProfileError, ProgressUpdate};
 pub use resource_minter::Resource;
+pub use session_manager::{Session, SessionError};
 pub use ship_registry::Ship;
 
 #[contract]
@@ -87,6 +89,27 @@ impl NebulaNomadContract {
     /// Retrieve a player profile by ID.
     pub fn get_profile(env: Env, profile_id: u64) -> Result<PlayerProfile, ProfileError> {
         player_profile::get_profile(&env, profile_id)
+    }
+
+    // ─── Session Manager ──────────────────────────────────────────────────────
+
+    /// Start a timed nebula exploration session for a ship. Max 3 per player.
+    pub fn start_session(env: Env, owner: Address, ship_id: u64) -> Result<u64, SessionError> {
+        session_manager::start_session(&env, owner, ship_id)
+    }
+
+    /// Close a session. Owner can force-close; anyone can clean up expired ones.
+    pub fn expire_session(
+        env: Env,
+        caller: Address,
+        session_id: u64,
+    ) -> Result<(), SessionError> {
+        session_manager::expire_session(&env, caller, session_id)
+    }
+
+    /// Retrieve session data by ID.
+    pub fn get_session(env: Env, session_id: u64) -> Result<Session, SessionError> {
+        session_manager::get_session(&env, session_id)
     }
 }
 
