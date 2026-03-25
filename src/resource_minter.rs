@@ -1,4 +1,39 @@
-use soroban_sdk::{contracttype, Address};
+use crate::{CellType, NebulaLayout};
+use crate::ship_nft::{DataKey as ShipDataKey, ShipNft};
+use arrayvec::ArrayVec;
+use soroban_sdk::{
+    contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec,
+};
+
+pub type AssetId = Symbol;
+
+const ASSET_STELLAR_DUST: Symbol = symbol_short!("dust");
+const ASSET_ASTEROID_ORE: Symbol = symbol_short!("ore");
+const ASSET_GAS_UNITS: Symbol = symbol_short!("gas");
+const ASSET_DARK_MATTER: Symbol = symbol_short!("dark");
+const ASSET_EXOTIC_MATTER: Symbol = symbol_short!("exotic");
+const ASSET_WORMHOLE_CORE: Symbol = symbol_short!("worm");
+
+#[derive(Clone)]
+#[contracttype]
+pub enum ResourceKey {
+    ResourceCounter,
+    HarvestCounter,
+    DexOfferCounter,
+    ResourceBalance(Address, AssetId),
+    DexOffer(u64),
+}
+
+#[contracterror]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum HarvestError {
+    ShipNotFound = 1,
+    EmptyHarvest = 2,
+    InvalidPrice = 3,
+    AssetNotHarvested = 4,
+    PriceOverflow = 5,
+}
 
 /// Resource data structure for in-game tradeable resources.
 #[derive(Clone)]
