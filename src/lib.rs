@@ -11,6 +11,7 @@ mod session_manager;
 mod ship_nft;
 mod ship_registry;
 
+mod batch_processor;
 mod dex_integration;
 mod difficulty_scaler;
 mod randomness_oracle;
@@ -31,6 +32,10 @@ pub use player_profile::{PlayerProfile, ProfileError, ProgressUpdate};
 pub use session_manager::{Session, SessionError};
 pub use ship_registry::Ship;
 
+pub use batch_processor::{
+    clear_batch, execute_batch, get_player_batch, queue_batch_operation, BatchError, BatchOp,
+    BatchOpType, BatchResult, MAX_BATCH_SIZE,
+};
 pub use dex_integration::{cancel_listing, harvest_and_list};
 pub use difficulty_scaler::{
     apply_scaling_to_layout, calculate_difficulty, DifficultyError, DifficultyResult,
@@ -137,7 +142,6 @@ impl NebulaNomadContract {
         resource_minter::auto_list_on_dex(&env, &resource, min_price)
     }
 
-<<<<<<< feat/game-mechanics
     // ─── DEX Integration (Issue #9) ──────────────────────────────────────
 
     /// Harvest resources and immediately list on DEX.
@@ -217,7 +221,8 @@ impl NebulaNomadContract {
     /// Get the current entropy pool.
     pub fn get_entropy_pool(env: Env) -> Vec<BytesN<32>> {
         randomness_oracle::get_entropy_pool(&env)
-=======
+    }
+
     // ─── Player Profile ───────────────────────────────────────────────────────
 
     /// Create a new on-chain player profile. Returns the assigned profile ID.
@@ -334,6 +339,35 @@ impl NebulaNomadContract {
     /// Retrieve a referral record by the new nomad's address.
     pub fn get_referral(env: Env, new_nomad: Address) -> Result<Referral, ReferralError> {
         referral_system::get_referral(&env, new_nomad)
->>>>>>> main
+    }
+
+    // ─── Batch Ship Operations (Issue #31) ───────────────────────────────
+
+    /// Stage up to 8 ship operations into the player's batch queue.
+    pub fn queue_batch_operation(
+        env: Env,
+        player: Address,
+        operations: Vec<BatchOp>,
+    ) -> Result<u32, BatchError> {
+        batch_processor::queue_batch_operation(&env, &player, operations)
+    }
+
+    /// Execute all queued operations atomically for the provided ship IDs.
+    pub fn execute_batch(
+        env: Env,
+        player: Address,
+        ship_ids: Vec<u64>,
+    ) -> Result<BatchResult, BatchError> {
+        batch_processor::execute_batch(&env, &player, ship_ids)
+    }
+
+    /// Return the player's currently queued batch.
+    pub fn get_player_batch(env: Env, player: Address) -> Option<Vec<BatchOp>> {
+        batch_processor::get_player_batch(&env, &player)
+    }
+
+    /// Clear the player's pending batch queue.
+    pub fn clear_batch(env: Env, player: Address) {
+        batch_processor::clear_batch(&env, &player)
     }
 }
