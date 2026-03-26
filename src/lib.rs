@@ -13,6 +13,7 @@ mod ship_registry;
 
 mod dex_integration;
 mod difficulty_scaler;
+mod emergency_controls;
 mod randomness_oracle;
 mod treasure_vault;
 
@@ -35,6 +36,10 @@ pub use dex_integration::{cancel_listing, harvest_and_list};
 pub use difficulty_scaler::{
     apply_scaling_to_layout, calculate_difficulty, DifficultyError, DifficultyResult,
     RarityWeights, MAX_LEVEL,
+};
+pub use emergency_controls::{
+    EmergencyError, execute_unpause, get_admins, initialize_admins, is_paused,
+    pause_contract, require_not_paused, schedule_unpause, emergency_withdraw, UNPAUSE_DELAY,
 };
 pub use randomness_oracle::{
     get_entropy_pool, request_random_seed, verify_and_fallback, OracleError,
@@ -137,7 +142,6 @@ impl NebulaNomadContract {
         resource_minter::auto_list_on_dex(&env, &resource, min_price)
     }
 
-<<<<<<< feat/game-mechanics
     // ─── DEX Integration (Issue #9) ──────────────────────────────────────
 
     /// Harvest resources and immediately list on DEX.
@@ -217,7 +221,8 @@ impl NebulaNomadContract {
     /// Get the current entropy pool.
     pub fn get_entropy_pool(env: Env) -> Vec<BytesN<32>> {
         randomness_oracle::get_entropy_pool(&env)
-=======
+    }
+
     // ─── Player Profile ───────────────────────────────────────────────────────
 
     /// Create a new on-chain player profile. Returns the assigned profile ID.
@@ -334,6 +339,49 @@ impl NebulaNomadContract {
     /// Retrieve a referral record by the new nomad's address.
     pub fn get_referral(env: Env, new_nomad: Address) -> Result<Referral, ReferralError> {
         referral_system::get_referral(&env, new_nomad)
->>>>>>> main
+    }
+
+    // ─── Emergency Controls (Issue #29) ──────────────────────────────────
+
+    /// Initialize the multi-sig admin set at deployment. One-time call.
+    pub fn initialize_admins(
+        env: Env,
+        admins: Vec<Address>,
+    ) -> Result<(), EmergencyError> {
+        emergency_controls::initialize_admins(&env, admins)
+    }
+
+    /// Instantly freeze all mutating contract functions. Admin-only.
+    pub fn pause_contract(env: Env, admin: Address) -> Result<(), EmergencyError> {
+        emergency_controls::pause_contract(&env, &admin)
+    }
+
+    /// Schedule a time-delayed unpause. Admin-only.
+    pub fn schedule_unpause(env: Env, admin: Address) -> Result<u64, EmergencyError> {
+        emergency_controls::schedule_unpause(&env, &admin)
+    }
+
+    /// Execute the unpause after the delay has elapsed. Admin-only.
+    pub fn execute_unpause(env: Env, admin: Address) -> Result<(), EmergencyError> {
+        emergency_controls::execute_unpause(&env, &admin)
+    }
+
+    /// Admin-only emergency recovery of stuck resources.
+    pub fn emergency_withdraw(
+        env: Env,
+        admin: Address,
+        resource: Symbol,
+    ) -> Result<(), EmergencyError> {
+        emergency_controls::emergency_withdraw(&env, &admin, resource)
+    }
+
+    /// Returns `true` if the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        emergency_controls::is_paused(&env)
+    }
+
+    /// Returns the current admin list.
+    pub fn get_admins(env: Env) -> Vec<Address> {
+        emergency_controls::get_admins(&env)
     }
 }
