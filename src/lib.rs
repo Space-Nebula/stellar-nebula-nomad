@@ -13,6 +13,7 @@ mod ship_registry;
 
 mod dex_integration;
 mod difficulty_scaler;
+mod metadata_resolver;
 mod randomness_oracle;
 mod treasure_vault;
 
@@ -35,6 +36,10 @@ pub use dex_integration::{cancel_listing, harvest_and_list};
 pub use difficulty_scaler::{
     apply_scaling_to_layout, calculate_difficulty, DifficultyError, DifficultyResult,
     RarityWeights, MAX_LEVEL,
+};
+pub use metadata_resolver::{
+    batch_resolve_metadata, get_current_gateway, resolve_metadata, set_gateway, set_metadata_uri,
+    MetadataError, TokenMetadata, MAX_BATCH_SIZE,
 };
 pub use randomness_oracle::{
     get_entropy_pool, request_random_seed, verify_and_fallback, OracleError,
@@ -137,7 +142,6 @@ impl NebulaNomadContract {
         resource_minter::auto_list_on_dex(&env, &resource, min_price)
     }
 
-<<<<<<< feat/game-mechanics
     // ─── DEX Integration (Issue #9) ──────────────────────────────────────
 
     /// Harvest resources and immediately list on DEX.
@@ -217,7 +221,8 @@ impl NebulaNomadContract {
     /// Get the current entropy pool.
     pub fn get_entropy_pool(env: Env) -> Vec<BytesN<32>> {
         randomness_oracle::get_entropy_pool(&env)
-=======
+    }
+
     // ─── Player Profile ───────────────────────────────────────────────────────
 
     /// Create a new on-chain player profile. Returns the assigned profile ID.
@@ -334,6 +339,43 @@ impl NebulaNomadContract {
     /// Retrieve a referral record by the new nomad's address.
     pub fn get_referral(env: Env, new_nomad: Address) -> Result<Referral, ReferralError> {
         referral_system::get_referral(&env, new_nomad)
->>>>>>> main
+    }
+
+    // ─── Metadata URI Resolver (Issue #30) ───────────────────────────────
+
+    /// Set the IPFS CID for a token. Immutable after first set.
+    pub fn set_metadata_uri(
+        env: Env,
+        caller: Address,
+        token_id: u64,
+        cid: Bytes,
+    ) -> Result<(), MetadataError> {
+        metadata_resolver::set_metadata_uri(&env, &caller, token_id, cid)
+    }
+
+    /// Resolve full metadata for a token using the configured gateway.
+    pub fn resolve_metadata(
+        env: Env,
+        token_id: u64,
+    ) -> Result<TokenMetadata, MetadataError> {
+        metadata_resolver::resolve_metadata(&env, token_id)
+    }
+
+    /// Batch resolve metadata for up to 10 tokens.
+    pub fn batch_resolve_metadata(
+        env: Env,
+        token_ids: Vec<u64>,
+    ) -> Result<Vec<TokenMetadata>, MetadataError> {
+        metadata_resolver::batch_resolve_metadata(&env, token_ids)
+    }
+
+    /// Update the IPFS gateway prefix. Admin-only.
+    pub fn set_gateway(env: Env, admin: Address, gateway: Bytes) {
+        metadata_resolver::set_gateway(&env, &admin, gateway)
+    }
+
+    /// Return the currently configured IPFS gateway prefix.
+    pub fn get_current_gateway(env: Env) -> Bytes {
+        metadata_resolver::get_current_gateway(&env)
     }
 }
