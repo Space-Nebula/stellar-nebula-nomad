@@ -1,0 +1,175 @@
+{
+  "generators": {
+    "address": 1,
+    "nonce": 0
+  },
+  "auth": [
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    []
+  ],
+  "ledger": {
+    "protocol_version": 22,
+    "sequence_number": 120,
+    "timestamp": 1700000100,
+    "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
+    "base_reserve": 10,
+    "min_persistent_entry_ttl": 1000,
+    "min_temp_entry_ttl": 100,
+    "max_entry_ttl": 10000,
+    "ledger_entries": [
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": "ledger_key_contract_instance",
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": "ledger_key_contract_instance",
+                "durability": "persistent",
+                "val": {
+                  "contract_instance": {
+                    "executable": {
+                      "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "storage": [
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "EntropyPool"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "bytes": "c44bbd29a6a9a535961c06a989c8306cc2d04332efbcec7e73c101fa85d3acc9"
+                            },
+                            {
+                              "bytes": "e2549507d6c9175a149c187a47967ad568bdba45dadc770d5e6fd7cc5366ea2d"
+                            },
+                            {
+                              "bytes": "c1a89c434a68b6bdcc864bccd60163d101168c9050ee83c2f2d0935a3291bddc"
+                            },
+                            {
+                              "bytes": "778dc9ade6fd292c887f45b382be649e2a4e4a9a4f2aa7c4329f76abf3c88181"
+                            },
+                            {
+                              "bytes": "48f608411bdb00de0c972c42a6202b4e978160cbde1704be2edf184fe3263f50"
+                            },
+                            {
+                              "bytes": "0affc992c448d4edf3d1945e2b143da543936e8e6a5fa0ac9af054b096501984"
+                            },
+                            {
+                              "bytes": "e0bbd23edae5f239eae58cf506c5d4ddc3b43d542d03db1cdf34db9f14f06022"
+                            },
+                            {
+                              "bytes": "8785be0796e3163e9ab941702ee1e6e86b394b796b55b1322f60b6aa0f8d36dc"
+                            },
+                            {
+                              "bytes": "dc471d414b1c272b2a876bea7305c74a654a16972aee9ea794143b600b43fb3c"
+                            },
+                            {
+                              "bytes": "ef47b1f28b16becc2d6ebd7fadbb6358b9c2f45f1d04d0db29d7c0a1551f9ae4"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "PreviousHash"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bytes": "ef47b1f28b16becc2d6ebd7fadbb6358b9c2f45f1d04d0db29d7c0a1551f9ae4"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          1099
+        ]
+      ],
+      [
+        {
+          "contract_code": {
+            "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_code": {
+                "ext": "v0",
+                "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "code": ""
+              }
+            },
+            "ext": "v0"
+          },
+          1099
+        ]
+      ]
+    ]
+  },
+  "events": [
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "rng"
+              },
+              {
+                "symbol": "seed"
+              }
+            ],
+            "data": {
+              "bytes": "ef47b1f28b16becc2d6ebd7fadbb6358b9c2f45f1d04d0db29d7c0a1551f9ae4"
+            }
+          }
+        }
+      },
+      "failed_call": false
+    }
+  ]
+}

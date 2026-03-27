@@ -56,7 +56,7 @@ pub fn create_proposal(env: Env, creator: Address, description: String, param_ch
     env.storage().instance().set(&symbol_short!("next_gid"), &(proposal_id + 1));
 
     env.events().publish(
-        (symbol_short!("gov"), symbol_short!("proposal_created")),
+        (symbol_short!("gov"), symbol_short!("prop_new")),
         (proposal_id, creator),
     );
 

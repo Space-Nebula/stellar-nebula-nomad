@@ -27,7 +27,7 @@ pub fn generate_theme_preview(env: Env, theme_id: Symbol) -> Result<ThemePreview
         s if s == symbol_short!("nebula2") => Ok(ThemePreview {
             name: symbol_short!("Void"),
             colors: Vec::from_array(&env, [symbol_short!("000000"), symbol_short!("444444")]),
-            particles: symbol_short!("DarkMatter"),
+            particles: symbol_short!("DrkMattr"),
         }),
         s if s == symbol_short!("nebula3") => Ok(ThemePreview {
             name: symbol_short!("Nova"),
@@ -52,7 +52,7 @@ pub fn generate_theme_preview(env: Env, theme_id: Symbol) -> Result<ThemePreview
         s if s == symbol_short!("nebula7") => Ok(ThemePreview {
             name: symbol_short!("BlackHole"),
             colors: Vec::from_array(&env, [symbol_short!("000000"), symbol_short!("111111")]),
-            particles: symbol_short!("Singularity"),
+            particles: symbol_short!("Singlrty"),
         }),
         s if s == symbol_short!("nebula8") => Ok(ThemePreview {
             name: symbol_short!("Aurora"),
