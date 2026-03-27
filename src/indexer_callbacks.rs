@@ -27,7 +27,7 @@ pub fn register_indexer_callback(env: Env, caller: Address, callback_id: Symbol)
     env.storage().persistent().set(&(symbol_short!("idx_cb"), callback_id.clone()), &callback);
 
     env.events().publish(
-        (symbol_short!("indexer"), symbol_short!("registered")),
+        (symbol_short!("indexer"), symbol_short!("registrd")),
         (callback_id,),
     );
 
@@ -39,7 +39,7 @@ pub fn trigger_indexer_event(env: Env, event_type: Symbol, payload: BytesN<256>)
     // Every call triggers an event that horizon indexers can filter and aggregate.
 
     env.events().publish(
-        (symbol_short!("indexer_ev"), event_type),
+        (symbol_short!("idxer_ev"), event_type),
         (payload,),
     );
 

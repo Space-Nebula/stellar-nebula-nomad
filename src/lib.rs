@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec};
 
 mod blueprint_factory;
 mod nebula_explorer;
@@ -16,6 +16,7 @@ mod difficulty_scaler;
 mod randomness_oracle;
 mod treasure_vault;
 
+mod energy_manager;
 mod yield_farming;
 mod governance;
 mod theme_customizer;
@@ -35,6 +36,7 @@ pub use referral_system::{Referral, ReferralError};
 pub use player_profile::{PlayerProfile, ProfileError, ProgressUpdate};
 pub use session_manager::{Session, SessionError};
 pub use ship_registry::Ship;
+pub use energy_manager::EnergyError;
 
 pub use dex_integration::{cancel_listing, harvest_and_list};
 pub use difficulty_scaler::{
@@ -423,5 +425,49 @@ impl NebulaNomadContract {
         payload: BytesN<256>,
     ) -> Result<(), indexer_callbacks::IndexerError> {
         indexer_callbacks::trigger_indexer_event(env, event_type, payload)
+    }
+
+    // ─── Energy Management ───────────────────────────────────────────────────
+
+    /// Initialize energy balance for a ship with a starting value.
+    pub fn initialize_energy(
+        env: Env,
+        ship_id: u64,
+        initial_energy: u32,
+    ) -> Result<(), EnergyError> {
+        energy_manager::initialize_energy(&env, ship_id, initial_energy)
+    }
+
+    /// Consume energy from a ship for scans, harvests, and other actions.
+    pub fn consume_energy(env: Env, ship_id: u64, amount: u32) -> Result<u32, EnergyError> {
+        energy_manager::consume_energy(&env, ship_id, amount)
+    }
+
+    /// Recharge a ship's energy by converting resources at the effective rate.
+    pub fn recharge_energy(
+        env: Env,
+        ship_id: u64,
+        resource_amount: i128,
+    ) -> Result<u32, EnergyError> {
+        energy_manager::recharge_energy(&env, ship_id, resource_amount)
+    }
+
+    /// Read the current energy balance for a ship.
+    pub fn get_energy(env: Env, ship_id: u64) -> u32 {
+        energy_manager::get_energy(&env, ship_id)
+    }
+
+    /// Set the global base recharge efficiency rate.
+    pub fn set_base_recharge_rate(env: Env, rate: u32) {
+        energy_manager::set_base_recharge_rate(&env, rate)
+    }
+
+    /// Apply a blueprint-derived efficiency bonus to a ship's recharge rate.
+    pub fn apply_efficiency_bonus(
+        env: Env,
+        ship_id: u64,
+        bonus: u32,
+    ) -> Result<(), EnergyError> {
+        energy_manager::apply_efficiency_bonus(&env, ship_id, bonus)
     }
 }
