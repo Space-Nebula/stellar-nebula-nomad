@@ -46,6 +46,10 @@ mod portal_registry;
 mod constellation_mapper;
 mod entanglement_comms;
 
+mod nebula_archive;
+mod soul_binding;
+mod offline_progress;
+
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
     NebulaLayout, Rarity, GRID_SIZE, TOTAL_CELLS,
@@ -156,6 +160,19 @@ pub use entanglement_comms::{
     dissolve_pair, get_entanglement_pair, get_message_count,
     EntanglementError, EntanglementPair, EntangledMessage,
     PAIR_LIFETIME_SECS, MAX_MESSAGE_BURST,
+};
+pub use nebula_archive::{
+    archive_nebula_layout, replay_archive, batch_archive_layouts,
+    get_archive_by_hash, get_archive_count, NebulaArchive, ArchiveError,
+};
+pub use soul_binding::{
+    bind_ship_to_owner, check_binding_status, is_bound_to, batch_bind_ships,
+    SoulBinding, BindingError,
+};
+pub use offline_progress::{
+    record_last_active, claim_offline_yield, get_offline_progress,
+    calculate_pending_yield, batch_claim_offline_yield,
+    OfflineProgress, OfflineYieldClaim, OfflineError,
 };
 
 #[contract]
@@ -1230,5 +1247,107 @@ impl NebulaNomadContract {
     /// Return total messages sent over a pair.
     pub fn get_message_count(env: Env, pair_id: u64) -> u64 {
         entanglement_comms::get_message_count(&env, pair_id)
+    }
+
+    // ─── Nebula Archive System ───────────────────────────────────────────
+
+    /// Archive a nebula layout for historical replay
+    pub fn archive_nebula_layout(
+        env: Env,
+        layout: NebulaLayout,
+    ) -> Result<u64, ArchiveError> {
+        nebula_archive::archive_nebula_layout(env, layout)
+    }
+
+    /// Replay a historical nebula layout by archive ID
+    pub fn replay_archive(
+        env: Env,
+        archive_id: u64,
+    ) -> Result<NebulaArchive, ArchiveError> {
+        nebula_archive::replay_archive(env, archive_id)
+    }
+
+    /// Batch archive up to 20 layouts in one transaction
+    pub fn batch_archive_layouts(
+        env: Env,
+        layouts: Vec<NebulaLayout>,
+    ) -> Result<Vec<u64>, ArchiveError> {
+        nebula_archive::batch_archive_layouts(env, layouts)
+    }
+
+    /// Query archive by nebula hash
+    pub fn get_archive_by_hash(
+        env: Env,
+        nebula_hash: BytesN<32>,
+    ) -> Result<NebulaArchive, ArchiveError> {
+        nebula_archive::get_archive_by_hash(env, nebula_hash)
+    }
+
+    /// Get total archive count
+    pub fn get_archive_count(env: Env) -> u64 {
+        nebula_archive::get_archive_count(env)
+    }
+
+    // ─── Soul-Bound Ship NFTs ────────────────────────────────────────────
+
+    /// Permanently bind a ship to its current owner
+    pub fn bind_ship_to_owner(
+        env: Env,
+        owner: Address,
+        ship_id: u64,
+    ) -> Result<SoulBinding, BindingError> {
+        soul_binding::bind_ship_to_owner(env, owner, ship_id)
+    }
+
+    /// Check if a ship is soul-bound
+    pub fn check_binding_status(env: Env, ship_id: u64) -> Option<SoulBinding> {
+        soul_binding::check_binding_status(env, ship_id)
+    }
+
+    /// Verify if a ship is bound to a specific owner
+    pub fn is_bound_to(env: Env, ship_id: u64, owner: Address) -> bool {
+        soul_binding::is_bound_to(env, ship_id, owner)
+    }
+
+    /// Batch bind up to 3 ships in one transaction
+    pub fn batch_bind_ships(
+        env: Env,
+        owner: Address,
+        ship_ids: Vec<u64>,
+    ) -> Result<Vec<SoulBinding>, BindingError> {
+        soul_binding::batch_bind_ships(env, owner, ship_ids)
+    }
+
+    // ─── Offline Progress System ──────────────────────────────────────────
+
+    /// Record player's last active timestamp
+    pub fn record_last_active(env: Env, player: Address) {
+        offline_progress::record_last_active(env, player)
+    }
+
+    /// Calculate and claim offline yield
+    pub fn claim_offline_yield(
+        env: Env,
+        player: Address,
+    ) -> Result<OfflineYieldClaim, OfflineError> {
+        offline_progress::claim_offline_yield(env, player)
+    }
+
+    /// Get player's offline progress status
+    pub fn get_offline_progress(env: Env, player: Address) -> Option<OfflineProgress> {
+        offline_progress::get_offline_progress(env, player)
+    }
+
+    /// Calculate pending offline yield without claiming
+    pub fn calculate_pending_yield(env: Env, player: Address) -> Result<i128, OfflineError> {
+        offline_progress::calculate_pending_yield(env, player)
+    }
+
+    /// Batch claim for multiple players (admin utility)
+    pub fn batch_claim_offline_yield(
+        env: Env,
+        players: Vec<Address>,
+    ) -> Vec<OfflineYieldClaim> {
+        offline_progress::batch_claim_offline_yield(env, players)
     }
 }
