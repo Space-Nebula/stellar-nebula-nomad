@@ -18,6 +18,7 @@ mod difficulty_scaler;
 mod emergency_controls;
 mod metadata_resolver;
 mod randomness_oracle;
+pub mod ship_upgrade;
 mod treasure_vault;
 
 mod yield_farming;
@@ -87,6 +88,7 @@ pub use metadata_resolver::{
 pub use randomness_oracle::{
     get_entropy_pool, request_random_seed, verify_and_fallback, OracleError,
 };
+pub use ship_upgrade::{ShipState, ShipUpgradeError, UpgradeBlueprint};
 pub use treasure_vault::{
     claim_treasure, deposit_treasure, get_vault, TreasureVault, VaultError,
     DEFAULT_MIN_LOCK_DURATION,
