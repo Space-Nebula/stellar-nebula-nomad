@@ -56,6 +56,7 @@ mod privacy_stats;
 mod navigation_planner;
 mod mobile_views;
 mod config_updater;
+mod event_scheduler;
 
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
@@ -209,6 +210,12 @@ pub use navigation_planner::{
     initialize_nav_graph, add_nebula_connection, add_nebula_connections_batch,
     calculate_optimal_route, validate_route_safety, get_neighbors, get_connection,
     NavError, NavPath, RouteEdge, NavConfig, MAX_ROUTE_HOPS, MAX_CONNECTIONS_PER_BATCH,
+};
+pub use event_scheduler::{
+    initialize_scheduler, schedule_event, trigger_scheduled_event, get_event,
+    get_active_events, schedule_weekly_festival, cancel_event, update_participants,
+    get_event_count, reset_burst_counter as reset_event_burst,
+    ScheduledEvent, EventResult, EventError, MAX_ACTIVE_EVENTS, WEEKLY_FESTIVAL_INTERVAL,
 };
 
 #[contract]
@@ -1714,5 +1721,78 @@ impl NebulaNomadContract {
     /// Return the single directed edge from `from` to `to`, if it exists.
     pub fn get_nav_connection(env: Env, from: u64, to: u64) -> Option<RouteEdge> {
         navigation_planner::get_connection(&env, from, to)
+    }
+
+    // ─── Automated Community Event Scheduler ──────────────────────────────
+
+    /// Initialize the event scheduler with an admin address.
+    pub fn initialize_scheduler(env: Env, admin: Address) {
+        event_scheduler::initialize_scheduler(&env, &admin)
+    }
+
+    /// Schedule a new community event.
+    pub fn schedule_event(
+        env: Env,
+        admin: Address,
+        event_type: Symbol,
+        start_time: u64,
+        reward_pool: i128,
+    ) -> Result<u64, EventError> {
+        event_scheduler::schedule_event(&env, admin, event_type, start_time, reward_pool)
+    }
+
+    /// Trigger a scheduled event when its time arrives.
+    pub fn trigger_scheduled_event(
+        env: Env,
+        event_id: u64,
+    ) -> Result<EventResult, EventError> {
+        event_scheduler::trigger_scheduled_event(&env, event_id)
+    }
+
+    /// Get event details by ID.
+    pub fn get_event(env: Env, event_id: u64) -> Result<ScheduledEvent, EventError> {
+        event_scheduler::get_event(&env, event_id)
+    }
+
+    /// Get all active event IDs.
+    pub fn get_active_events(env: Env) -> Vec<u64> {
+        event_scheduler::get_active_events(&env)
+    }
+
+    /// Schedule a weekly nebula festival (template).
+    pub fn schedule_weekly_festival(
+        env: Env,
+        admin: Address,
+        reward_pool: i128,
+    ) -> Result<u64, EventError> {
+        event_scheduler::schedule_weekly_festival(&env, admin, reward_pool)
+    }
+
+    /// Cancel a scheduled event (admin only).
+    pub fn cancel_event(
+        env: Env,
+        admin: Address,
+        event_id: u64,
+    ) -> Result<(), EventError> {
+        event_scheduler::cancel_event(&env, admin, event_id)
+    }
+
+    /// Update event participant count.
+    pub fn update_event_participants(
+        env: Env,
+        event_id: u64,
+        participant_count: u32,
+    ) -> Result<(), EventError> {
+        event_scheduler::update_participants(&env, event_id, participant_count)
+    }
+
+    /// Get total number of events scheduled.
+    pub fn get_event_count(env: Env) -> u64 {
+        event_scheduler::get_event_count(&env)
+    }
+
+    /// Reset event burst counter.
+    pub fn reset_event_burst_counter(env: Env) {
+        event_scheduler::reset_burst_counter(&env)
     }
 }

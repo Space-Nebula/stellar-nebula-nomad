@@ -63,10 +63,13 @@ fn compute_commitment_hash(
 ) -> BytesN<32> {
     let mut data = soroban_sdk::Bytes::new(env);
     
-    // Append stat_type as bytes (convert symbol to bytes)
-    let stat_bytes = env.crypto().sha256(&stat_type.to_val());
-    for i in 0..32 {
-        data.push_back(stat_bytes.get(i).unwrap());
+    // Append stat_type as bytes (use a simple representation)
+    // Convert symbol to a deterministic byte representation
+    let stat_val = stat_type.to_val();
+    let stat_u64 = stat_val.get_payload();
+    let stat_bytes = stat_u64.to_be_bytes();
+    for byte in stat_bytes.iter() {
+        data.push_back(*byte);
     }
     
     // Append value bytes
@@ -81,8 +84,9 @@ fn compute_commitment_hash(
         data.push_back(*byte);
     }
     
-    // Use Soroban's built-in hash function
-    env.crypto().sha256(&data)
+    // Use Soroban's built-in hash function and convert to BytesN
+    let hash = env.crypto().sha256(&data);
+    BytesN::from_array(env, &hash.to_array())
 }
 
 /// Verify a proof against a commitment.
