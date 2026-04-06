@@ -67,6 +67,7 @@ mod market_oracle;
 mod audio_seed_generator;
 mod privacy_stats;
 mod navigation_planner;
+mod bug_bounty_payout;
 
 mod nebula_archive;
 mod soul_binding;
