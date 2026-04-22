@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec, symbol_short};
 
 mod analytics;
 mod nebula_explorer;
@@ -8,17 +8,13 @@ pub mod resource_minter;
 mod ship_registry;
 
 pub use analytics::{AnalyticsError, GlobalStats, LeaderboardEntry};
-use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec, symbol_short};
 
 mod blueprint_factory;
 mod gifting_system;
-mod nebula_explorer;
 mod player_profile;
 mod referral_system;
-mod resource_minter;
 mod session_manager;
 mod ship_nft;
-mod ship_registry;
 
 mod batch_processor;
 mod dex_integration;
@@ -57,6 +53,7 @@ mod gas_sponsor;
 mod storage_optim;
 mod state_snapshot;
 
+mod mobile_views;
 mod prize_distributor;
 mod portal_registry;
 mod constellation_mapper;
@@ -79,7 +76,7 @@ pub use nebula_explorer::{
 pub use resource_minter::{ResourceError, ResourceType, StakeRecord, Config, LEDGERS_PER_DAY};
 pub use resource_minter::{
     auto_list_on_dex, harvest_resources, AssetId, DexOffer, HarvestError, HarvestResult,
-    HarvestedResource, Resource, ResourceKey,
+    HarvestedResource, ResourceKey,
 };
 pub use ship_nft::{ShipError, ShipNft};
 pub use blueprint_factory::{Blueprint, BlueprintError, BlueprintRarity};
@@ -166,6 +163,7 @@ pub use fractional_resources::{
     get_original_resource, is_share_owner, update_config as update_fractional_config,
     FractionalShare, OriginalResource, FractionalConfig,
     FractionalError, MAX_FRACTIONS_PER_TX, MIN_SHARE_SIZE,
+};
 pub use yield_forecast::{
     initialize as initialize_forecast, generate_yield_forecast, update_forecast_model,
     batch_generate_forecasts, get_cached_forecast, get_player_history, get_history_count,
@@ -232,6 +230,7 @@ pub use privacy_stats::{
     opt_in_privacy, commit_private_stat, verify_private_stat, get_commitment,
     get_commitment_count, batch_commit_stats, is_opted_in, reset_burst_counter as reset_privacy_burst,
     StatCommitment, PrivacyError, MAX_COMMITMENTS_PER_TX,
+};
 pub use navigation_planner::{
     initialize_nav_graph, add_nebula_connection, add_nebula_connections_batch,
     calculate_optimal_route, validate_route_safety, get_neighbors, get_connection,
@@ -255,16 +254,11 @@ impl NebulaNomadContract {
     }
 
     /// Full scan: generates layout, calculates rarity, and emits a
+    /// Full scan: generates layout, calculates rarity, and emits a
     /// `NebulaScanned` event containing the layout hash.
     ///
     /// Also updates the on-chain analytics counters (total_scans,
     /// total_essence_accrued) and registers the player for the leaderboard.
-    pub fn scan_nebula(
-        env: Env,
-        seed: BytesN<32>,
-        player: Address,
-    ) -> (NebulaLayout, Rarity) {
-    /// Full scan: generates layout, calculates rarity, emits NebulaScanned event.
     pub fn scan_nebula(env: Env, seed: BytesN<32>, player: Address) -> (NebulaLayout, Rarity) {
         player.require_auth();
         let layout = nebula_explorer::generate_nebula_layout(&env, &seed, &player);
@@ -295,9 +289,6 @@ impl NebulaNomadContract {
         top_n: u32,
     ) -> Result<Vec<LeaderboardEntry>, AnalyticsError> {
         analytics::snapshot_leaderboard(&env, top_n)
-    }
-}
-        (layout, rarity)
     }
 
     // === Contract Versioning API ===
@@ -706,6 +697,8 @@ impl NebulaNomadContract {
     /// Read the current upgrade state of a ship.
     pub fn get_ship_state(env: Env, ship_id: u64) -> Option<ShipState> {
         ship_upgrade::get_ship_state(&env, ship_id)
+    }
+
     // ─── Cross-Player Resource Gifting (#27) ──────────────────────────────
 
     /// Send a resource gift to another player.
@@ -1468,6 +1461,8 @@ impl NebulaNomadContract {
         max_fractions: u32,
     ) -> Result<FractionalConfig, FractionalError> {
         fractional_resources::update_config(&env, &admin, min_share_size, max_fractions)
+    }
+
     // ─── Yield Forecasting API (Issue #90) ─────────────────────────────────
 
     /// Initialize the yield forecasting system.
@@ -1535,6 +1530,8 @@ impl NebulaNomadContract {
         volatility_adjustment: u32,
     ) -> Result<ModelParams, ForecastError> {
         yield_forecast::update_model_params(&env, &admin, moving_average_window, trend_weight, volatility_adjustment)
+    }
+
     // ─── Inter-Nebula Wormhole Travel System (Issue #77) ─────────────────────
 
     /// Open a new wormhole between two nebulae with verifiable travel link.
@@ -1827,6 +1824,8 @@ impl NebulaNomadContract {
     /// Reset privacy burst counter for a new transaction.
     pub fn reset_privacy_burst_counter(env: Env) {
         privacy_stats::reset_burst_counter(&env)
+    }
+
     // ─── Nebula Navigation Route Planner (Issue #69) ──────────────────────────
 
     /// Initialise the nebula navigation graph with an admin address.

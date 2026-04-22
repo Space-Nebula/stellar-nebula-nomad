@@ -3,7 +3,7 @@ use soroban_sdk::{
     Address, BytesN, Env, Vec,
 };
 
-use crate::nebula_gen::NebulaLayout;
+use crate::nebula_explorer::NebulaLayout;
 
 /// Compressed archive entry for historical nebula layouts
 #[derive(Clone)]
@@ -34,10 +34,10 @@ pub enum ArchiveError {
 const MAX_ARCHIVE_BURST: u32 = 20;
 
 #[contract]
-pub struct NebulaArchive;
+pub struct NebulaArchiveContract;
 
 #[contractimpl]
-impl NebulaArchive {
+impl NebulaArchiveContract {
     /// Archive a nebula layout with timestamp and hash
     pub fn archive_nebula_layout(
         env: Env,
@@ -51,7 +51,7 @@ impl NebulaArchive {
             + 1;
 
         let archived_at = env.ledger().timestamp();
-        let nebula_hash = layout.layout_hash.clone();
+        let nebula_hash = crate::nebula_explorer::compute_layout_hash(&env, &layout);
 
         let archive = NebulaArchive {
             archive_id,
