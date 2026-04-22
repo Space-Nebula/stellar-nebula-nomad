@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contract, contractimpl, contracttype, Address, Env};
+use soroban_sdk::{contracterror, contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -9,7 +9,6 @@ const BPS_DENOM: i128 = 10_000;
 // ── Errors ────────────────────────────────────────────────────────────────────
 use crate::ship_nft::{DataKey as ShipDataKey, ShipNft};
 use crate::{CellType, NebulaLayout};
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 pub type AssetId = Symbol;
 
@@ -63,6 +62,11 @@ pub struct StakeRecord {
     pub last_claim_ledger: u32,
     /// Ledger sequence after which unstaking is permitted.
     pub min_lock_ledger: u32,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
 pub enum HarvestError {
     ShipNotFound = 1,
     EmptyHarvest = 2,
@@ -420,6 +424,16 @@ impl ResourceMinter {
         let elapsed = current_ledger.saturating_sub(stake.last_claim_ledger) as i128;
         if elapsed == 0 {
             return 0;
+        }
+        
+        let annual_yield = (stake.amount * apy_bps as i128) / 10_000;
+        let daily_yield = annual_yield / 365;
+        let ledger_yield = daily_yield / LEDGERS_PER_DAY as i128;
+        
+        ledger_yield * elapsed
+    }
+}
+
 /// A single harvested resource entry.
 #[derive(Clone)]
 #[contracttype]
