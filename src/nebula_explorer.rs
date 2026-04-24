@@ -1,3 +1,4 @@
+use crate::difficulty_curve;
 use soroban_sdk::{contracttype, symbol_short, Address, Bytes, BytesN, Env, Vec};
 
 pub const GRID_SIZE: u32 = 16;
@@ -25,6 +26,7 @@ pub struct NebulaCell {
     pub energy: u32,
 }
 
+/// Placeholder for nebula scan result (see issue #1).
 #[derive(Clone)]
 #[contracttype]
 pub struct NebulaLayout {
@@ -69,8 +71,14 @@ fn compute_combined_hash(env: &Env, seed: &BytesN<32>) -> BytesN<32> {
     let mut input = Bytes::new(env);
     let seed_bytes: Bytes = seed.clone().into();
     input.append(&seed_bytes);
-    input.append(&Bytes::from_slice(env, &env.ledger().sequence().to_be_bytes()));
-    input.append(&Bytes::from_slice(env, &env.ledger().timestamp().to_be_bytes()));
+    input.append(&Bytes::from_slice(
+        env,
+        &env.ledger().sequence().to_be_bytes(),
+    ));
+    input.append(&Bytes::from_slice(
+        env,
+        &env.ledger().timestamp().to_be_bytes(),
+    ));
     env.crypto().sha256(&input).into()
 }
 
@@ -81,13 +89,17 @@ fn seed_from_hash(_env: &Env, hash: &BytesN<32>) -> u64 {
     for i in 0..8u32 {
         val = (val << 8) | (bytes.get(i).unwrap_or(0) as u64);
     }
-    if val == 0 { 1 } else { val }
+    if val == 0 {
+        1
+    } else {
+        val
+    }
 }
 
 /// Map a random u64 value to a CellType with weighted distribution.
 fn cell_type_from_val(val: u64) -> CellType {
     match val % 100 {
-        0..=29 => CellType::Empty,        // 30%
+        0..=29 => CellType::Empty,         // 30%
         30..=44 => CellType::Star,         // 15%
         45..=59 => CellType::Asteroid,     // 15%
         60..=74 => CellType::GasCloud,     // 15%
@@ -119,7 +131,7 @@ fn energy_for_cell(cell_type: &CellType, val: u64) -> u32 {
 /// timestamp to produce deterministic, on-chain verifiable output.
 /// The `player` address is authenticated via `require_auth` and recorded
 /// in the emitted event for attribution.
-pub fn generate_nebula_layout(env: &Env, seed: &BytesN<32>, _player: &Address) -> NebulaLayout {
+pub fn generate_nebula_layout(env: &Env, seed: &BytesN<32>, player: &Address) -> NebulaLayout {
     let combined = compute_combined_hash(env, seed);
     let prng_seed = seed_from_hash(env, &combined);
     let mut rng = Xorshift64::new(prng_seed);
@@ -144,14 +156,18 @@ pub fn generate_nebula_layout(env: &Env, seed: &BytesN<32>, _player: &Address) -
         }
     }
 
-    NebulaLayout {
+    let mut layout = NebulaLayout {
         width: GRID_SIZE,
         height: GRID_SIZE,
         cells,
         seed: combined,
         timestamp,
         total_energy,
-    }
+    };
+
+    let _ = difficulty_curve::apply_curve_to_layout(env, player, &mut layout);
+
+    layout
 }
 
 /// Calculate rarity tier from a NebulaLayout using on-chain verifiable math.
@@ -199,15 +215,9 @@ pub fn compute_layout_hash(env: &Env, layout: &NebulaLayout) -> BytesN<32> {
 }
 
 /// Emit the NebulaScanned event with player address, layout hash, and rarity.
-pub fn emit_nebula_scanned(
-    env: &Env,
-    player: &Address,
-    layout_hash: &BytesN<32>,
-    rarity: &Rarity,
-) {
+pub fn emit_nebula_scanned(env: &Env, player: &Address, layout_hash: &BytesN<32>, rarity: &Rarity) {
     env.events().publish(
         (symbol_short!("nebula"), symbol_short!("scanned")),
         (player.clone(), layout_hash.clone(), rarity.clone()),
     );
 }
-

@@ -42,10 +42,20 @@
   - Level-based progression system
   - Unique ship metadata storage
 
+- **Nomad Bonding Contract**
+  - `create_bond()`: Form a multi-sig cooperative bond between two players
+  - `accept_bond()`: Partner confirms the bond (Pending → Active)
+  - `delegate_yield()`: Share a percentage of cosmic essence with bonded partner
+  - `claim_yield()`: Beneficiary claims their delegated yield share
+  - `dissolve_bond()`: Either party can end the bond
+  - Full security: only bonded addresses can interact
+  - See [Nomad Bonding Guide](docs/NOMAD_BONDING_GUIDE.md) for details
+
 ### Advanced Mechanics
 
 - **Procedural Generation**: Ledger-seeded RNG ensures fair, verifiable region generation
 - **NFT Ownership**: Ships stored as Soroban tokens with full transfer/trading support
+- **Nomad Bonding**: Multi-sig cooperative bonds with passive yield delegation — real Web3 social mechanics
 - **Resource Trading**: Collected resources can be exchanged on DEXs integrated with Stellar
 - **Leaderboards**: On-chain tracking of top explorers by region coverage and resource wealth
 - **Achievements**: Milestone tracking for community engagement
@@ -192,6 +202,41 @@ graph TB
     Ledger --> Stellar["Stellar Mainnet / Futurenet"]
 ```
 
+### Nebula Generation Engine — Data Flow
+
+```mermaid
+flowchart TD
+    A([Player dApp]) -->|generate_nebula_layout\ncaller, ship_id, region_id, seed| B[NebulaGen Contract]
+
+    B --> C{Seed valid?}
+    C -- "No (all-zero)" --> E1([Err: InvalidSeed])
+    C -- Yes --> D[Mix seed with ledger state]
+
+    D --> D1["master =\nsplitmix64(seed)\n^ splitmix64(ledger_seq)\n^ splitmix64(timestamp)\n^ splitmix64(ship_id)\n^ splitmix64(region_id)"]
+
+    D1 --> F[Generate N anomalies\nfor i in 0..default_size]
+
+    F --> G["Anomaly i:\n• x  = derive(master, i, salt_x) % 1000\n• y  = derive(master, i, salt_y) % 1000\n• rarity = derive(master, i, salt_r) % 101\n• type   = derive(master, i, salt_t) % 5"]
+
+    G --> H[Classify resource_class\nfrom rarity score]
+    H --> H1["0-33  → Sparse\n34-66 → Moderate\n67-100 → Abundant"]
+
+    H1 --> I[Build layout_hash\nBytesN-32 from master]
+
+    I --> J[(Persistent Storage\nActiveLayout ship_id)]
+    I --> K[/"Emit NebulaGenerated\n(ship_id, layout_hash, size)"/]
+    I --> L([Return NebulaLayout])
+
+    M([Resource Minter]) -->|has_anomaly\nship_id, anomaly_index| J
+    J -->|true / false| M
+
+    style B fill:#1a1a2e,color:#e0e0ff
+    style D1 fill:#16213e,color:#e0e0ff
+    style G fill:#16213e,color:#e0e0ff
+    style J fill:#0f3460,color:#e0e0ff
+    style K fill:#533483,color:#fff
+```
+
 ### Module Breakdown
 
 ```
@@ -199,14 +244,16 @@ stellar-nebula-nomad/
 ├── src/
 │   ├── lib.rs                    # Main contract entry point
 │   ├── nebula_explorer.rs        # Procedural generation logic
+│   ├── nomad_bonding.rs          # Multi-sig bonding & yield delegation
 │   ├── resource_minter.rs        # Resource NFT minting
 │   └── ship_registry.rs          # Ship NFT management
 ├── tests/
-│   └── integration_tests.rs      # Contract test suite
+│   └── integration_tests.rs      # Contract test suite (33 tests)
 ├── scripts/
 │   ├── deploy.sh                 # Deployment automation
 │   └── test.sh                   # Test runner
 ├── docs/
+│   ├── NOMAD_BONDING_GUIDE.md    # Bonding system guide
 │   └── ABI.md                    # Contract interface specs
 ├── examples/
 │   └── scan_example.rs           # Usage examples
@@ -487,6 +534,7 @@ DEPLOY_TIMEOUT=300
 
 ### Phase 2: Expansion (Q2 2026)
 
+- [x] Nomad Bonding System (multi-sig co-op yield sharing)
 - [ ] Multi-contract coordination
 - [ ] Advanced upgrade system
 - [ ] Leaderboard smart contract
