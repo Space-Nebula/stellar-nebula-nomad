@@ -82,6 +82,15 @@ mod offline_progress;
 mod achievements;
 mod badges;
 
+// ── Issue #118: Cross-chain bridge for multi-chain support ──────────────────────
+mod bridge;
+
+// ── Issue #116: Rate limiting to prevent spam ──────────────────────────────────
+mod rate_limiter;
+
+// ── Issue #121: Enhanced referral system with tiered rewards ──────────────────
+mod rewards;
+
 // ── Issues #113 / #114: Upgradeable contract pattern ─────────────────────────
 mod proxy;
 
