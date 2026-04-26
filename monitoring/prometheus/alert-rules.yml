@@ -1,0 +1,93 @@
+groups:
+  - name: stellar-nebula-nomad-critical
+    interval: 30s
+    rules:
+
+      # Contract invocation error rate > 5%
+      - alert: HighContractErrorRate
+        expr: |
+          (
+            rate(nebula_contract_errors_total[5m])
+            /
+            rate(nebula_contract_invocations_total[5m])
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High contract error rate ({{ $value | humanizePercentage }})"
+          description: "Contract error rate has exceeded 5% for more than 2 minutes."
+
+      # Gas usage per transaction > 1M instructions
+      - alert: HighGasUsage
+        expr: |
+          histogram_quantile(0.95,
+            rate(nebula_contract_gas_instructions_bucket[10m])
+          ) > 1000000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High gas usage detected (p95 > 1M instructions)"
+          description: "95th percentile gas usage has exceeded 1,000,000 CPU instructions."
+
+      # Transaction throughput drops below 1 tx/min
+      - alert: LowTransactionThroughput
+        expr: |
+          rate(nebula_contract_invocations_total[5m]) < 0.016
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low transaction throughput"
+          description: "Transaction throughput has dropped below 1 per minute for 10 minutes."
+
+      # Horizon RPC latency p99 > 3s
+      - alert: SlowHorizonRpc
+        expr: |
+          histogram_quantile(0.99,
+            rate(horizon_request_duration_seconds_bucket[5m])
+          ) > 3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Slow Horizon RPC responses (p99 > 3s)"
+          description: "Horizon RPC 99th percentile latency has exceeded 3 seconds."
+
+      # Node memory > 90%
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+          ) > 0.90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High memory usage ({{ $value | humanizePercentage }})"
+          description: "Host memory usage has exceeded 90% for 5 minutes."
+
+      # Node disk > 85%
+      - alert: HighDiskUsage
+        expr: |
+          (
+            1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} /
+                 node_filesystem_size_bytes{fstype!="tmpfs"})
+          ) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk usage ({{ $value | humanizePercentage }})"
+          description: "Disk usage has exceeded 85% on {{ $labels.mountpoint }}."
+
+      # Prometheus target down
+      - alert: MonitoringTargetDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Monitoring target down: {{ $labels.job }}"
+          description: "Scrape target {{ $labels.instance }} ({{ $labels.job }}) is unreachable."
