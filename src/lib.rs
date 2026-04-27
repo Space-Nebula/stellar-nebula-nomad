@@ -93,6 +93,8 @@ mod rewards;
 
 // ── Issues #113 / #114: Upgradeable contract pattern ─────────────────────────
 mod proxy;
+mod seasons;
+mod battle_pass;
 
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
@@ -286,6 +288,8 @@ pub use navigation_planner::{
     calculate_optimal_route, validate_route_safety, get_neighbors, get_connection,
     NavError, NavPath, RouteEdge, NavConfig, MAX_ROUTE_HOPS, MAX_CONNECTIONS_PER_BATCH,
 };
+pub use seasons::{Season, SeasonError, ParticipantStats};
+pub use battle_pass::{BattlePassState, BattlePassReward, BattlePassError};
 
 #[contract]
 pub struct NebulaNomadContract;
@@ -316,6 +320,13 @@ impl NebulaNomadContract {
 
         // Record analytics: use total_energy as the essence earned this scan.
         analytics::record_scan(&env, &player, layout.total_energy as u64);
+
+        // Update seasonal participation and battle pass XP
+        let profile_result = player_profile::get_profile_by_owner(&env, &player);
+        if let Ok(profile) = profile_result {
+            let _ = seasons::record_participation(&env, profile.id, 1, layout.total_energy as i128);
+            let _ = battle_pass::add_xp(&env, profile.id, 1, layout.total_energy as i128);
+        }
 
         (layout, rarity)
     }
@@ -801,6 +812,32 @@ impl NebulaNomadContract {
         metrics: Vec<HealthMetricInput>,
     ) -> Result<Vec<HealthMetricSummary>, HealthError> {
         health_monitor::record_contract_health_batch(&env, metrics)
+    }
+
+    // ─── Seasonal Content & Battle Pass API ──────────────────────────────
+
+    pub fn init_season(env: Env, admin: Address, title: String) -> Result<u64, SeasonError> {
+        seasons::initialize_season(&env, admin, title)
+    }
+
+    pub fn get_current_season(env: Env) -> Result<Season, SeasonError> {
+        seasons::get_current_season(&env)
+    }
+
+    pub fn reset_season(env: Env, admin: Address, new_title: String) -> Result<u64, SeasonError> {
+        seasons::reset_season(&env, admin, new_title)
+    }
+
+    pub fn init_battle_pass_rewards(env: Env, admin: Address) {
+        battle_pass::init_battle_pass_rewards(&env, admin)
+    }
+
+    pub fn get_battle_pass_state(env: Env, profile_id: u64) -> Result<BattlePassState, BattlePassError> {
+        battle_pass::get_battle_pass_state(&env, profile_id)
+    }
+
+    pub fn claim_bp_reward(env: Env, player: Address, profile_id: u64, tier: u32) -> Result<i128, BattlePassError> {
+        battle_pass::claim_reward(&env, player, profile_id, tier)
     }
 
     /// Return the current health summary.
