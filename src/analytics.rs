@@ -46,6 +46,21 @@ pub struct LeaderboardEntry {
 /// without requiring unbounded on-chain iteration.
 pub const MAX_PLAYERS: u32 = 50;
 
+/// Aggregated leaderboard statistics (all tracked players).
+#[contracttype]
+#[derive(Clone, Default)]
+pub struct LeaderboardSummary {
+    pub tracked_players: u32,
+    pub sum_cosmic_essence: u64,
+    pub max_cosmic_essence: u64,
+    pub min_cosmic_essence: u64,
+    pub top_1_essence: u64,
+    pub top_2_essence: u64,
+    pub top_3_essence: u64,
+    pub top_5_sum: u64,
+    pub top_10_sum: u64,
+}
+
 // ── Write Helpers (called on every harvest / scan) ────────────────────────────
 
 /// Increment the global scan counter and record essence earned by `player`.
@@ -127,6 +142,122 @@ fn register_player(env: &Env, player: &Address) {
 
 // ── Read-Only View Functions (zero state mutation) ────────────────────────────
 
+/// Build and sort all leaderboard entries (descending by essence). Does not emit events.
+fn load_sorted_leaderboard_entries(env: &Env) -> Vec<LeaderboardEntry> {
+    let players: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&AnalyticsDataKey::PlayerList)
+        .unwrap_or_else(|| Vec::new(env));
+
+    let total = players.len();
+
+    let mut entries: Vec<LeaderboardEntry> = Vec::new(env);
+    for i in 0..total {
+        if let Some(player) = players.get(i) {
+            let essence: u64 = env
+                .storage()
+                .persistent()
+                .get(&AnalyticsDataKey::PlayerEssence(player.clone()))
+                .unwrap_or(0);
+            entries.push_back(LeaderboardEntry {
+                player,
+                cosmic_essence: essence,
+            });
+        }
+    }
+
+    let mut used = [false; 50];
+    let mut sorted: Vec<LeaderboardEntry> = Vec::new(env);
+    for _ in 0..entries.len() {
+        let mut best_idx: u32 = 0;
+        let mut best_essence: u64 = 0;
+        let mut found = false;
+
+        for i in 0..entries.len() {
+            if !used[i as usize] {
+                if let Some(e) = entries.get(i) {
+                    if !found || e.cosmic_essence > best_essence {
+                        best_essence = e.cosmic_essence;
+                        best_idx = i;
+                        found = true;
+                    }
+                }
+            }
+        }
+
+        if found {
+            used[best_idx as usize] = true;
+            if let Some(e) = entries.get(best_idx) {
+                sorted.push_back(e);
+            }
+        }
+    }
+
+    sorted
+}
+
+/// Summary statistics for dashboards (no events; safe for frequent RPC polling).
+pub fn compute_leaderboard_summary(env: &Env) -> LeaderboardSummary {
+    let sorted = load_sorted_leaderboard_entries(env);
+    let n = sorted.len();
+    if n == 0 {
+        return LeaderboardSummary::default();
+    }
+
+    let mut sum: u64 = 0;
+    let mut max_e: u64 = 0;
+    let mut min_e: u64 = u64::MAX;
+
+    for i in 0..n {
+        if let Some(e) = sorted.get(i) {
+            sum = sum.saturating_add(e.cosmic_essence);
+            max_e = max_e.max(e.cosmic_essence);
+            min_e = min_e.min(e.cosmic_essence);
+        }
+    }
+
+    let top_1 = match sorted.get(0) {
+        Some(e) => e.cosmic_essence,
+        None => 0,
+    };
+    let top_2 = match sorted.get(1) {
+        Some(e) => e.cosmic_essence,
+        None => 0,
+    };
+    let top_3 = match sorted.get(2) {
+        Some(e) => e.cosmic_essence,
+        None => 0,
+    };
+
+    let mut top_5_sum: u64 = 0;
+    let mut top_10_sum: u64 = 0;
+    let limit_5 = n.min(5);
+    let limit_10 = n.min(10);
+    for i in 0..limit_5 {
+        if let Some(e) = sorted.get(i) {
+            top_5_sum = top_5_sum.saturating_add(e.cosmic_essence);
+        }
+    }
+    for i in 0..limit_10 {
+        if let Some(e) = sorted.get(i) {
+            top_10_sum = top_10_sum.saturating_add(e.cosmic_essence);
+        }
+    }
+
+    LeaderboardSummary {
+        tracked_players: n,
+        sum_cosmic_essence: sum,
+        max_cosmic_essence: max_e,
+        min_cosmic_essence: if min_e == u64::MAX { 0 } else { min_e },
+        top_1_essence: top_1,
+        top_2_essence: top_2,
+        top_3_essence: top_3,
+        top_5_sum,
+        top_10_sum,
+    }
+}
+
 /// Return the current global statistics aggregate.
 ///
 /// Pure read — no ledger writes.
@@ -152,58 +283,12 @@ pub fn snapshot_leaderboard(
         return Err(AnalyticsError::InvalidTopN);
     }
 
-    let players: Vec<Address> = env
-        .storage()
-        .persistent()
-        .get(&AnalyticsDataKey::PlayerList)
-        .unwrap_or_else(|| Vec::new(env));
-
-    let total = players.len();
-
-    // Build the unsorted candidate Vec (at most MAX_PLAYERS = 50 entries).
-    let mut entries: Vec<LeaderboardEntry> = Vec::new(env);
-    for i in 0..total {
-        if let Some(player) = players.get(i) {
-            let essence: u64 = env
-                .storage()
-                .persistent()
-                .get(&AnalyticsDataKey::PlayerEssence(player.clone()))
-                .unwrap_or(0);
-            entries.push_back(LeaderboardEntry {
-                player,
-                cosmic_essence: essence,
-            });
-        }
-    }
-
-    // Selection sort descending by cosmic_essence.
-    // O(n²) is acceptable: n ≤ MAX_PLAYERS (50).
-    let mut used = [false; 50];
+    let sorted_full = load_sorted_leaderboard_entries(env);
+    let limit = top_n.min(sorted_full.len()) as usize;
     let mut sorted: Vec<LeaderboardEntry> = Vec::new(env);
-    let limit = top_n.min(entries.len());
-
-    for _ in 0..limit {
-        let mut best_idx: u32 = 0;
-        let mut best_essence: u64 = 0;
-        let mut found = false;
-
-        for i in 0..entries.len() {
-            if !used[i as usize] {
-                if let Some(e) = entries.get(i) {
-                    if !found || e.cosmic_essence > best_essence {
-                        best_essence = e.cosmic_essence;
-                        best_idx = i;
-                        found = true;
-                    }
-                }
-            }
-        }
-
-        if found {
-            used[best_idx as usize] = true;
-            if let Some(e) = entries.get(best_idx) {
-                sorted.push_back(e);
-            }
+    for i in 0..limit {
+        if let Some(e) = sorted_full.get(i as u32) {
+            sorted.push_back(e);
         }
     }
 
@@ -283,6 +368,25 @@ mod tests {
             let stats = get_global_stats(&env);
             assert_eq!(stats.ships_minted, 2);
             assert_eq!(stats.total_scans, 0);
+        });
+    }
+
+    #[test]
+    fn test_compute_leaderboard_summary_matches_totals() {
+        let (env, contract_id) = make_env();
+        let p1 = Address::generate(&env);
+        let p2 = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            record_scan(&env, &p1, 40);
+            record_scan(&env, &p2, 60);
+
+            let s = compute_leaderboard_summary(&env);
+            assert_eq!(s.tracked_players, 2);
+            assert_eq!(s.sum_cosmic_essence, 100);
+            assert_eq!(s.max_cosmic_essence, 60);
+            assert_eq!(s.min_cosmic_essence, 40);
+            assert_eq!(s.top_5_sum, 100);
         });
     }
 

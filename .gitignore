@@ -12,6 +12,11 @@ Cargo.lock
 *~
 .DS_Store
 
+# Node (frontend/mobile scaffolds)
+**/node_modules/
+frontend/analytics/dist/
+mobile/.expo/
+
 # Environment
 .env
 .env.local
