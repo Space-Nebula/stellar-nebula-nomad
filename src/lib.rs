@@ -78,6 +78,10 @@ mod nebula_archive;
 mod soul_binding;
 mod offline_progress;
 
+// ── Issue #120: Token staking and DAO governance ────────────────────────────
+mod staking;
+mod dao;
+
 // ── Issue #119: On-chain achievements and badges ──────────────────────────────
 mod achievements;
 mod badges;
@@ -285,6 +289,23 @@ pub use navigation_planner::{
     initialize_nav_graph, add_nebula_connection, add_nebula_connections_batch,
     calculate_optimal_route, validate_route_safety, get_neighbors, get_connection,
     NavError, NavPath, RouteEdge, NavConfig, MAX_ROUTE_HOPS, MAX_CONNECTIONS_PER_BATCH,
+};
+
+// ── DAO and Staking Governance ─────────────────────────────────────────────
+pub use staking::{
+    initialize as initialize_staking, stake, unstake, get_voting_power, delegate,
+    undelegate, get_stake, get_total_staked,
+    StakeRecord, DelegationRecord, StakingError,
+};
+pub use dao::{
+    initialize as initialize_dao, create_proposal, vote, execute_proposal,
+    cancel_proposal, get_proposal, get_vote, treasury_transfer,
+    Proposal, VoteRecord, ProposalStatus, VoteDirection, DaoConfig, DaoError,
+};
+pub use governance::{
+    create_proposal as gov_create_proposal, cast_vote as gov_cast_vote,
+    finalize_proposal, set_game_parameter, get_game_parameter, set_dao_contract,
+    Proposal as GovProposal, ProposalStatus as GovProposalStatus, GovError,
 };
 
 #[contract]
