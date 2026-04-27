@@ -1,0 +1,121 @@
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Run every day at 02:00 UTC to catch newly published advisories
+    - cron: "0 2 * * *"
+
+jobs:
+  # ─── Cargo audit ─────────────────────────────────────────────────────────
+  cargo-audit:
+    name: Cargo Audit (CVE scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo audit
+        id: audit
+        run: |
+          cargo audit --json 2>&1 | tee audit-report.json
+          # Exit non-zero if any vulnerabilities found
+          cargo audit
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-audit-report
+          path: audit-report.json
+          retention-days: 30
+
+      - name: Post audit summary to PR
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '## ❌ Security Vulnerabilities Found\n\n';
+            try {
+              const report = JSON.parse(fs.readFileSync('audit-report.json', 'utf8'));
+              const vulns = report.vulnerabilities?.list ?? [];
+              if (vulns.length > 0) {
+                body += `Found **${vulns.length}** vulnerabilit${vulns.length === 1 ? 'y' : 'ies'}:\n\n`;
+                body += '| Crate | Advisory | Severity | Title |\n';
+                body += '|-------|----------|----------|-------|\n';
+                for (const v of vulns) {
+                  const adv = v.advisory;
+                  body += `| \`${v.package.name}\` | [${adv.id}](https://rustsec.org/advisories/${adv.id}) | ${adv.cvss ?? 'N/A'} | ${adv.title} |\n`;
+                }
+                body += '\n> ⚠️ This PR is **blocked** until vulnerabilities are resolved or explicitly ignored in `audit.toml`.';
+              }
+            } catch {
+              body += 'Could not parse audit report. Check the Actions log for details.';
+            }
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+  # ─── Dependency review (new deps introduced in PR) ───────────────────────
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-3.0, AGPL-3.0
+
+  # ─── Supply-chain / SBOM ─────────────────────────────────────────────────
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      - name: Generate SBOM
+        run: cargo cyclonedx --format json --output-file sbom.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom.json
+          retention-days: 90
+
+  # ─── Secret scanning ─────────────────────────────────────────────────────
+  secret-scan:
+    name: Secret Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed for accurate scanning
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
