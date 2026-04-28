@@ -1,0 +1,124 @@
+# Backup Monitoring Configuration
+# Add to Prometheus alert rules
+
+groups:
+  - name: backup_alerts
+    interval: 5m
+    rules:
+      # Critical: Backup failed
+      - alert: BackupFailed
+        expr: backup_success == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: backup
+        annotations:
+          summary: "Backup operation failed"
+          description: "Last backup attempt failed. Check backup logs immediately."
+          runbook: "https://github.com/yourorg/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#backup-issues"
+
+      # Critical: No recent backup
+      - alert: NoRecentBackup
+        expr: (time() - backup_last_success_timestamp) > 172800
+        for: 10m
+        labels:
+          severity: critical
+          component: backup
+        annotations:
+          summary: "No successful backup in 48 hours"
+          description: "Last successful backup was more than 48 hours ago. Immediate action required."
+          runbook: "https://github.com/yourorg/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#troubleshooting"
+
+      # Warning: Backup duration high
+      - alert: BackupDurationHigh
+        expr: backup_duration_seconds > 1800
+        for: 5m
+        labels:
+          severity: warning
+          component: backup
+        annotations:
+          summary: "Backup taking longer than expected"
+          description: "Backup duration exceeded 30 minutes. May indicate performance issues."
+
+      # Warning: Low disk space
+      - alert: BackupStorageLow
+        expr: (backup_storage_available_bytes / backup_storage_total_bytes) < 0.1
+        for: 15m
+        labels:
+          severity: warning
+          component: backup
+        annotations:
+          summary: "Backup storage space running low"
+          description: "Less than 10% storage space available for backups. Clean up old backups."
+
+      # Warning: Backup size anomaly
+      - alert: BackupSizeAnomaly
+        expr: abs(backup_size_bytes - avg_over_time(backup_size_bytes[7d])) / avg_over_time(backup_size_bytes[7d]) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          component: backup
+        annotations:
+          summary: "Backup size changed significantly"
+          description: "Backup size differs by more than 50% from 7-day average. Investigate for data issues."
+
+      # Info: Backup completed successfully
+      - alert: BackupSuccess
+        expr: backup_success == 1
+        for: 1m
+        labels:
+          severity: info
+          component: backup
+        annotations:
+          summary: "Backup completed successfully"
+          description: "Daily backup completed without errors."
+
+  - name: recovery_alerts
+    interval: 5m
+    rules:
+      # Critical: Recovery failed
+      - alert: RecoveryFailed
+        expr: recovery_success == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: recovery
+        annotations:
+          summary: "Disaster recovery failed"
+          description: "Recovery operation failed. Escalate immediately."
+          runbook: "https://github.com/yourorg/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#recovery-procedures"
+
+      # Warning: Recovery time exceeded RTO
+      - alert: RecoveryTimeExceededRTO
+        expr: recovery_duration_seconds > 3600
+        for: 1m
+        labels:
+          severity: warning
+          component: recovery
+        annotations:
+          summary: "Recovery time exceeded RTO"
+          description: "Recovery took longer than 1 hour RTO target."
+
+      # Info: Monthly drill due
+      - alert: MonthlyDrillDue
+        expr: (time() - last_drill_timestamp) > 2592000
+        for: 1h
+        labels:
+          severity: info
+          component: recovery
+        annotations:
+          summary: "Monthly disaster recovery drill due"
+          description: "It's been more than 30 days since last DR drill. Schedule a drill."
+
+# Backup metrics to expose
+# These should be exported by your backup monitoring system
+
+# backup_success: 1 if last backup succeeded, 0 if failed
+# backup_last_success_timestamp: Unix timestamp of last successful backup
+# backup_duration_seconds: Duration of last backup in seconds
+# backup_size_bytes: Size of last backup in bytes
+# backup_storage_available_bytes: Available storage space
+# backup_storage_total_bytes: Total storage space
+# recovery_success: 1 if last recovery succeeded, 0 if failed
+# recovery_duration_seconds: Duration of last recovery in seconds
+# last_drill_timestamp: Unix timestamp of last DR drill

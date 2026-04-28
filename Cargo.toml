@@ -9,6 +9,14 @@ repository = "https://github.com/yourusername/stellar-nebula-nomad"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[bench]]
+name = "gas_benchmarks"
+harness = false
+
+[[bench]]
+name = "performance_regression"
+harness = false
+
 [features]
 # Enable advanced fuzz / property-based testing helpers.
 # Usage: cargo test --features fuzz

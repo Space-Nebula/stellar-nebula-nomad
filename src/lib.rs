@@ -3,29 +3,23 @@
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec, symbol_short};
 
 mod analytics;
-mod metrics;
-mod nebula_explorer;
-pub mod resource_minter;
-mod ship_registry;
-
-mod bug_bounty_payout;
-mod event_framework;
-mod fleet_manager;
-mod onboarding_tutorial;
-
-pub use analytics::{AnalyticsError, GlobalStats, LeaderboardEntry, LeaderboardSummary};
-pub use metrics::{AdvancedMetricsSnapshot, MetricsError};
-
 mod blueprint_factory;
 mod gifting_system;
+mod nebula_explorer;
 mod player_profile;
 mod referral_system;
+pub mod resource_minter;
 mod session_manager;
 mod ship_nft;
+mod ship_registry;
 
 mod batch_processor;
 mod dex_integration;
 mod difficulty_scaler;
+mod difficulty_curve;
+mod health_monitor;
+mod achievement_engine;
+mod data_exporter;
 mod emergency_controls;
 mod metadata_resolver;
 mod randomness_oracle;
@@ -38,10 +32,6 @@ mod yield_farming;
 mod governance;
 mod theme_customizer;
 mod indexer_callbacks;
-mod difficulty_curve;
-mod health_monitor;
-mod achievement_engine;
-mod data_exporter;
 
 mod contract_versioning;
 mod gas_recovery;
@@ -64,7 +54,6 @@ mod gas_sponsor;
 mod storage_optim;
 mod state_snapshot;
 
-mod mobile_views;
 mod prize_distributor;
 mod portal_registry;
 mod constellation_mapper;
@@ -75,50 +64,23 @@ mod market_oracle;
 mod audio_seed_generator;
 mod privacy_stats;
 mod navigation_planner;
+mod event_scheduler;
 
-mod nebula_archive;
-mod soul_binding;
-mod offline_progress;
-
-// ── Issue #120: Token staking and DAO governance ────────────────────────────
-mod staking;
-mod dao;
-
-// ── Issue #119: On-chain achievements and badges ──────────────────────────────
-mod achievements;
-mod badges;
-
-// ── Issue #118: Cross-chain bridge for multi-chain support ──────────────────────
-mod bridge;
-
-// ── Issue #116: Rate limiting to prevent spam ──────────────────────────────────
-mod rate_limiter;
-
-// ── Issue #121 / #127: Enhanced referral system with tiered rewards ───────────
 mod rewards;
-
-// ── Issue #130: NFT marketplace integration ───────────────────────────────────
 mod nft_marketplace;
-
-// ── Issue #141: Advanced trading — limit orders and trading history ───────────
 mod trading;
-
-// ── Issues #113 / #114: Upgradeable contract pattern ─────────────────────────
-mod proxy;
 mod seasons;
 mod battle_pass;
 
+// Gas optimization modules
+mod gas_optimized_storage;
+mod gas_optimized_compute;
+
+pub use analytics::{AnalyticsError, GlobalStats, LeaderboardEntry};
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
     NebulaLayout, Rarity, GRID_SIZE, TOTAL_CELLS,
 };
-
-pub use bug_bounty_payout::{BountyConfig, BugReport};
-pub use bug_bounty_payout::BountyError as BountyPayoutError;
-pub use event_framework::{EventFrameworkError, StandardEvent};
-pub use fleet_manager::{Fleet, FleetError, FleetStatus, FleetTemplate};
-pub use onboarding_tutorial::{OnboardingError, PlayerProfile as OnboardingPlayerProfile, TutorialProgress};
-
 pub use resource_minter::{ResourceError, ResourceType, StakeRecord, Config, LEDGERS_PER_DAY};
 pub use resource_minter::{
     auto_list_on_dex, harvest_resources, AssetId, DexOffer, HarvestError, HarvestResult,
@@ -127,9 +89,6 @@ pub use resource_minter::{
 pub use ship_nft::{ShipError, ShipNft};
 pub use blueprint_factory::{Blueprint, BlueprintError, BlueprintRarity};
 pub use referral_system::{Referral, ReferralError};
-pub use rewards::{LeaderboardEntry as ReferralLeaderboardEntry, ReferralAnalytics, ReferrerStats, RewardError};
-pub use nft_marketplace::{Listing, MarketplaceError};
-pub use trading::{LimitOrder, OrderSide, TradeRecord, TradingError};
 pub use player_profile::{PlayerProfile, ProfileError, ProgressUpdate};
 pub use session_manager::{Session, SessionError};
 pub use ship_registry::Ship;
@@ -143,24 +102,6 @@ pub use difficulty_scaler::{
     apply_scaling_to_layout, calculate_difficulty, DifficultyError, DifficultyResult,
     RarityWeights, MAX_LEVEL,
 };
-pub use difficulty_curve::{
-    adjust_curve_parameter, apply_curve_to_layout, calculate_progressive_difficulty, CurveConfig,
-    CurveError, ProgressiveDifficulty,
-};
-pub use health_monitor::{
-    get_health_summary, record_contract_health, record_contract_health_batch, HealthError,
-    HealthMetricInput, HealthMetricSummary, HealthSummary,
-};
-pub use achievement_engine::{
-    batch_unlock_achievements, check_achievement_progress, get_player_achievement_count,
-    get_player_badges, unlock_achievement, AchievementBadge, AchievementError,
-    AchievementProgress, AchievementTemplate,
-};
-pub use data_exporter::{
-    batch_export_players, export_player_data, get_export_session, get_export_settings,
-    set_export_compression, set_export_opt_in, ExportError, ExportRecord, ExportSession,
-    ExportSettings,
-};
 pub use emergency_controls::{
     EmergencyError, execute_unpause, get_admins, initialize_admins, is_paused,
     pause_contract, require_not_paused, schedule_unpause, emergency_withdraw, UNPAUSE_DELAY,
@@ -172,7 +113,6 @@ pub use metadata_resolver::{
 pub use randomness_oracle::{
     get_entropy_pool, request_random_seed, verify_and_fallback, OracleError,
 };
-pub use mobile_views::{get_mobile_dashboard, get_quick_scan_preview, MobileDashboard, MobileViewError, QuickScanPreview};
 pub use ship_upgrade::{ShipState, ShipUpgradeError, UpgradeBlueprint};
 pub use treasure_vault::{
     claim_treasure, deposit_treasure, get_vault, TreasureVault, VaultError,
@@ -303,24 +243,11 @@ pub use navigation_planner::{
     calculate_optimal_route, validate_route_safety, get_neighbors, get_connection,
     NavError, NavPath, RouteEdge, NavConfig, MAX_ROUTE_HOPS, MAX_CONNECTIONS_PER_BATCH,
 };
-pub use seasons::{Season, SeasonError, ParticipantStats};
-pub use battle_pass::{BattlePassState, BattlePassReward, BattlePassError};
-
-// ── DAO and Staking Governance ─────────────────────────────────────────────
-pub use staking::{
-    initialize as initialize_staking, stake, unstake, get_voting_power, delegate,
-    undelegate, get_stake, get_total_staked,
-    StakeRecord, DelegationRecord, StakingError,
-};
-pub use dao::{
-    initialize as initialize_dao, create_proposal, vote, execute_proposal,
-    cancel_proposal, get_proposal, get_vote, treasury_transfer,
-    Proposal, VoteRecord, ProposalStatus, VoteDirection, DaoConfig, DaoError,
-};
-pub use governance::{
-    create_proposal as gov_create_proposal, cast_vote as gov_cast_vote,
-    finalize_proposal, set_game_parameter, get_game_parameter, set_dao_contract,
-    Proposal as GovProposal, ProposalStatus as GovProposalStatus, GovError,
+pub use event_scheduler::{
+    initialize_scheduler, schedule_event, trigger_scheduled_event, get_event,
+    get_active_events, schedule_weekly_festival, cancel_event, update_participants,
+    get_event_count, reset_burst_counter as reset_event_burst,
+    ScheduledEvent, EventResult, EventError, MAX_ACTIVE_EVENTS, WEEKLY_FESTIVAL_INTERVAL,
 };
 
 #[contract]
@@ -342,7 +269,9 @@ impl NebulaNomadContract {
     /// Full scan: generates layout, calculates rarity, and emits a
     /// `NebulaScanned` event containing the layout hash.
     ///
-    /// Also updates the on-chain analytics counters and leaderboard.
+    /// Full scan: generates layout, calculates rarity, emits NebulaScanned event.
+    /// Also updates the on-chain analytics counters (total_scans,
+    /// total_essence_accrued) and registers the player for the leaderboard.
     pub fn scan_nebula(env: Env, seed: BytesN<32>, player: Address) -> (NebulaLayout, Rarity) {
         player.require_auth();
         let layout = nebula_explorer::generate_nebula_layout(&env, &seed, &player);
@@ -353,199 +282,7 @@ impl NebulaNomadContract {
         // Record analytics: use total_energy as the essence earned this scan.
         analytics::record_scan(&env, &player, layout.total_energy as u64);
 
-        // Update seasonal participation and battle pass XP
-        let profile_result = player_profile::get_profile_by_owner(&env, &player);
-        if let Ok(profile) = profile_result {
-            let _ = seasons::record_participation(&env, profile.id, 1, layout.total_energy as i128);
-            let _ = battle_pass::add_xp(&env, profile.id, 1, layout.total_energy as i128);
-        }
-
         (layout, rarity)
-    }
-
-    // ─── Onboarding tutorial ─────────────────────────────────────────────
-
-    pub fn init_onboarding(env: Env, admin: Address) -> Result<(), OnboardingError> {
-        onboarding_tutorial::init_onboarding(&env, &admin)
-    }
-
-    pub fn create_profile(env: Env, player: Address) -> Result<(), OnboardingError> {
-        onboarding_tutorial::create_profile(&env, &player)
-    }
-
-    pub fn start_tutorial(env: Env, player: Address) -> Result<(), OnboardingError> {
-        onboarding_tutorial::start_tutorial(&env, &player)
-    }
-
-    pub fn complete_tutorial_step(
-        env: Env,
-        player: Address,
-        step_id: u32,
-    ) -> Result<i128, OnboardingError> {
-        onboarding_tutorial::complete_tutorial_step(&env, &player, step_id)
-    }
-
-    pub fn get_tutorial_progress(env: Env, player: Address) -> Option<TutorialProgress> {
-        onboarding_tutorial::get_tutorial_progress(&env, &player)
-    }
-
-    pub fn get_starter_resources(env: Env, player: Address) -> i128 {
-        onboarding_tutorial::get_starter_resources(&env, &player)
-    }
-
-    pub fn set_tutorial_path(
-        env: Env,
-        admin: Address,
-        path: soroban_sdk::Vec<u32>,
-    ) -> Result<(), OnboardingError> {
-        onboarding_tutorial::set_tutorial_path(&env, &admin, path)
-    }
-
-    // ─── Bug bounty payout engine ────────────────────────────────────────
-
-    pub fn init_bounty_engine(
-        env: Env,
-        admin: Address,
-        approvers: soroban_sdk::Vec<Address>,
-        approval_threshold: u32,
-        high_value_threshold: i128,
-        timelock_seconds: u64,
-    ) -> Result<(), BountyPayoutError> {
-        bug_bounty_payout::init_bounty_engine(
-            &env,
-            &admin,
-            approvers,
-            approval_threshold,
-            high_value_threshold,
-            timelock_seconds,
-        )
-    }
-
-    pub fn fund_bounty_pool(env: Env, admin: Address, amount: i128) -> Result<i128, BountyPayoutError> {
-        bug_bounty_payout::fund_bounty_pool(&env, &admin, amount)
-    }
-
-    pub fn submit_bug_report(
-        env: Env,
-        reporter: Address,
-        description: soroban_sdk::String,
-        severity: soroban_sdk::Symbol,
-    ) -> Result<u64, BountyPayoutError> {
-        bug_bounty_payout::submit_bug_report(&env, &reporter, description, severity)
-    }
-
-    pub fn approve_and_pay_bounty(
-        env: Env,
-        approver: Address,
-        report_id: u64,
-        amount: i128,
-    ) -> Result<bool, BountyPayoutError> {
-        bug_bounty_payout::approve_and_pay_bounty(&env, &approver, report_id, amount)
-    }
-
-    pub fn approve_and_pay_bounty_burst(
-        env: Env,
-        approver: Address,
-        report_ids: soroban_sdk::Vec<u64>,
-        amounts: soroban_sdk::Vec<i128>,
-    ) -> Result<u32, BountyPayoutError> {
-        bug_bounty_payout::approve_and_pay_bounty_burst(&env, &approver, report_ids, amounts)
-    }
-
-    pub fn set_emergency_pause(env: Env, admin: Address, paused: bool) -> Result<(), BountyPayoutError> {
-        bug_bounty_payout::set_emergency_pause(&env, &admin, paused)
-    }
-
-    pub fn set_community_voted_mode(
-        env: Env,
-        admin: Address,
-        enabled: bool,
-    ) -> Result<(), BountyPayoutError> {
-        bug_bounty_payout::set_community_voted_mode(&env, &admin, enabled)
-    }
-
-    pub fn get_report(env: Env, report_id: u64) -> Option<BugReport> {
-        bug_bounty_payout::get_report(&env, report_id)
-    }
-
-    pub fn get_bounty_balance(env: Env, reporter: Address) -> i128 {
-        bug_bounty_payout::get_bounty_balance(&env, &reporter)
-    }
-
-    pub fn get_bounty_pool(env: Env) -> i128 {
-        bug_bounty_payout::get_bounty_pool(&env)
-    }
-
-    // ─── Standardized event framework ────────────────────────────────────
-
-    pub fn init_event_framework(env: Env, admin: Address) {
-        event_framework::init_event_framework(&env, &admin)
-    }
-
-    pub fn register_event_schema(
-        env: Env,
-        admin: Address,
-        event_type: soroban_sdk::Symbol,
-        version: u32,
-    ) -> Result<(), EventFrameworkError> {
-        event_framework::register_event_schema(&env, &admin, event_type, version)
-    }
-
-    pub fn emit_standard_event(
-        env: Env,
-        caller: Address,
-        event_type: soroban_sdk::Symbol,
-        payload: BytesN<256>,
-    ) -> Result<u64, EventFrameworkError> {
-        event_framework::emit_standard_event(&env, &caller, event_type, payload)
-    }
-
-    pub fn emit_standard_event_burst(
-        env: Env,
-        caller: Address,
-        event_type: soroban_sdk::Symbol,
-        payloads: soroban_sdk::Vec<BytesN<256>>,
-    ) -> Result<u32, EventFrameworkError> {
-        event_framework::emit_standard_event_burst(&env, &caller, event_type, payloads)
-    }
-
-    pub fn query_recent_events(
-        env: Env,
-        filter: soroban_sdk::Symbol,
-        limit: u32,
-    ) -> soroban_sdk::Vec<StandardEvent> {
-        event_framework::query_recent_events(&env, filter, limit)
-    }
-
-    // ─── Fleet manager ────────────────────────────────────────────────────
-
-    pub fn init_fleet_templates(env: Env) -> Result<(), FleetError> {
-        fleet_manager::init_fleet_templates(&env)
-    }
-
-    pub fn register_ship_for_owner(env: Env, owner: Address, ship: Ship) -> Result<(), FleetError> {
-        fleet_manager::register_ship_for_owner(&env, &owner, ship)
-    }
-
-    pub fn register_fleet(
-        env: Env,
-        owner: Address,
-        ship_ids: soroban_sdk::Vec<u64>,
-        template_id: u32,
-    ) -> Result<Fleet, FleetError> {
-        fleet_manager::register_fleet(&env, &owner, ship_ids, template_id)
-    }
-
-    pub fn sync_fleet_status(env: Env, fleet_id: u64) -> Result<FleetStatus, FleetError> {
-        fleet_manager::sync_fleet_status(&env, fleet_id)
-    }
-
-    pub fn get_fleet(env: Env, fleet_id: u64) -> Option<Fleet> {
-        fleet_manager::get_fleet(&env, fleet_id)
-    }
-
-    pub fn get_fleet_status(env: Env, fleet_id: u64) -> Option<FleetStatus> {
-        fleet_manager::get_fleet_status(&env, fleet_id)
     }
 
     /// Return aggregate global statistics (total scans, ships minted, etc.).
@@ -553,15 +290,6 @@ impl NebulaNomadContract {
     /// Pure view — no ledger writes, zero gas cost beyond the read.
     pub fn get_global_stats(env: Env) -> GlobalStats {
         analytics::get_global_stats(&env)
-    }
-
-    /// Admin-only aggregated metrics snapshot for analytics dashboards (Issue #129).
-    ///
-    /// Combines gameplay, referrals, health telemetry, audit counts, and economic
-    /// ratios into one struct (50+ numeric fields). Caller must authenticate and
-    /// appear in [`get_admins`].
-    pub fn get_advanced_metrics(env: Env, caller: Address) -> Result<AdvancedMetricsSnapshot, MetricsError> {
-        metrics::get_advanced_metrics(&env, &caller)
     }
 
     /// Return the top-`top_n` explorers sorted by cumulative cosmic essence.
@@ -809,165 +537,6 @@ impl NebulaNomadContract {
         player_level: u32,
     ) -> Result<u32, DifficultyError> {
         difficulty_scaler::apply_scaling_to_layout(&env, base_anomaly_count, player_level)
-    }
-
-    // ─── Dynamic Difficulty Curve ──────────────────────────────────────────
-
-    /// Calculate progressive nebula difficulty for a player level.
-    pub fn calculate_progressive_difficulty(
-        env: Env,
-        player_level: u32,
-    ) -> Result<ProgressiveDifficulty, CurveError> {
-        difficulty_curve::calculate_progressive_difficulty(&env, player_level)
-    }
-
-    /// Admin-tune a curve parameter during the tuning window.
-    pub fn adjust_curve_parameter(
-        env: Env,
-        admin: Address,
-        param: Symbol,
-        value: i128,
-    ) -> Result<CurveConfig, CurveError> {
-        difficulty_curve::adjust_curve_parameter(&env, &admin, param, value)
-    }
-
-    /// Read the active curve configuration.
-    pub fn get_curve_config(env: Env) -> CurveConfig {
-        difficulty_curve::get_curve_config(&env)
-    }
-
-    // ─── Contract Health Monitoring ───────────────────────────────────────
-
-    /// Record a single health metric.
-    pub fn record_contract_health(
-        env: Env,
-        metric: Symbol,
-        value: u64,
-    ) -> HealthMetricSummary {
-        health_monitor::record_contract_health(&env, metric, value)
-    }
-
-    /// Record a burst of health metrics.
-    pub fn record_contract_health_batch(
-        env: Env,
-        metrics: Vec<HealthMetricInput>,
-    ) -> Result<Vec<HealthMetricSummary>, HealthError> {
-        health_monitor::record_contract_health_batch(&env, metrics)
-    }
-
-    // ─── Seasonal Content & Battle Pass API ──────────────────────────────
-
-    pub fn init_season(env: Env, admin: Address, title: String) -> Result<u64, SeasonError> {
-        seasons::initialize_season(&env, admin, title)
-    }
-
-    pub fn get_current_season(env: Env) -> Result<Season, SeasonError> {
-        seasons::get_current_season(&env)
-    }
-
-    pub fn reset_season(env: Env, admin: Address, new_title: String) -> Result<u64, SeasonError> {
-        seasons::reset_season(&env, admin, new_title)
-    }
-
-    pub fn init_battle_pass_rewards(env: Env, admin: Address) {
-        battle_pass::init_battle_pass_rewards(&env, admin)
-    }
-
-    pub fn get_battle_pass_state(env: Env, profile_id: u64) -> Result<BattlePassState, BattlePassError> {
-        battle_pass::get_battle_pass_state(&env, profile_id)
-    }
-
-    pub fn claim_bp_reward(env: Env, player: Address, profile_id: u64, tier: u32) -> Result<i128, BattlePassError> {
-        battle_pass::claim_reward(&env, player, profile_id, tier)
-    }
-
-    /// Return the current health summary.
-    pub fn get_health_summary(env: Env) -> HealthSummary {
-        health_monitor::get_health_summary(&env)
-    }
-
-    // ─── Achievement Engine ───────────────────────────────────────────────
-
-    /// Unlock an achievement and mint a badge.
-    pub fn unlock_achievement(
-        env: Env,
-        player: Address,
-        achievement_id: u64,
-    ) -> Result<AchievementBadge, AchievementError> {
-        achievement_engine::unlock_achievement(&env, player, achievement_id)
-    }
-
-    /// Batch unlock up to five achievements.
-    pub fn batch_unlock_achievements(
-        env: Env,
-        player: Address,
-        achievement_ids: Vec<u64>,
-    ) -> Result<Vec<AchievementBadge>, AchievementError> {
-        achievement_engine::batch_unlock_achievements(&env, player, achievement_ids)
-    }
-
-    /// Return completion status for all predefined achievements.
-    pub fn check_achievement_progress(
-        env: Env,
-        player: Address,
-    ) -> Result<Vec<AchievementProgress>, AchievementError> {
-        achievement_engine::check_achievement_progress(&env, player)
-    }
-
-    /// Count unlocked achievements for a player.
-    pub fn get_player_achievement_count(
-        env: Env,
-        player: Address,
-    ) -> Result<u32, AchievementError> {
-        achievement_engine::get_player_achievement_count(&env, player)
-    }
-
-    /// Return the player's minted achievement badges.
-    pub fn get_player_badges(env: Env, player: Address) -> Vec<AchievementBadge> {
-        achievement_engine::get_player_badges(&env, player)
-    }
-
-    // ─── Data Exporter ────────────────────────────────────────────────────
-
-    /// Opt a player into export sharing.
-    pub fn set_export_opt_in(
-        env: Env,
-        player: Address,
-        enabled: bool,
-    ) -> Result<ExportSettings, ExportError> {
-        data_exporter::set_export_opt_in(&env, player, enabled)
-    }
-
-    /// Toggle compact export payloads for a player.
-    pub fn set_export_compression(
-        env: Env,
-        player: Address,
-        compressed: bool,
-    ) -> Result<ExportSettings, ExportError> {
-        data_exporter::set_export_compression(&env, player, compressed)
-    }
-
-    /// Export a single player's stats payload.
-    pub fn export_player_data(env: Env, player: Address) -> Result<Bytes, ExportError> {
-        data_exporter::export_player_data(&env, player)
-    }
-
-    /// Paginate opted-in players and export their payloads.
-    pub fn batch_export_players(
-        env: Env,
-        limit: u32,
-    ) -> Result<Vec<ExportRecord>, ExportError> {
-        data_exporter::batch_export_players(&env, limit)
-    }
-
-    /// Return the active export session.
-    pub fn get_export_session(env: Env) -> ExportSession {
-        data_exporter::get_export_session(&env)
-    }
-
-    /// Return the export settings for a player.
-    pub fn get_export_settings(env: Env, player: Address) -> ExportSettings {
-        data_exporter::get_export_settings(&env, player)
     }
 
     // ─── Randomness Oracle ────────────────────────────────────────────────
@@ -2323,157 +1892,76 @@ impl NebulaNomadContract {
         navigation_planner::get_connection(&env, from, to)
     }
 
-    // ── Issue #127: Enhanced referral system with tiered rewards ──────────────
+    // ─── Automated Community Event Scheduler ──────────────────────────────
 
-    /// Generate a unique 8-byte referral code for `referrer`.
-    pub fn generate_referral_code(env: Env, referrer: Address) -> Result<soroban_sdk::BytesN<8>, RewardError> {
-        rewards::generate_referral_code(&env, &referrer)
+    /// Initialize the event scheduler with an admin address.
+    pub fn initialize_scheduler(env: Env, admin: Address) {
+        event_scheduler::initialize_scheduler(&env, &admin)
     }
 
-    /// Record a referral: `referrer` referred `new_nomad` (rewards the referrer).
-    pub fn record_referral(
-        env: Env,
-        referrer: Address,
-        new_nomad: Address,
-    ) -> Result<i128, RewardError> {
-        rewards::record_referral(&env, &referrer, &new_nomad)
-    }
-
-    /// Mark a referred nomad as active (completed their first scan).
-    pub fn mark_referral_active(env: Env, referrer: Address) -> Result<(), RewardError> {
-        rewards::mark_referral_active(&env, &referrer)
-    }
-
-    /// Claim tiered referral rewards based on the number of active referrals.
-    pub fn claim_tiered_rewards(env: Env, referrer: Address) -> Result<i128, RewardError> {
-        rewards::claim_rewards(&env, &referrer)
-    }
-
-    /// Return the referrer stats (tier, active count, total claimed).
-    pub fn get_referrer_stats(env: Env, referrer: Address) -> Option<ReferrerStats> {
-        rewards::get_referrer_stats(&env, &referrer)
-    }
-
-    /// Resolve a referral code to the referrer address.
-    pub fn get_referrer_by_code(env: Env, code: soroban_sdk::BytesN<8>) -> Option<Address> {
-        rewards::get_referrer_by_code(&env, &code)
-    }
-
-    /// Return the top-10 referral leaderboard.
-    pub fn get_referral_leaderboard(env: Env) -> soroban_sdk::Vec<rewards::LeaderboardEntry> {
-        rewards::get_leaderboard(&env)
-    }
-
-    /// Return global referral analytics.
-    pub fn get_referral_analytics(env: Env) -> ReferralAnalytics {
-        rewards::get_referral_analytics(&env)
-    }
-
-    /// Flag an address as suspicious (admin only, anti-gaming).
-    pub fn flag_suspicious_referrer(
+    /// Schedule a new community event.
+    pub fn schedule_event(
         env: Env,
         admin: Address,
-        target: Address,
-    ) -> Result<(), RewardError> {
-        rewards::flag_suspicious(&env, &admin, &target)
+        event_type: Symbol,
+        start_time: u64,
+        reward_pool: i128,
+    ) -> Result<u64, EventError> {
+        event_scheduler::schedule_event(&env, admin, event_type, start_time, reward_pool)
     }
 
-    // ── Issue #130: NFT marketplace integration ───────────────────────────────
-
-    /// List a ship NFT for sale on the marketplace.
-    pub fn list_ship_for_sale(
+    /// Trigger a scheduled event when its time arrives.
+    pub fn trigger_scheduled_event(
         env: Env,
-        seller: Address,
-        ship_id: u64,
-        price: i128,
-    ) -> Result<(), nft_marketplace::MarketplaceError> {
-        nft_marketplace::list_ship(&env, &seller, ship_id, price)
+        event_id: u64,
+    ) -> Result<EventResult, EventError> {
+        event_scheduler::trigger_scheduled_event(&env, event_id)
     }
 
-    /// Buy a listed ship NFT, transferring ownership and enforcing royalties.
-    pub fn buy_ship(
+    /// Get event details by ID.
+    pub fn get_event(env: Env, event_id: u64) -> Result<ScheduledEvent, EventError> {
+        event_scheduler::get_event(&env, event_id)
+    }
+
+    /// Get all active event IDs.
+    pub fn get_active_events(env: Env) -> Vec<u64> {
+        event_scheduler::get_active_events(&env)
+    }
+
+    /// Schedule a weekly nebula festival (template).
+    pub fn schedule_weekly_festival(
         env: Env,
-        buyer: Address,
-        ship_id: u64,
-    ) -> Result<(), nft_marketplace::MarketplaceError> {
-        nft_marketplace::buy_ship(&env, &buyer, ship_id)
+        admin: Address,
+        reward_pool: i128,
+    ) -> Result<u64, EventError> {
+        event_scheduler::schedule_weekly_festival(&env, admin, reward_pool)
     }
 
-    /// Cancel a ship NFT listing.
-    pub fn cancel_ship_listing(
+    /// Cancel a scheduled event (admin only).
+    pub fn cancel_event(
         env: Env,
-        seller: Address,
-        ship_id: u64,
-    ) -> Result<(), nft_marketplace::MarketplaceError> {
-        nft_marketplace::cancel_listing(&env, &seller, ship_id)
+        admin: Address,
+        event_id: u64,
+    ) -> Result<(), EventError> {
+        event_scheduler::cancel_event(&env, admin, event_id)
     }
 
-    /// Get a marketplace listing for a ship.
-    pub fn get_ship_listing(env: Env, ship_id: u64) -> Option<nft_marketplace::Listing> {
-        nft_marketplace::get_listing(&env, ship_id)
-    }
-
-    // ── Issue #141: Advanced trading — limit orders and market depth ──────────
-
-    /// Place a limit order (buy or sell a resource at a specified price).
-    pub fn place_limit_order(
+    /// Update event participant count.
+    pub fn update_event_participants(
         env: Env,
-        trader: Address,
-        order: trading::LimitOrder,
-    ) -> Result<u64, trading::TradingError> {
-        trading::place_limit_order(&env, &trader, order)
+        event_id: u64,
+        participant_count: u32,
+    ) -> Result<(), EventError> {
+        event_scheduler::update_participants(&env, event_id, participant_count)
     }
 
-    /// Cancel an open limit order.
-    pub fn cancel_limit_order(
-        env: Env,
-        trader: Address,
-        order_id: u64,
-    ) -> Result<(), trading::TradingError> {
-        trading::cancel_limit_order(&env, &trader, order_id)
+    /// Get total number of events scheduled.
+    pub fn get_event_count(env: Env) -> u64 {
+        event_scheduler::get_event_count(&env)
     }
 
-    /// Get a limit order by ID.
-    pub fn get_limit_order(env: Env, order_id: u64) -> Option<trading::LimitOrder> {
-        trading::get_limit_order(&env, order_id)
-    }
-
-    /// Return open orders for a trader.
-    pub fn get_trader_orders(env: Env, trader: Address) -> soroban_sdk::Vec<trading::LimitOrder> {
-        trading::get_trader_orders(&env, &trader)
-    }
-
-    /// Record a completed trade in the trading history.
-    pub fn record_trade(
-        env: Env,
-        caller: Address,
-        trade: trading::TradeRecord,
-    ) -> Result<(), trading::TradingError> {
-        trading::record_trade(&env, &caller, trade)
-    }
-
-    /// Retrieve recent trading history (up to 50 records).
-    pub fn get_trading_history(env: Env) -> soroban_sdk::Vec<trading::TradeRecord> {
-        trading::get_trading_history(&env)
-    }
-
-    // ── Issue #142: Event indexing hooks ─────────────────────────────────────
-
-    /// Register a new indexer callback ID for off-chain event consumers.
-    pub fn register_indexer(
-        env: Env,
-        caller: Address,
-        callback_id: soroban_sdk::Symbol,
-    ) -> Result<(), indexer_callbacks::IndexerError> {
-        indexer_callbacks::register_indexer_callback(env, caller, callback_id)
-    }
-
-    /// Emit a structured indexer event (used by the off-chain event service).
-    pub fn emit_indexer_event(
-        env: Env,
-        event_type: soroban_sdk::Symbol,
-        payload: soroban_sdk::BytesN<256>,
-    ) -> Result<(), indexer_callbacks::IndexerError> {
-        indexer_callbacks::trigger_indexer_event(env, event_type, payload)
+    /// Reset event burst counter.
+    pub fn reset_event_burst_counter(env: Env) {
+        event_scheduler::reset_burst_counter(&env)
     }
 }

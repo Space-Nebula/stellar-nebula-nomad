@@ -191,3 +191,4 @@ pub fn set_dao_contract(env: Env, admin: Address, dao_address: Address) -> Resul
     );
 
     Ok(())
+}

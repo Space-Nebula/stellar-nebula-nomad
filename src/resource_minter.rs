@@ -425,11 +425,11 @@ impl ResourceMinter {
         if elapsed == 0 {
             return 0;
         }
-        
+
         let annual_yield = (stake.amount * apy_bps as i128) / 10_000;
         let daily_yield = annual_yield / 365;
         let ledger_yield = daily_yield / LEDGERS_PER_DAY as i128;
-        
+
         ledger_yield * elapsed
     }
 }
