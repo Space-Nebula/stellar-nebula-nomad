@@ -1,7 +1,7 @@
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Vec};
 
-const TOTAL_STEPS: u32 = 5;
-const STEP_REWARDS: [i128; 5] = [25, 35, 50, 65, 100];
+pub const TOTAL_STEPS: u32 = 5;
+pub const STEP_REWARDS: [i128; 5] = [25, 35, 50, 65, 100];
 
 #[derive(Clone)]
 #[contracttype]

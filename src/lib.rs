@@ -12,6 +12,10 @@ pub mod resource_minter;
 mod session_manager;
 mod ship_nft;
 mod ship_registry;
+mod onboarding_tutorial;
+mod leaderboards;
+mod content_tools;
+mod pvp_combat;
 
 mod batch_processor;
 mod dex_integration;
@@ -81,7 +85,7 @@ mod economics;
 mod gas_optimized_storage;
 mod gas_optimized_compute;
 
-pub use analytics::{AnalyticsError, GlobalStats, LeaderboardEntry};
+pub use analytics::{AnalyticsError, GlobalStats};
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
     NebulaLayout, Rarity, GRID_SIZE, TOTAL_CELLS,
@@ -97,6 +101,33 @@ pub use referral_system::{Referral, ReferralError};
 pub use player_profile::{PlayerProfile, ProfileError, ProgressUpdate};
 pub use session_manager::{Session, SessionError};
 pub use ship_registry::Ship;
+pub use onboarding_tutorial::{
+    TutorialProgress, PlayerProfile as OnboardingPlayerProfile,
+    OnboardingError, TOTAL_STEPS, STEP_REWARDS,
+};
+pub use leaderboards::{
+    LeaderboardEntry as EnhancedLeaderboardEntry, GuildEntry, RegionalEntry, AchievementEntry,
+    LeaderboardRewards, LeaderboardError,
+    CATEGORY_ESSENCE, CATEGORY_SCANS, CATEGORY_MISSIONS,
+    CATEGORY_NEBULAE_EXPLORED, CATEGORY_SHIPS_MINTED, CATEGORY_TRADES,
+    CATEGORY_CRAFTS, CATEGORY_BOUNTIES, CATEGORY_PVP_WINS,
+    CATEGORY_PVP_RATING, CATEGORY_GUILD_CONTRIBUTION, CATEGORY_ACHIEVEMENTS,
+    PERIOD_DAILY, PERIOD_WEEKLY, PERIOD_MONTHLY, PERIOD_ALL_TIME,
+    MAX_LEADERBOARD_ENTRIES,
+};
+pub use content_tools::{
+    CreatedContent, ContentMetadata, MarketplaceListing, VoteResult,
+    ContentToolsError,
+    CONTENT_TYPE_NEBULA, CONTENT_TYPE_MISSION, CONTENT_TYPE_EVENT,
+    MAX_CONTENT_PER_CREATOR, MAX_MARKETPLACE_LISTINGS,
+};
+pub use pvp_combat::{
+    CombatStats, Challenge, CombatState, CombatMove, CombatHistory,
+    MatchmakingEntry, RewardsConfig, SpectatorInfo,
+    PvPError,
+    INITIAL_ELO, K_FACTOR, MAX_HP, MAX_ENERGY, COMBAT_TIMEOUT,
+    MAX_SPECTATORS, MAX_QUEUE_SIZE,
+};
 
 pub use batch_processor::{
     clear_batch, execute_batch, get_player_batch, queue_batch_operation, BatchError, BatchOp,
@@ -328,6 +359,381 @@ impl NebulaNomadContract {
         top_n: u32,
     ) -> Result<Vec<LeaderboardEntry>, AnalyticsError> {
         analytics::snapshot_leaderboard(&env, top_n)
+    }
+
+    // === Enhanced Leaderboards API (Issue #159) ===
+
+    /// Update a player's score in a specific leaderboard category and time period.
+    pub fn update_leaderboard_score(
+        env: Env,
+        player: Address,
+        category: Symbol,
+        time_period: Symbol,
+        score: u64,
+    ) -> Result<(), LeaderboardError> {
+        leaderboards::update_score(&env, &player, category, time_period, score)
+    }
+
+    /// Get leaderboard entries for a category and time period.
+    pub fn get_leaderboard(
+        env: Env,
+        category: Symbol,
+        time_period: Symbol,
+        limit: u32,
+    ) -> Result<Vec<EnhancedLeaderboardEntry>, LeaderboardError> {
+        leaderboards::get_leaderboard(&env, category, time_period, limit)
+    }
+
+    /// Set a player's guild affiliation.
+    pub fn set_player_guild(
+        env: Env,
+        player: Address,
+        guild_name: String,
+    ) -> Result<(), LeaderboardError> {
+        leaderboards::set_player_guild(&env, &player, guild_name)
+    }
+
+    /// Get a player's guild.
+    pub fn get_player_guild(env: Env, player: Address) -> Option<String> {
+        leaderboards::get_player_guild(&env, &player)
+    }
+
+    /// Update guild leaderboard score (admin only).
+    pub fn update_guild_score(
+        env: Env,
+        caller: Address,
+        guild_name: String,
+        score: u64,
+        member_count: u32,
+    ) -> Result<(), LeaderboardError> {
+        leaderboards::update_guild_score(&env, &caller, guild_name, score, member_count)
+    }
+
+    /// Get guild leaderboard.
+    pub fn get_guild_leaderboard(
+        env: Env,
+        limit: u32,
+    ) -> Vec<leaderboards::GuildEntry> {
+        leaderboards::get_guild_leaderboard(&env, limit)
+    }
+
+    /// Update regional leaderboard score.
+    pub fn update_regional_score(
+        env: Env,
+        player: Address,
+        region: Symbol,
+        score: u64,
+    ) -> Result<(), LeaderboardError> {
+        leaderboards::update_regional_score(&env, &player, region, score)
+    }
+
+    /// Get regional leaderboard.
+    pub fn get_regional_leaderboard(
+        env: Env,
+        region: Symbol,
+        limit: u32,
+    ) -> Result<Vec<leaderboards::RegionalEntry>, LeaderboardError> {
+        leaderboards::get_regional_leaderboard(&env, region, limit)
+    }
+
+    /// Update achievement leaderboard.
+    pub fn update_achievement_score(
+        env: Env,
+        player: Address,
+        achievement_count: u32,
+        points: u64,
+    ) -> Result<(), LeaderboardError> {
+        leaderboards::update_achievement_score(&env, &player, achievement_count, points)
+    }
+
+    /// Get achievement leaderboard.
+    pub fn get_achievement_leaderboard(
+        env: Env,
+        limit: u32,
+    ) -> Vec<leaderboards::AchievementEntry> {
+        leaderboards::get_achievement_leaderboard(&env, limit)
+    }
+
+    /// Distribute rewards to top leaderboard players (admin only).
+    pub fn distribute_leaderboard_rewards(
+        env: Env,
+        caller: Address,
+        category: Symbol,
+        time_period: Symbol,
+        rewards: LeaderboardRewards,
+    ) -> Result<(), LeaderboardError> {
+        leaderboards::distribute_rewards(&env, &caller, category, time_period, rewards)
+    }
+
+    /// Set leaderboard admin (admin only).
+    pub fn set_leaderboard_admin(env: Env, admin: Address) {
+        leaderboards::set_admin(&env, &admin)
+    }
+
+    // === Content Creation Tools API (Issue #158) ===
+
+    /// Create new community content (nebula, mission, or event).
+    pub fn create_content(
+        env: Env,
+        creator: Address,
+        name: String,
+        description: String,
+        content_type: Symbol,
+        data: Bytes,
+        is_public: bool,
+        tags: Vec<Symbol>,
+    ) -> Result<u64, ContentToolsError> {
+        content_tools::create_content(&env, &creator, name, description, content_type, data, is_public, tags)
+    }
+
+    /// Update existing content.
+    pub fn update_content(
+        env: Env,
+        creator: Address,
+        content_id: u64,
+        name: Option<String>,
+        description: Option<String>,
+        data: Option<Bytes>,
+        is_public: Option<bool>,
+        tags: Option<Vec<Symbol>>,
+    ) -> Result<(), ContentToolsError> {
+        content_tools::update_content(&env, &creator, content_id, name, description, data, is_public, tags)
+    }
+
+    /// Get content by ID.
+    pub fn get_content(env: Env, content_id: u64) -> Result<CreatedContent, ContentToolsError> {
+        content_tools::get_content(&env, content_id)
+    }
+
+    /// Get all content IDs created by an address.
+    pub fn get_creator_content(env: Env, creator: Address) -> Vec<u64> {
+        content_tools::get_creator_content(&env, &creator)
+    }
+
+    /// Delete content (creator only).
+    pub fn delete_content(
+        env: Env,
+        creator: Address,
+        content_id: u64,
+    ) -> Result<(), ContentToolsError> {
+        content_tools::delete_content(&env, &creator, content_id)
+    }
+
+    /// Approve content (admin only).
+    pub fn approve_content(
+        env: Env,
+        caller: Address,
+        content_id: u64,
+    ) -> Result<(), ContentToolsError> {
+        content_tools::approve_content(&env, &caller, content_id)
+    }
+
+    /// Reject content (admin only).
+    pub fn reject_content(
+        env: Env,
+        caller: Address,
+        content_id: u64,
+    ) -> Result<(), ContentToolsError> {
+        content_tools::reject_content(&env, &caller, content_id)
+    }
+
+    /// Get content status.
+    pub fn get_content_status(env: Env, content_id: u64) -> Symbol {
+        content_tools::get_content_status(&env, content_id)
+    }
+
+    /// Vote/rate content (1-5 stars).
+    pub fn vote_content(
+        env: Env,
+        voter: Address,
+        content_id: u64,
+        rating: u32,
+    ) -> Result<(), ContentToolsError> {
+        content_tools::vote_content(&env, &voter, content_id, rating)
+    }
+
+    /// Get vote result for content.
+    pub fn get_vote_result(env: Env, content_id: u64) -> VoteResult {
+        content_tools::get_vote_result(&env, content_id)
+    }
+
+    /// Increment play count for content.
+    pub fn increment_play_count(
+        env: Env,
+        content_id: u64,
+    ) -> Result<(), ContentToolsError> {
+        content_tools::increment_play_count(&env, content_id)
+    }
+
+    /// List content on marketplace.
+    pub fn list_on_marketplace(
+        env: Env,
+        seller: Address,
+        content_id: u64,
+        price: i128,
+    ) -> Result<u64, ContentToolsError> {
+        content_tools::list_on_marketplace(&env, &seller, content_id, price)
+    }
+
+    /// Unlist content from marketplace.
+    pub fn unlist_from_marketplace(
+        env: Env,
+        seller: Address,
+        listing_id: u64,
+    ) -> Result<(), ContentToolsError> {
+        content_tools::unlist_from_marketplace(&env, &seller, listing_id)
+    }
+
+    /// Get marketplace listing.
+    pub fn get_marketplace_listing(
+        env: Env,
+        listing_id: u64,
+    ) -> Result<MarketplaceListing, ContentToolsError> {
+        content_tools::get_marketplace_listing(&env, listing_id)
+    }
+
+    /// Set content tools admin (admin only).
+    pub fn set_content_admin(env: Env, admin: Address) {
+        content_tools::set_admin(&env, &admin)
+    }
+
+    // === PvP Combat API (Issue #152) ===
+
+    /// Get combat stats for a player.
+    pub fn get_combat_stats(env: Env, player: Address) -> pvp_combat::CombatStats {
+        pvp_combat::get_combat_stats(&env, &player)
+    }
+
+    /// Get ELO rating for a player.
+    pub fn get_elo_rating(env: Env, player: Address) -> u32 {
+        pvp_combat::get_elo_rating(&env, &player)
+    }
+
+    /// Create a PvP challenge.
+    pub fn create_challenge(
+        env: Env,
+        challenger: Address,
+        opponent: Address,
+        stake: i128,
+    ) -> Result<u64, PvPError> {
+        pvp_combat::create_challenge(&env, &challenger, &opponent, stake)
+    }
+
+    /// Accept a PvP challenge.
+    pub fn accept_challenge(
+        env: Env,
+        caller: Address,
+        challenge_id: u64,
+    ) -> Result<u64, PvPError> {
+        pvp_combat::accept_challenge(&env, &caller, challenge_id)
+    }
+
+    /// Decline a PvP challenge.
+    pub fn decline_challenge(
+        env: Env,
+        caller: Address,
+        challenge_id: u64,
+    ) -> Result<(), PvPError> {
+        pvp_combat::decline_challenge(&env, &caller, challenge_id)
+    }
+
+    /// Get a challenge by ID.
+    pub fn get_challenge(env: Env, challenge_id: u64) -> Result<Challenge, PvPError> {
+        pvp_combat::get_challenge(&env, challenge_id)
+    }
+
+    /// Execute a combat move.
+    pub fn execute_combat_move(
+        env: Env,
+        player: Address,
+        combat_id: u64,
+        move_type: Symbol,
+        power: u32,
+    ) -> Result<(), PvPError> {
+        pvp_combat::execute_move(&env, &player, combat_id, move_type, power)
+    }
+
+    /// Get combat state.
+    pub fn get_combat(env: Env, combat_id: u64) -> Result<CombatState, PvPError> {
+        pvp_combat::get_combat(&env, combat_id)
+    }
+
+    /// Get player's combat history.
+    pub fn get_player_combat_history(
+        env: Env,
+        player: Address,
+        limit: u32,
+    ) -> Vec<CombatHistory> {
+        pvp_combat::get_player_combat_history(&env, &player, limit)
+    }
+
+    /// Join matchmaking queue.
+    pub fn join_matchmaking(
+        env: Env,
+        player: Address,
+        preferred_stake: i128,
+    ) -> Result<(), PvPError> {
+        pvp_combat::join_matchmaking(&env, &player, preferred_stake)
+    }
+
+    /// Leave matchmaking queue.
+    pub fn leave_matchmaking(
+        env: Env,
+        player: Address,
+    ) -> Result<(), PvPError> {
+        pvp_combat::leave_matchmaking(&env, &player)
+    }
+
+    /// Process matchmaking (admin/system).
+    pub fn process_matchmaking(env: Env) -> Result<Option<(Address, Address)>, PvPError> {
+        pvp_combat::process_matchmaking(&env)
+    }
+
+    /// Get matchmaking queue size.
+    pub fn get_matchmaking_queue_size(env: Env) -> u32 {
+        pvp_combat::get_matchmaking_queue_size(&env)
+    }
+
+    /// Add spectator to combat.
+    pub fn add_spectator(
+        env: Env,
+        spectator: Address,
+        combat_id: u64,
+    ) -> Result<(), PvPError> {
+        pvp_combat::add_spectator(&env, &spectator, combat_id)
+    }
+
+    /// Remove spectator from combat.
+    pub fn remove_spectator(
+        env: Env,
+        spectator: Address,
+        combat_id: u64,
+    ) -> Result<(), PvPError> {
+        pvp_combat::remove_spectator(&env, &spectator, combat_id)
+    }
+
+    /// Get combat spectators.
+    pub fn get_spectators(env: Env, combat_id: u64) -> Vec<Address> {
+        pvp_combat::get_spectators(&env, combat_id)
+    }
+
+    /// Set combat rewards config (admin only).
+    pub fn set_combat_rewards_config(
+        env: Env,
+        caller: Address,
+        config: RewardsConfig,
+    ) -> Result<(), PvPError> {
+        pvp_combat::set_rewards_config(&env, &caller, config)
+    }
+
+    /// Get combat rewards config.
+    pub fn get_combat_rewards_config(env: Env) -> RewardsConfig {
+        pvp_combat::get_rewards_config(&env)
+    }
+
+    /// Set PvP combat admin (admin only).
+    pub fn set_pvp_admin(env: Env, admin: Address) {
+        pvp_combat::set_admin(&env, &admin)
     }
 
     // === Contract Versioning API ===
@@ -613,6 +1019,43 @@ impl NebulaNomadContract {
     /// Retrieve a player profile by ID.
     pub fn get_profile(env: Env, profile_id: u64) -> Result<PlayerProfile, ProfileError> {
         player_profile::get_profile(&env, profile_id)
+    }
+
+    // ─── Onboarding Tutorial (Issue #139) ────────────────────────────────
+
+    /// Initialize the onboarding system with an admin.
+    pub fn init_onboarding(env: Env, admin: Address) -> Result<(), OnboardingError> {
+        onboarding_tutorial::init_onboarding(&env, &admin)
+    }
+
+    /// Create a player profile and start the tutorial.
+    pub fn create_profile_onboarding(env: Env, player: Address) -> Result<(), OnboardingError> {
+        onboarding_tutorial::create_profile(&env, &player)
+    }
+
+    /// Start the tutorial for an existing profile.
+    pub fn start_tutorial(env: Env, player: Address) -> Result<(), OnboardingError> {
+        onboarding_tutorial::start_tutorial(&env, &player)
+    }
+
+    /// Complete a tutorial step and earn rewards.
+    pub fn complete_tutorial_step(env: Env, player: Address, step_id: u32) -> Result<i128, OnboardingError> {
+        onboarding_tutorial::complete_tutorial_step(&env, &player, step_id)
+    }
+
+    /// Get tutorial progress for a player.
+    pub fn get_tutorial_progress(env: Env, player: Address) -> Option<TutorialProgress> {
+        onboarding_tutorial::get_tutorial_progress(&env, &player)
+    }
+
+    /// Get starter resources earned from tutorial.
+    pub fn get_starter_resources(env: Env, player: Address) -> i128 {
+        onboarding_tutorial::get_starter_resources(&env, &player)
+    }
+
+    /// Admin function to set a custom tutorial path.
+    pub fn set_tutorial_path(env: Env, admin: Address, path: Vec<u32>) -> Result<(), OnboardingError> {
+        onboarding_tutorial::set_tutorial_path(&env, &admin, path)
     }
 
     // ─── Session Manager ──────────────────────────────────────────────────
