@@ -74,6 +74,12 @@ mod battle_pass;
 
 mod ship_customization;
 mod skins;
+mod crafting;
+pub mod recipes;
+pub mod notifications {
+    pub mod push_service;
+    pub mod alerts;
+}
 
 mod economics;
 
@@ -275,6 +281,11 @@ pub use trading::{
     place_limit_order, cancel_limit_order, get_limit_order, get_trader_orders,
     record_trade, get_trading_history, LimitOrder, OrderSide, TradeRecord, TradingError,
 };
+
+pub use crafting::{craft, add_xp, get_level, get_xp};
+pub use recipes::{Recipe, get_recipe, set_recipe, unlock_rare_recipe};
+pub use notifications::push_service::{Notification, emit_notification};
+pub use notifications::alerts::{check_low_resources, notify_rare_discovery, notify_crafting_complete};
 
 #[contract]
 pub struct NebulaNomadContract;
