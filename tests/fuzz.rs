@@ -370,6 +370,124 @@ fn scenario_unknown_falls_back_to_empty() {
     assert_eq!(client.get_ships_by_owner(&player).len(), 0);
 }
 
+// ─── Additional arithmetic fuzz tests ─────────────────────────────────────────
+
+proptest! {
+    /// Difficulty anomaly count increases monotonically with level.
+    #[test]
+    fn prop_anomaly_count_monotonic(level1 in 1u32..50u32, level2 in 51u32..100u32) {
+        let (_, client, _) = make_env();
+        let d1 = client.calculate_difficulty(&level1);
+        let d2 = client.calculate_difficulty(&level2);
+        prop_assert!(d2.anomaly_count >= d1.anomaly_count);
+    }
+
+    /// Vault payout is always >= deposited amount after lock expires.
+    #[test]
+    fn prop_vault_payout_gte_deposit(amount in 1u64..100000u64) {
+        let (env, client, player) = make_env();
+        let metadata = Bytes::from_array(&env, &[0u8; 4]);
+        let ship = client.mint_ship(&player, &symbol_short!("hauler"), &metadata);
+        let vault = client.deposit_treasure(&player, &ship.id, &amount);
+        advance_time(&env, DEFAULT_MIN_LOCK_DURATION + 1);
+        let payout = client.claim_treasure(&player, &vault.vault_id);
+        prop_assert!(payout >= amount);
+    }
+
+    /// Ship hull and scanner_power are deterministic for ship type.
+    #[test]
+    fn prop_ship_stats_deterministic(_x in 0u8..10u8) {
+        let (env, client, player) = make_env();
+        let metadata = Bytes::from_array(&env, &[0u8; 4]);
+        let ship1 = client.mint_ship(&player, &symbol_short!("explorer"), &metadata);
+        let ship2 = client.mint_ship(&player, &symbol_short!("explorer"), &metadata);
+        prop_assert_eq!(ship1.hull, ship2.hull);
+        prop_assert_eq!(ship1.scanner_power, ship2.scanner_power);
+    }
+}
+
+// ─── State transition fuzz tests ──────────────────────────────────────────────
+
+#[test]
+fn fuzz_vault_state_transitions() {
+    let (env, client, player) = make_env();
+    let metadata = Bytes::from_array(&env, &[0u8; 4]);
+    let ship = client.mint_ship(&player, &symbol_short!("fighter"), &metadata);
+    
+    // Deposit → StillLocked → Claimed
+    let vault = client.deposit_treasure(&player, &ship.id, &1000u64);
+    assert!(!vault.claimed);
+    
+    let early_result = client.try_claim_treasure(&player, &vault.vault_id);
+    assert!(matches!(early_result, Err(Ok(VaultError::StillLocked))));
+    
+    advance_time(&env, DEFAULT_MIN_LOCK_DURATION + 1);
+    let payout = client.claim_treasure(&player, &vault.vault_id);
+    assert!(payout >= 1000);
+    
+    let vault_after = client.get_vault(&vault.vault_id);
+    assert!(vault_after.claimed);
+}
+
+#[test]
+fn fuzz_ship_ownership_transfer() {
+    let (env, client, player) = make_env();
+    let new_owner = Address::generate(&env);
+    let metadata = Bytes::from_array(&env, &[1u8; 4]);
+    
+    let ship = client.mint_ship(&player, &symbol_short!("explorer"), &metadata);
+    assert_eq!(ship.owner, player);
+    
+    let transferred = client.transfer_ownership(&ship.id, &new_owner);
+    assert_eq!(transferred.owner, new_owner);
+    
+    let fetched = client.get_ship(&ship.id);
+    assert_eq!(fetched.owner, new_owner);
+}
+
+// ─── Input validation fuzz tests ──────────────────────────────────────────────
+
+#[test]
+fn fuzz_invalid_ship_types() {
+    let invalid_types = [
+        symbol_short!("invalid"),
+        symbol_short!("unknown"),
+        symbol_short!("ghost"),
+        symbol_short!("turret"),
+        symbol_short!("carrier"),
+    ];
+    
+    for ship_type in &invalid_types {
+        let (env, client, player) = make_env();
+        let metadata = Bytes::from_array(&env, &[0u8; 4]);
+        let result = client.try_mint_ship(&player, ship_type, &metadata);
+        assert!(
+            matches!(result, Err(Ok(ShipError::InvalidShipType))),
+            "ship_type {:?} should be invalid",
+            ship_type
+        );
+    }
+}
+
+#[test]
+fn fuzz_boundary_difficulty_levels() {
+    let (_, client, _) = make_env();
+    let boundary_levels = [0u32, 1, 50, 99, 100, 101, u32::MAX];
+    
+    for &level in &boundary_levels {
+        let result = client.try_calculate_difficulty(&level);
+        if level == 0 || level > 100 {
+            assert!(
+                matches!(result, Err(Ok(DifficultyError::InvalidLevel))),
+                "level {} should be invalid",
+                level
+            );
+        } else {
+            assert!(result.is_ok(), "level {} should be valid", level);
+        }
+    }
+}
+
 // ─── Vault lock invariant ─────────────────────────────────────────────────────
 
 /// Claiming before the lock expires always returns `StillLocked`.
