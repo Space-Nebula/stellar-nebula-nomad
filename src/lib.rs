@@ -2,6 +2,7 @@
 
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec, symbol_short};
 
+mod access_control;
 mod analytics;
 mod blueprint_factory;
 mod gifting_system;
@@ -81,6 +82,11 @@ mod economics;
 mod gas_optimized_storage;
 mod gas_optimized_compute;
 
+pub use access_control::{
+    AccessControlError, AccessControlKey, RoleRecord, init_roles, grant_role, revoke_role,
+    grant_role_batch, revoke_permission, grant_permission, check_permission, transfer_admin,
+    has_role, has_permission, propose_role_change, BATCH_GRANT_LIMIT,
+};
 pub use analytics::{AnalyticsError, GlobalStats, LeaderboardEntry};
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
@@ -350,6 +356,54 @@ impl NebulaNomadContract {
 
     pub fn migrate_data(env: Env, caller: Address, old_version: u32, new_version: u32, batch: Vec<Bytes>) -> MigrationRecord {
         contract_versioning::migrate_data(&env, &caller, old_version, new_version, batch).unwrap()
+    }
+
+    // === Role-Based Access Control (RBAC) API ===
+
+    /// Initialize the RBAC system with default roles (admin, nomad, indexer).
+    /// Must be called exactly once before any role-gated operations.
+    pub fn init_rbac(env: Env, admin: Address) -> Result<(), AccessControlError> {
+        access_control::init_roles(&env, admin)
+    }
+
+    /// Grant a role to a single address with optional expiry.
+    pub fn grant_role(env: Env, caller: Address, role: Symbol, grantee: Address, expiry: Option<u32>) -> Result<(), AccessControlError> {
+        access_control::grant_role(&env, caller, role, grantee, expiry)
+    }
+
+    /// Grant a role to up to 5 addresses in a single batch operation.
+    pub fn grant_role_batch(env: Env, caller: Address, role: Symbol, grantees: Vec<Address>, expiry: Option<u32>) -> Result<(), AccessControlError> {
+        access_control::grant_role_batch(&env, caller, role, grantees, expiry)
+    }
+
+    /// Revoke a role from an address.
+    pub fn revoke_role(env: Env, caller: Address, role: Symbol, revokee: Address) -> Result<(), AccessControlError> {
+        access_control::revoke_role(&env, caller, role, revokee)
+    }
+
+    /// Grant a permission to a role (allow role to perform action).
+    pub fn grant_permission(env: Env, caller: Address, role: Symbol, action: Symbol) -> Result<(), AccessControlError> {
+        access_control::grant_permission(&env, caller, role, action)
+    }
+
+    /// Revoke a permission from a role.
+    pub fn revoke_permission(env: Env, caller: Address, role: Symbol, action: Symbol) -> Result<(), AccessControlError> {
+        access_control::revoke_permission(&env, caller, role, action)
+    }
+
+    /// Transfer admin privileges to a new address.
+    pub fn transfer_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), AccessControlError> {
+        access_control::transfer_admin(&env, caller, new_admin)
+    }
+
+    /// Check whether an address holds a specific role.
+    pub fn has_role(env: Env, role: Symbol, address: Address) -> bool {
+        access_control::has_role(&env, &role, &address)
+    }
+
+    /// Check whether a role is permitted to perform an action.
+    pub fn has_permission(env: Env, role: Symbol, action: Symbol) -> bool {
+        access_control::has_permission(&env, &role, &action)
     }
 
     // === Gas Recovery API ===
