@@ -72,6 +72,11 @@ mod trading;
 mod seasons;
 mod battle_pass;
 
+mod ship_customization;
+mod skins;
+
+mod economics;
+
 // Gas optimization modules
 mod gas_optimized_storage;
 mod gas_optimized_compute;
@@ -248,6 +253,27 @@ pub use event_scheduler::{
     get_active_events, schedule_weekly_festival, cancel_event, update_participants,
     get_event_count, reset_burst_counter as reset_event_burst,
     ScheduledEvent, EventResult, EventError, MAX_ACTIVE_EVENTS, WEEKLY_FESTIVAL_INTERVAL,
+};
+
+pub use ship_customization::{
+    mint_skin, apply_skin, get_ship_skin, get_owner_skins, transfer_skin,
+    ShipSkin, SkinRarity, SkinError,
+};
+pub use skins::{get_skin_templates, SkinTemplate};
+
+pub use economics::monitor::{
+    initialize_monitor, update_supply_metrics, track_resource_activity,
+    get_metrics, get_resource_metrics, calculate_inflation_rate,
+    EconomicMetrics, ResourceMetrics,
+};
+pub use economics::balancer::{
+    detect_imbalance, suggest_adjustment, apply_adjustment, generate_report,
+    BalanceAdjustment, SupplyDemandRatio,
+};
+
+pub use trading::{
+    place_limit_order, cancel_limit_order, get_limit_order, get_trader_orders,
+    record_trade, get_trading_history, LimitOrder, OrderSide, TradeRecord, TradingError,
 };
 
 #[contract]
@@ -1963,5 +1989,125 @@ impl NebulaNomadContract {
     /// Reset event burst counter.
     pub fn reset_event_burst_counter(env: Env) {
         event_scheduler::reset_burst_counter(&env)
+    }
+
+    // ─── Ship Customization & Skins ───────────────────────────────────────
+
+    pub fn mint_skin(
+        env: Env,
+        owner: Address,
+        name: Symbol,
+        rarity: SkinRarity,
+        color_primary: u32,
+        color_secondary: u32,
+        metadata: Bytes,
+    ) -> Result<ShipSkin, SkinError> {
+        ship_customization::mint_skin(&env, &owner, name, rarity, color_primary, color_secondary, metadata)
+    }
+
+    pub fn apply_skin(env: Env, owner: Address, ship_id: u64, skin_id: u64) -> Result<(), SkinError> {
+        ship_customization::apply_skin(&env, &owner, ship_id, skin_id)
+    }
+
+    pub fn get_ship_skin(env: Env, ship_id: u64) -> Option<u64> {
+        ship_customization::get_ship_skin(&env, ship_id)
+    }
+
+    pub fn get_owner_skins(env: Env, owner: Address) -> Vec<u64> {
+        ship_customization::get_owner_skins(&env, &owner)
+    }
+
+    pub fn transfer_skin(env: Env, skin_id: u64, new_owner: Address) -> Result<ShipSkin, SkinError> {
+        ship_customization::transfer_skin(&env, skin_id, &new_owner)
+    }
+
+    pub fn get_skin_templates(env: Env) -> Vec<SkinTemplate> {
+        skins::get_skin_templates(&env)
+    }
+
+    // ─── Economic Monitoring & Balancing ──────────────────────────────────
+
+    pub fn initialize_economic_monitor(env: Env, admin: Address) {
+        economics::monitor::initialize_monitor(&env, &admin)
+    }
+
+    pub fn update_supply_metrics(
+        env: Env,
+        admin: Address,
+        total_supply: i128,
+        circulating_supply: i128,
+        staked_supply: i128,
+    ) {
+        economics::monitor::update_supply_metrics(&env, &admin, total_supply, circulating_supply, staked_supply)
+    }
+
+    pub fn track_resource_activity(
+        env: Env,
+        resource_type: Symbol,
+        minted: i128,
+        burned: i128,
+        avg_price: i128,
+    ) {
+        economics::monitor::track_resource_activity(&env, resource_type, minted, burned, avg_price)
+    }
+
+    pub fn get_economic_metrics(env: Env) -> EconomicMetrics {
+        economics::monitor::get_metrics(&env)
+    }
+
+    pub fn get_resource_metrics(env: Env, resource_type: Symbol) -> ResourceMetrics {
+        economics::monitor::get_resource_metrics(&env, resource_type)
+    }
+
+    pub fn calculate_inflation_rate(env: Env, old_supply: i128, new_supply: i128) -> u32 {
+        economics::monitor::calculate_inflation_rate(&env, old_supply, new_supply)
+    }
+
+    pub fn detect_economic_imbalance(env: Env, resource_type: Symbol, supply: i128, demand: i128) -> SupplyDemandRatio {
+        economics::balancer::detect_imbalance(&env, resource_type, supply, demand)
+    }
+
+    pub fn suggest_balance_adjustment(env: Env, resource_type: Symbol) -> Option<BalanceAdjustment> {
+        economics::balancer::suggest_adjustment(&env, resource_type)
+    }
+
+    pub fn apply_balance_adjustment(
+        env: Env,
+        admin: Address,
+        parameter: Symbol,
+        new_value: i128,
+        reason: Symbol,
+    ) {
+        economics::balancer::apply_adjustment(&env, &admin, parameter, new_value, reason)
+    }
+
+    pub fn generate_economic_report(env: Env) -> (i128, i128, i128) {
+        economics::balancer::generate_report(&env)
+    }
+
+    // ─── Trading System ───────────────────────────────────────────────────
+
+    pub fn place_limit_order(env: Env, trader: Address, order: LimitOrder) -> Result<u64, TradingError> {
+        trading::place_limit_order(&env, &trader, order)
+    }
+
+    pub fn cancel_limit_order(env: Env, trader: Address, order_id: u64) -> Result<(), TradingError> {
+        trading::cancel_limit_order(&env, &trader, order_id)
+    }
+
+    pub fn get_limit_order(env: Env, order_id: u64) -> Option<LimitOrder> {
+        trading::get_limit_order(&env, order_id)
+    }
+
+    pub fn get_trader_orders(env: Env, trader: Address) -> Vec<LimitOrder> {
+        trading::get_trader_orders(&env, &trader)
+    }
+
+    pub fn record_trade(env: Env, caller: Address, trade: TradeRecord) -> Result<(), TradingError> {
+        trading::record_trade(&env, &caller, trade)
+    }
+
+    pub fn get_trading_history(env: Env) -> Vec<TradeRecord> {
+        trading::get_trading_history(&env)
     }
 }
