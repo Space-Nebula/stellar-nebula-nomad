@@ -1,5 +1,7 @@
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec};
 
+use crate::reentrancy_guard::{with_guard, ReentrancyError};
+
 // ─── Error Handling ─────────────────────────────────────────────────────────
 
 #[contracterror]
@@ -22,6 +24,14 @@ pub enum ComposabilityError {
     Timeout = 7,
     /// Invalid method name or parameters.
     InvalidMethod = 8,
+    /// A cross-contract call re-entered a guarded section.
+    Reentrancy = 9,
+}
+
+impl From<ReentrancyError> for ComposabilityError {
+    fn from(_: ReentrancyError) -> Self {
+        ComposabilityError::Reentrancy
+    }
 }
 
 // ─── Response Types ─────────────────────────────────────────────────────────
@@ -60,7 +70,9 @@ impl ComposableResponse {
 /// - Sanitizes method name (max 32 chars)
 /// - Limits argument size (max 1024 bytes)
 /// - Tracks gas usage
-/// 
+/// - Holds a reentrancy guard across the external call so a malicious callee
+///   cannot re-enter this function before it completes
+///
 /// # Returns
 /// `ComposableResponse` with success flag, return data, and gas consumed
 pub fn compose_with_external_contract(
@@ -73,32 +85,37 @@ pub fn compose_with_external_contract(
     if !validate_target_address(env, target) {
         return Err(ComposabilityError::InvalidTarget);
     }
-    
+
     if !validate_method_name(env, &method) {
         return Err(ComposabilityError::InvalidMethod);
     }
-    
+
     if args.len() > 1024 {
         return Err(ComposabilityError::InputTooLarge);
     }
-    
-    // Record pre-call gas (simulated via ledger sequence)
-    let gas_start = env.ledger().sequence() as u64;
-    
-    // Note: In a real implementation, this would perform an actual cross-contract call
-    // For this example library, we simulate the composition pattern
-    // The actual cross-contract invocation would use env.invoke_contract()
-    
-    let gas_end = env.ledger().sequence() as u64;
-    let gas_used = gas_end.saturating_sub(gas_start);
-    
-    // Simulate successful call with empty response data
-    let response_data = Bytes::new(env);
-    
-    // Emit trace event if enabled
-    emit_composition_trace(env, target, &method, true, gas_used);
-    
-    Ok(ComposableResponse::new(env, true, response_data, gas_used))
+
+    // The external call is performed inside the reentrancy guard: if the callee
+    // attempts to call back into this function the nested invocation observes
+    // the lock and is rejected with `ComposabilityError::Reentrancy`.
+    with_guard(env, || {
+        // Record pre-call gas (simulated via ledger sequence)
+        let gas_start = env.ledger().sequence() as u64;
+
+        // Note: In a real implementation, this would perform an actual cross-contract call
+        // For this example library, we simulate the composition pattern
+        // The actual cross-contract invocation would use env.invoke_contract()
+
+        let gas_end = env.ledger().sequence() as u64;
+        let gas_used = gas_end.saturating_sub(gas_start);
+
+        // Simulate successful call with empty response data
+        let response_data = Bytes::new(env);
+
+        // Emit trace event if enabled
+        emit_composition_trace(env, target, &method, true, gas_used);
+
+        Ok(ComposableResponse::new(env, true, response_data, gas_used))
+    })
 }
 
 /// Validates and sanitizes a composable response.
