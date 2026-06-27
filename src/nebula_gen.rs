@@ -58,6 +58,10 @@ pub struct NebulaLayout {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
+/// Default time-to-live for an active layout: 24 hours (in ledger seconds).
+/// After this window a layout is considered stale and eligible for cleanup.
+pub const DEFAULT_LAYOUT_TTL: u64 = 86_400;
+
 /// Configurable nebula generation parameters (updatable by admin).
 #[derive(Clone)]
 #[contracttype]
@@ -69,6 +73,10 @@ pub struct NebulaConfig {
     pub min_size: u32,
     /// Absolute maximum anomalies per layout
     pub max_size: u32,
+    /// Lifetime of an active layout in seconds. A layout older than
+    /// `generated_at + layout_ttl` is treated as expired and cleaned up on the
+    /// next access or by an admin sweep, bounding long-term storage growth.
+    pub layout_ttl: u64,
 }
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
@@ -100,6 +108,8 @@ pub enum NebulaError {
     LayoutNotFound     = 5,
     /// Requested nebula size is outside the configured [min_size, max_size] range
     InvalidSize        = 6,
+    /// Provided layout TTL is zero / invalid
+    InvalidTtl         = 7,
 }
 
 // ─── PRNG Engine ─────────────────────────────────────────────────────────────
@@ -186,6 +196,13 @@ fn u64_to_anomaly_type(v: u64) -> AnomalyType {
     }
 }
 
+/// Returns `true` when a layout generated at `generated_at` has outlived
+/// `ttl` seconds relative to `now`. Saturating addition keeps a very large TTL
+/// from overflowing into a false "expired" result.
+fn is_expired(now: u64, generated_at: u64, ttl: u64) -> bool {
+    now > generated_at.saturating_add(ttl)
+}
+
 // ─── Contract ─────────────────────────────────────────────────────────────────
 
 #[contract]
@@ -200,12 +217,15 @@ impl NebulaGen {
     /// # Parameters
     /// - `default_size` – anomalies per layout (clamped to [min_size, max_size])
     /// - `min_size` / `max_size` – hard bounds for future size updates
+    /// - `layout_ttl` – lifetime of an active layout in seconds; pass `0` to use
+    ///   [`DEFAULT_LAYOUT_TTL`]
     pub fn init(
         env: Env,
         admin: Address,
         default_size: u32,
         min_size: u32,
         max_size: u32,
+        layout_ttl: u64,
     ) -> Result<(), NebulaError> {
         if env.storage().instance().has(&DataKey::Config) {
             return Err(NebulaError::AlreadyInitialized);
@@ -214,10 +234,11 @@ impl NebulaGen {
         if min_size == 0 || min_size > max_size {
             return Err(NebulaError::InvalidSize);
         }
+        let ttl = if layout_ttl == 0 { DEFAULT_LAYOUT_TTL } else { layout_ttl };
         let clamped = default_size.max(min_size).min(max_size);
         env.storage().instance().set(
             &DataKey::Config,
-            &NebulaConfig { admin, default_size: clamped, min_size, max_size },
+            &NebulaConfig { admin, default_size: clamped, min_size, max_size, layout_ttl: ttl },
         );
         Ok(())
     }
@@ -298,6 +319,16 @@ impl NebulaGen {
             .persistent()
             .set(&DataKey::ActiveLayout(ship_id), &layout);
 
+        // Tie storage rent to the configured logical TTL so the entry is not
+        // kept alive (and paid for) far beyond its useful lifetime. TTL is in
+        // seconds; convert to ledgers (~5s each).
+        let ttl_ledgers = (config.layout_ttl / 5) as u32;
+        env.storage().persistent().extend_ttl(
+            &DataKey::ActiveLayout(ship_id),
+            ttl_ledgers,
+            ttl_ledgers,
+        );
+
         // Emit NebulaGenerated
         env.events().publish(
             (symbol_short!("neb_gen"), caller),
@@ -310,33 +341,32 @@ impl NebulaGen {
     // ── Queries ───────────────────────────────────────────────────────────────
 
     /// Return a single anomaly by index from the active layout of `ship_id`.
+    ///
+    /// If the active layout has expired it is cleaned up and treated as absent.
     pub fn query_anomaly(
         env: Env,
         ship_id: u64,
         index: u32,
     ) -> Result<Anomaly, NebulaError> {
-        let layout = Self::require_layout(&env, ship_id)?;
+        let layout = Self::get_live_layout(&env, ship_id).ok_or(NebulaError::LayoutNotFound)?;
         layout.anomalies.get(index).ok_or(NebulaError::InvalidIndex)
     }
 
     /// Return `true` when `anomaly_index` is a valid index in the active layout
     /// for `ship_id`.  Called cross-contract by the Resource Minter.
+    ///
+    /// Expired layouts are cleaned up and reported as absent.
     pub fn has_anomaly(env: Env, ship_id: u64, anomaly_index: u32) -> bool {
-        match env
-            .storage()
-            .persistent()
-            .get::<DataKey, NebulaLayout>(&DataKey::ActiveLayout(ship_id))
-        {
+        match Self::get_live_layout(&env, ship_id) {
             Some(l) => anomaly_index < l.size,
             None => false,
         }
     }
 
-    /// Return the full active layout for `ship_id`, or `None` if none exists.
+    /// Return the full active layout for `ship_id`, or `None` if none exists
+    /// or it has expired. Expired entries are removed lazily on access.
     pub fn get_layout(env: Env, ship_id: u64) -> Option<NebulaLayout> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::ActiveLayout(ship_id))
+        Self::get_live_layout(&env, ship_id)
     }
 
     pub fn get_config(env: Env) -> Option<NebulaConfig> {
@@ -357,6 +387,41 @@ impl NebulaGen {
         Ok(())
     }
 
+    /// Update the active-layout TTL (seconds). Must be non-zero. Admin only.
+    pub fn update_layout_ttl(env: Env, new_ttl: u64) -> Result<(), NebulaError> {
+        let mut config = Self::require_config(&env)?;
+        config.admin.require_auth();
+        if new_ttl == 0 {
+            return Err(NebulaError::InvalidTtl);
+        }
+        config.layout_ttl = new_ttl;
+        env.storage().instance().set(&DataKey::Config, &config);
+        Ok(())
+    }
+
+    /// Manually remove the active layout for `ship_id` **iff** it has expired.
+    /// Admin only. Returns `true` when an expired layout was removed.
+    pub fn clean_expired_layout(env: Env, ship_id: u64) -> Result<bool, NebulaError> {
+        let config = Self::require_config(&env)?;
+        config.admin.require_auth();
+        Ok(Self::remove_if_expired(&env, &config, ship_id))
+    }
+
+    /// Manually sweep a batch of ship layouts, removing any that have expired.
+    /// Admin only. Returns the number of layouts removed.
+    pub fn clean_expired_layouts(env: Env, ship_ids: Vec<u64>) -> Result<u32, NebulaError> {
+        let config = Self::require_config(&env)?;
+        config.admin.require_auth();
+        let mut removed = 0u32;
+        for i in 0..ship_ids.len() {
+            let ship_id = ship_ids.get(i).unwrap();
+            if Self::remove_if_expired(&env, &config, ship_id) {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     fn require_config(env: &Env) -> Result<NebulaConfig, NebulaError> {
@@ -366,10 +431,147 @@ impl NebulaGen {
             .ok_or(NebulaError::NotInitialized)
     }
 
-    fn require_layout(env: &Env, ship_id: u64) -> Result<NebulaLayout, NebulaError> {
-        env.storage()
+    /// Fetch the active layout for `ship_id`, transparently removing and
+    /// reporting `None` if it has expired. Falls back to the default TTL when
+    /// the contract has not been initialised (defensive for view calls).
+    fn get_live_layout(env: &Env, ship_id: u64) -> Option<NebulaLayout> {
+        let layout: NebulaLayout = env
+            .storage()
             .persistent()
-            .get(&DataKey::ActiveLayout(ship_id))
-            .ok_or(NebulaError::LayoutNotFound)
+            .get(&DataKey::ActiveLayout(ship_id))?;
+        let ttl = match env.storage().instance().get::<DataKey, NebulaConfig>(&DataKey::Config) {
+            Some(c) => c.layout_ttl,
+            None => DEFAULT_LAYOUT_TTL,
+        };
+        if is_expired(env.ledger().timestamp(), layout.generated_at, ttl) {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::ActiveLayout(ship_id));
+            env.events().publish(
+                (symbol_short!("neb_gen"), symbol_short!("expired")),
+                ship_id,
+            );
+            return None;
+        }
+        Some(layout)
+    }
+
+    /// Remove the active layout for `ship_id` if expired under `config`.
+    fn remove_if_expired(env: &Env, config: &NebulaConfig, ship_id: u64) -> bool {
+        let layout: Option<NebulaLayout> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ActiveLayout(ship_id));
+        match layout {
+            Some(l) if is_expired(env.ledger().timestamp(), l.generated_at, config.layout_ttl) => {
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::ActiveLayout(ship_id));
+                env.events().publish(
+                    (symbol_short!("neb_gen"), symbol_short!("cleaned")),
+                    ship_id,
+                );
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn require_layout(env: &Env, ship_id: u64) -> Result<NebulaLayout, NebulaError> {
+        Self::get_live_layout(env, ship_id).ok_or(NebulaError::LayoutNotFound)
+    }
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::{Address as _, Ledger, LedgerInfo};
+    use soroban_sdk::{Address, BytesN, Env, Vec};
+
+    const SHORT_TTL: u64 = 100; // seconds
+
+    fn ledger_info(seq: u32, ts: u64) -> LedgerInfo {
+        LedgerInfo {
+            protocol_version: 22,
+            sequence_number: seq,
+            timestamp: ts,
+            network_id: [0u8; 32],
+            base_reserve: 10,
+            min_temp_entry_ttl: 16,
+            min_persistent_entry_ttl: 16,
+            max_entry_ttl: 100_000,
+        }
+    }
+
+    fn setup() -> (Env, NebulaGenClient<'static>, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set(ledger_info(1, 1_000));
+        let id = env.register(NebulaGen, ());
+        let client = NebulaGenClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        client.init(&admin, &5u32, &1u32, &10u32, &SHORT_TTL);
+        (env, client, admin)
+    }
+
+    fn gen_layout(env: &Env, client: &NebulaGenClient, ship_id: u64) {
+        let caller = Address::generate(env);
+        let seed = BytesN::from_array(env, &[42u8; 32]);
+        client.generate_nebula_layout(&caller, &ship_id, &1u64, &seed);
+    }
+
+    #[test]
+    fn layout_available_before_expiry() {
+        let (env, client, _) = setup();
+        gen_layout(&env, &client, 7);
+        assert!(client.get_layout(&7).is_some());
+    }
+
+    #[test]
+    fn layout_auto_cleaned_after_expiry() {
+        let (env, client, _) = setup();
+        gen_layout(&env, &client, 7);
+        // Advance wall-clock past the TTL without aging out storage rent.
+        env.ledger().set(ledger_info(2, 1_000 + SHORT_TTL + 1));
+        assert!(client.get_layout(&7).is_none());
+        // Entry is physically removed, not just hidden.
+        assert!(client.has_anomaly(&7, &0) == false);
+    }
+
+    #[test]
+    fn admin_can_clean_expired_layout() {
+        let (env, client, _) = setup();
+        gen_layout(&env, &client, 7);
+        env.ledger().set(ledger_info(2, 1_000 + SHORT_TTL + 1));
+        assert_eq!(client.clean_expired_layout(&7), true);
+        // Cleaning an already-removed / non-expired ship reports false.
+        assert_eq!(client.clean_expired_layout(&7), false);
+    }
+
+    #[test]
+    fn admin_batch_cleanup_counts_removed() {
+        let (env, client, _) = setup();
+        for ship in [10u64, 11, 12] {
+            gen_layout(&env, &client, ship);
+        }
+        env.ledger().set(ledger_info(2, 1_000 + SHORT_TTL + 1));
+        let mut ships = Vec::new(&env);
+        ships.push_back(10u64);
+        ships.push_back(11u64);
+        ships.push_back(12u64);
+        assert_eq!(client.clean_expired_layouts(&ships), 3u32);
+    }
+
+    #[test]
+    fn admin_can_update_ttl() {
+        let (env, client, _) = setup();
+        gen_layout(&env, &client, 7);
+        // Extend TTL well past the elapsed time; layout stays live.
+        client.update_layout_ttl(&1_000_000u64);
+        env.ledger().set(ledger_info(2, 1_000 + SHORT_TTL + 1));
+        assert!(client.get_layout(&7).is_some());
     }
 }

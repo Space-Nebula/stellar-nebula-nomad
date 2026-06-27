@@ -92,6 +92,11 @@ mod economics;
 mod gas_optimized_storage;
 mod gas_optimized_compute;
 
+// Cross-contract safety: reentrancy guard + composable call helpers.
+mod reentrancy_guard;
+mod composability_examples;
+pub use reentrancy_guard::ReentrancyError;
+
 pub use analytics::{AnalyticsError, GlobalStats};
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
