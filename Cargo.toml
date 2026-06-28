@@ -24,13 +24,30 @@ fuzz = ["soroban-sdk/testutils"]
 
 [dependencies]
 soroban-sdk = "22.0"
-arrayvec = { version = "0.7", default-features = false }
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0", features = ["testutils"] }
 proptest = "1.6"
 
 [profile.release]
+# Optimize strictly for binary size — critical for Soroban WASM deployment.
 opt-level = "z"
+# Link-time optimization across all crates to eliminate dead code globally.
 lto = true
+# Single codegen unit maximizes cross-crate optimization passes.
 codegen-units = 1
+# Strip panic string formatting and backtrace logic from the WASM binary.
+panic = "abort"
+# Incremental compilation disabled for release — ensures clean LTO passes.
+incremental = false
+# Strip debug symbols and DWARF sections from the final artifact.
+strip = true
+# Compact general allocator to reduce binary overhead.
+overflow-checks = false
+
+# ─── Profile for post-build wasm-opt processing ───────────────────────────
+# When `wasm-opt -Oz` is run downstream (e.g. in deploy.sh), this profile
+# ensures the input artifact has no debug metadata or symbol bloat that would
+# interfere with wasm-opt's size-reduction passes.
+[profile.release-with-opt]
+inherits = "release"
