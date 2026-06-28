@@ -53,6 +53,12 @@ pub enum ContentDataKey {
     MarketplaceListing(u64),
     /// Marketplace counter.
     MarketplaceCounter,
+    /// Creator revenue balance (accumulated from purchases).
+    CreatorRevenue(Address),
+    /// Platform revenue balance.
+    PlatformRevenue,
+    /// Revenue split configuration (creator_bps, platform_bps).
+    RevenueSplitConfig,
 }
 
 // ── Data Types ────────────────────────────────────────────────────────────────
@@ -79,6 +85,8 @@ pub struct CreatedContent {
     pub is_verified: bool,
     pub play_count: u64,
     pub rating: u32,
+    /// Price in stroops for purchasing this content (0 = not for sale, Issue #192).
+    pub price: i128,
 }
 
 #[contracttype]
@@ -101,6 +109,14 @@ pub struct VoteResult {
     pub rating_count: u32,
     pub average_rating: u32,
 }
+
+// ── Revenue Sharing (Issue #192) ──────────────────────────────────────────────
+
+/// Default revenue split basis points: creator gets 8500 (85%), platform gets 1500 (15%).
+pub const DEFAULT_CREATOR_SHARE_BPS: u64 = 8500;
+pub const DEFAULT_PLATFORM_SHARE_BPS: u64 = 1500;
+/// Maximum price for content purchases.
+pub const MAX_CONTENT_PRICE: i128 = 1_000_000_000_000;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -191,6 +207,7 @@ pub fn create_content(
         is_verified: false,
         play_count: 0,
         rating: 0,
+        price: 0,
     };
 
     env.storage()
@@ -611,6 +628,209 @@ pub fn get_marketplace_listing(
         .persistent()
         .get(&key)
         .ok_or(ContentToolsError::ContentNotFound)
+}
+
+// ── Revenue Sharing (Issue #192) ─────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RevenueSplitConfig {
+    /// Creator share in basis points (e.g. 8500 = 85%).
+    pub creator_share_bps: u64,
+    /// Platform share in basis points (e.g. 1500 = 15%).
+    pub platform_share_bps: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PurchaseResult {
+    pub content_id: u64,
+    pub buyer: Address,
+    pub price: i128,
+    pub creator_share: i128,
+    pub platform_share: i128,
+}
+
+/// Get the current revenue split configuration.
+pub fn get_revenue_split_config(env: &Env) -> RevenueSplitConfig {
+    env.storage()
+        .persistent()
+        .get(&ContentDataKey::RevenueSplitConfig)
+        .unwrap_or(RevenueSplitConfig {
+            creator_share_bps: DEFAULT_CREATOR_SHARE_BPS,
+            platform_share_bps: DEFAULT_PLATFORM_SHARE_BPS,
+        })
+}
+
+/// Set the revenue split configuration (admin only).
+pub fn set_revenue_split_config(
+    env: &Env,
+    caller: &Address,
+    config: RevenueSplitConfig,
+) -> Result<(), ContentToolsError> {
+    require_admin(env, caller)?;
+    env.storage()
+        .persistent()
+        .set(&ContentDataKey::RevenueSplitConfig, &config);
+    Ok(())
+}
+
+/// Set the price of a content item (creator only).
+pub fn set_content_price(
+    env: &Env,
+    creator: &Address,
+    content_id: u64,
+    price: i128,
+) -> Result<(), ContentToolsError> {
+    creator.require_auth();
+
+    if price < 0 || price > MAX_CONTENT_PRICE {
+        return Err(ContentToolsError::InvalidContent);
+    }
+
+    let key = ContentDataKey::Content(content_id);
+    let mut content: CreatedContent = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(ContentToolsError::ContentNotFound)?;
+
+    if content.creator != *creator {
+        return Err(ContentToolsError::Unauthorized);
+    }
+
+    content.price = price;
+    env.storage().persistent().set(&key, &content);
+
+    env.events().publish(
+        (symbol_short!("ct"), symbol_short!("price")),
+        (content_id, price),
+    );
+
+    Ok(())
+}
+
+/// Purchase content. The buyer pays the price, revenue is split between creator and platform.
+/// The buyer gains access to the content.
+pub fn purchase_content(
+    env: &Env,
+    buyer: &Address,
+    content_id: u64,
+) -> Result<PurchaseResult, ContentToolsError> {
+    buyer.require_auth();
+
+    let key = ContentDataKey::Content(content_id);
+    let content: CreatedContent = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(ContentToolsError::ContentNotFound)?;
+
+    if content.price <= 0 {
+        return Err(ContentToolsError::InvalidContent);
+    }
+
+    let status = get_content_status(env, content_id);
+    if status != symbol_short!("approved") {
+        return Err(ContentToolsError::UnderReview);
+    }
+
+    // Calculate revenue split
+    let config = get_revenue_split_config(env);
+    let creator_share = content.price * (config.creator_share_bps as i128) / 10000;
+    let platform_share = content.price * (config.platform_share_bps as i128) / 10000;
+
+    // Verify total matches (handle rounding)
+    debug_assert!(
+        creator_share + platform_share <= content.price,
+        "revenue split exceeds price"
+    );
+
+    // Credit creator revenue
+    let creator_rev_key = ContentDataKey::CreatorRevenue(content.creator.clone());
+    let creator_balance: i128 = env.storage().persistent().get(&creator_rev_key).unwrap_or(0);
+    env.storage()
+        .persistent()
+        .set(&creator_rev_key, &(creator_balance + creator_share));
+
+    // Credit platform revenue
+    let platform_balance: i128 = env
+        .storage()
+        .persistent()
+        .get(&ContentDataKey::PlatformRevenue)
+        .unwrap_or(0);
+    env.storage()
+        .persistent()
+        .set(&ContentDataKey::PlatformRevenue, &(platform_balance + platform_share));
+
+    let content_price = content.price;
+
+    // Increment play count
+    let mut updated_content = content;
+    updated_content.play_count += 1;
+    env.storage().persistent().set(&key, &updated_content);
+
+    let result = PurchaseResult {
+        content_id,
+        buyer: buyer.clone(),
+        price: content_price,
+        creator_share,
+        platform_share,
+    };
+
+    env.events().publish(
+        (symbol_short!("ct"), symbol_short!("purchased")),
+        (content_id, buyer.clone(), content_price, creator_share, platform_share),
+    );
+
+    Ok(result)
+}
+
+/// Get the accumulated revenue balance for a creator.
+pub fn get_creator_revenue(env: &Env, creator: &Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&ContentDataKey::CreatorRevenue(creator.clone()))
+        .unwrap_or(0)
+}
+
+/// Get the accumulated platform revenue balance.
+pub fn get_platform_revenue(env: &Env) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&ContentDataKey::PlatformRevenue)
+        .unwrap_or(0)
+}
+
+/// Withdraw creator revenue (creator only).
+pub fn withdraw_creator_revenue(
+    env: &Env,
+    creator: &Address,
+    amount: i128,
+) -> Result<i128, ContentToolsError> {
+    creator.require_auth();
+
+    if amount <= 0 {
+        return Err(ContentToolsError::InvalidContent);
+    }
+
+    let rev_key = ContentDataKey::CreatorRevenue(creator.clone());
+    let balance: i128 = env.storage().persistent().get(&rev_key).unwrap_or(0);
+
+    if balance < amount {
+        return Err(ContentToolsError::InvalidContent);
+    }
+
+    env.storage()
+        .persistent()
+        .set(&rev_key, &(balance - amount));
+
+    env.events().publish(
+        (symbol_short!("ct"), symbol_short!("withdraw")),
+        (creator.clone(), amount),
+    );
+
+    Ok(balance - amount)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
