@@ -1,0 +1,10 @@
+# ABIs Directory
+#
+# Place the compiled StellarNebulaNomad contract ABI JSON here:
+#   StellarNebulaNomad.json
+#
+# Generate it from your Soroban contract with:
+#   soroban contract bindings typescript --wasm <path-to-wasm> --output-dir .
+#
+# Then copy the generated ABI file here:
+#   cp StellarNebulaNomad.json ./abis/
