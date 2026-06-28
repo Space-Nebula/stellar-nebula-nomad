@@ -61,6 +61,10 @@ pub enum PvPDataKey {
     RewardsConfig,
     /// Admin address.
     Admin,
+    /// Last active timestamp for a player (Issue #191).
+    LastActive(Address),
+    /// ELO decay configuration.
+    EloDecayConfig,
 }
 
 // ── Data Types ────────────────────────────────────────────────────────────────
@@ -151,6 +155,17 @@ pub struct SpectatorInfo {
     pub max_spectators: u32,
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct EloDecayConfig {
+    /// Seconds of inactivity before decay starts.
+    pub inactivity_secs: u64,
+    /// Points lost per decay event.
+    pub decay_points: u32,
+    /// Minimum ELO (floor).
+    pub floor: u32,
+}
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 pub const INITIAL_ELO: u32 = 1200;
@@ -161,6 +176,13 @@ pub const COMBAT_TIMEOUT: u64 = 3600; // 1 hour
 pub const CHALLENGE_EXPIRY: u64 = 86400; // 24 hours
 pub const MAX_SPECTATORS: u32 = 50;
 pub const MAX_QUEUE_SIZE: u32 = 100;
+
+/// Number of seconds of inactivity before ELO decay begins (7 days).
+pub const ELO_DECAY_INACTIVITY_SECS: u64 = 604800;
+/// Base points lost per decay tick.
+pub const ELO_DECAY_BASE_POINTS: u32 = 10;
+/// Minimum ELO rating (floor below which decay is not applied).
+pub const ELO_DECAY_FLOOR: u32 = 1000;
 
 // ── Admin Functions ──────────────────────────────────────────────────────────
 
@@ -190,7 +212,7 @@ fn require_admin(env: &Env, caller: &Address) -> Result<(), PvPError> {
 
 pub fn get_or_init_stats(env: &Env, player: &Address) -> CombatStats {
     let key = PvPDataKey::PlayerStats(player.clone());
-    env.storage()
+    let stats = env.storage()
         .persistent()
         .get(&key)
         .unwrap_or(CombatStats {
@@ -201,7 +223,17 @@ pub fn get_or_init_stats(env: &Env, player: &Address) -> CombatStats {
             total_damage_received: 0,
             elo_rating: INITIAL_ELO,
             combat_count: 0,
-        })
+        });
+
+    // Apply ELO decay on any access
+    apply_elo_decay(env, player);
+    update_last_active(env, player);
+
+    // Re-read after decay may have modified ELO
+    env.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(stats)
 }
 
 pub fn update_stats(env: &Env, player: &Address, stats: &CombatStats) {
@@ -238,6 +270,110 @@ fn calculate_elo_change(winner_rating: u32, loser_rating: u32) -> (u32, u32) {
     (winner_change, loser_change)
 }
 
+// ── ELO Decay (Issue #191) ─────────────────────────────────────────────────
+
+/// Track the last active timestamp for a player. Called on any PvP action.
+pub fn update_last_active(env: &Env, player: &Address) {
+    let key = PvPDataKey::LastActive(player.clone());
+    env.storage()
+        .persistent()
+        .set(&key, &env.ledger().timestamp());
+}
+
+/// Get the last active timestamp for a player.
+pub fn get_last_active(env: &Env, player: &Address) -> u64 {
+    let key = PvPDataKey::LastActive(player.clone());
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+/// Set the ELO decay configuration (admin only).
+pub fn set_elo_decay_config(
+    env: &Env,
+    caller: &Address,
+    config: EloDecayConfig,
+) -> Result<(), PvPError> {
+    require_admin(env, caller)?;
+    env.storage()
+        .persistent()
+        .set(&PvPDataKey::EloDecayConfig, &config);
+    Ok(())
+}
+
+/// Get the current ELO decay configuration.
+pub fn get_elo_decay_config(env: &Env) -> EloDecayConfig {
+    env.storage()
+        .persistent()
+        .get(&PvPDataKey::EloDecayConfig)
+        .unwrap_or(EloDecayConfig {
+            inactivity_secs: ELO_DECAY_INACTIVITY_SECS,
+            decay_points: ELO_DECAY_BASE_POINTS,
+            floor: ELO_DECAY_FLOOR,
+        })
+}
+
+/// Apply ELO decay for a player based on their last active timestamp.
+/// Returns the new ELO rating after decay (or the same if no decay applied).
+pub fn apply_elo_decay(env: &Env, player: &Address) -> u32 {
+    let now = env.ledger().timestamp();
+    let last_active = get_last_active(env, player);
+
+    if last_active == 0 {
+        // Never been active — no decay
+        return get_elo_rating(env, player);
+    }
+
+    let inactive_duration = now.saturating_sub(last_active);
+    let config = get_elo_decay_config(env);
+
+    if inactive_duration < config.inactivity_secs {
+        return get_elo_rating(env, player);
+    }
+
+    // Calculate how many full decay periods have elapsed
+    let periods = inactive_duration / config.inactivity_secs;
+    let total_decay = (config.decay_points as u64)
+        .saturating_mul(periods as u64) as u32;
+
+    let current_elo = get_elo_rating(env, player);
+    let new_elo = current_elo.saturating_sub(total_decay).max(config.floor);
+
+    if new_elo != current_elo {
+        update_elo_rating(env, player, new_elo);
+        // Reset the decay timer
+        update_last_active(env, player);
+
+        env.events().publish(
+            (symbol_short!("pvp"), symbol_short!("elo_decay")),
+            (player.clone(), current_elo, new_elo),
+        );
+    }
+
+    new_elo
+}
+
+/// Apply decay to all players in a batch (admin / cron call).
+/// Returns the number of players whose ELO was affected.
+pub fn apply_batch_elo_decay(
+    env: &Env,
+    caller: &Address,
+    players: Vec<Address>,
+) -> Result<u32, PvPError> {
+    require_admin(env, caller)?;
+
+    let mut affected = 0u32;
+    for i in 0..players.len() {
+        if let Some(player) = players.get(i) {
+            let before = get_elo_rating(env, &player);
+            let after = apply_elo_decay(env, &player);
+            if after != before {
+                affected += 1;
+            }
+        }
+    }
+
+    Ok(affected)
+}
+
 // ── Challenge System ────────────────────────────────────────────────────────
 
 pub fn create_challenge(
@@ -250,6 +386,9 @@ pub fn create_challenge(
 
     // Check if opponent exists (has stats)
     let _ = get_or_init_stats(env, opponent);
+
+    // Track last active
+    update_last_active(env, challenger);
 
     // Generate challenge ID
     let counter: u64 = env
@@ -316,6 +455,10 @@ pub fn accept_challenge(
 
     challenge.status = symbol_short!("accepted");
     env.storage().persistent().set(&key, &challenge);
+
+    // Track last active
+    update_last_active(env, caller);
+    update_last_active(env, &challenge.challenger);
 
     // Start combat
     start_combat(env, &challenge.challenger, caller, challenge_id)
@@ -437,6 +580,9 @@ pub fn execute_move(
     if combat.turn != *player {
         return Err(PvPError::InvalidMove);
     }
+
+    // Track last active
+    update_last_active(env, player);
 
     // Check timeout
     if env.ledger().timestamp() > combat.started_at + COMBAT_TIMEOUT {
@@ -665,6 +811,9 @@ pub fn join_matchmaking(
     preferred_stake: i128,
 ) -> Result<(), PvPError> {
     player.require_auth();
+
+    // Track last active
+    update_last_active(env, player);
 
     let mut queue: Vec<MatchmakingEntry> = env
         .storage()

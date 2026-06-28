@@ -135,10 +135,11 @@ pub use content_tools::{
 };
 pub use pvp_combat::{
     CombatStats, Challenge, CombatState, CombatMove, CombatHistory,
-    MatchmakingEntry, RewardsConfig, SpectatorInfo,
+    MatchmakingEntry, RewardsConfig, SpectatorInfo, EloDecayConfig,
     PvPError,
     INITIAL_ELO, K_FACTOR, MAX_HP, MAX_ENERGY, COMBAT_TIMEOUT,
     MAX_SPECTATORS, MAX_QUEUE_SIZE,
+    ELO_DECAY_INACTIVITY_SECS, ELO_DECAY_BASE_POINTS, ELO_DECAY_FLOOR,
 };
 
 pub use batch_processor::{
@@ -716,6 +717,41 @@ impl NebulaNomadContract {
     /// Get matchmaking queue size.
     pub fn get_matchmaking_queue_size(env: Env) -> u32 {
         pvp_combat::get_matchmaking_queue_size(&env)
+    }
+
+    // ─── ELO Decay (Issue #191) ─────────────────────────────────────────────
+
+    /// Apply ELO decay for a player based on inactivity.
+    pub fn apply_elo_decay(env: Env, player: Address) -> u32 {
+        pvp_combat::apply_elo_decay(&env, &player)
+    }
+
+    /// Get the last active timestamp for a player.
+    pub fn get_last_active(env: Env, player: Address) -> u64 {
+        pvp_combat::get_last_active(&env, &player)
+    }
+
+    /// Set ELO decay configuration (admin only).
+    pub fn set_elo_decay_config(
+        env: Env,
+        caller: Address,
+        config: EloDecayConfig,
+    ) -> Result<(), PvPError> {
+        pvp_combat::set_elo_decay_config(&env, &caller, config)
+    }
+
+    /// Get ELO decay configuration.
+    pub fn get_elo_decay_config(env: Env) -> EloDecayConfig {
+        pvp_combat::get_elo_decay_config(&env)
+    }
+
+    /// Apply batch ELO decay (admin only).
+    pub fn apply_batch_elo_decay(
+        env: Env,
+        caller: Address,
+        players: Vec<Address>,
+    ) -> Result<u32, PvPError> {
+        pvp_combat::apply_batch_elo_decay(&env, &caller, players)
     }
 
     /// Add spectator to combat.
