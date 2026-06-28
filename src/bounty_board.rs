@@ -61,6 +61,8 @@ pub struct Bounty {
     pub created_at: u64,
     pub claimer: Option<Address>,
     pub proof_hash: Option<BytesN<32>>,
+    pub approved: bool,
+    pub disputed: bool,
 }
 
 /// ─── Public API ─────────────────────────────────────────────────────────────
@@ -134,6 +136,8 @@ pub fn post_bounty(
         created_at: env.ledger().timestamp(),
         claimer: None,
         proof_hash: None,
+        approved: false,
+        disputed: false,
     };
 
     env.storage()
@@ -183,9 +187,6 @@ pub fn claim_bounty(
         return Err(BountyError::InvalidProof);
     }
 
-    // In a real implementation, you would verify the proof against the task requirements.
-    // Here we accept any non-zero proof.
-    bounty.claimed = true;
     bounty.claimer = Some(claimer.clone());
     bounty.proof_hash = Some(proof);
 
@@ -193,17 +194,38 @@ pub fn claim_bounty(
         .instance()
         .set(&BountyKey::Bounty(bounty_id), &bounty);
 
-    // Emit BountyClaimed event; actual reward distribution would be handled via token interface.
     env.events().publish(
-        (symbol_short!("bounty"), symbol_short!("claimed")),
+        (symbol_short!("bounty"), symbol_short!("proof_sub")),
         (
             claimer.clone(),
             bounty_id,
-            bounty.reward,
             now,
         ),
     );
 
+    Ok(bounty)
+}
+
+pub fn approve_bounty(env: &Env, poster: &Address, bounty_id: u64) -> Result<Bounty, BountyError> {
+    poster.require_auth();
+    let mut bounty: Bounty = env.storage().instance().get(&BountyKey::Bounty(bounty_id)).ok_or(BountyError::BountyNotFound)?;
+    if bounty.poster != *poster { return Err(BountyError::NotPoster); }
+    if bounty.claimer.is_none() { return Err(BountyError::InvalidProof); }
+    if bounty.disputed { return Err(BountyError::AlreadyClaimed); }
+    
+    bounty.claimed = true;
+    bounty.approved = true;
+    env.storage().instance().set(&BountyKey::Bounty(bounty_id), &bounty);
+    Ok(bounty)
+}
+
+pub fn dispute_bounty(env: &Env, poster: &Address, bounty_id: u64) -> Result<Bounty, BountyError> {
+    poster.require_auth();
+    let mut bounty: Bounty = env.storage().instance().get(&BountyKey::Bounty(bounty_id)).ok_or(BountyError::BountyNotFound)?;
+    if bounty.poster != *poster { return Err(BountyError::NotPoster); }
+    
+    bounty.disputed = true;
+    env.storage().instance().set(&BountyKey::Bounty(bounty_id), &bounty);
     Ok(bounty)
 }
 
