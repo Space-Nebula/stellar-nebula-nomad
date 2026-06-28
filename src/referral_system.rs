@@ -1,7 +1,8 @@
 use soroban_sdk::{contracttype, contracterror, symbol_short, Address, Env};
 
-/// Essence bonus distributed to the referrer after the new nomad's first scan.
-pub const ESSENCE_REWARD: i128 = 100;
+/// Default essence bonus distributed to the referrer after the new nomad's first scan.
+/// Overridable at runtime via `set_reward_config`.
+pub const DEFAULT_ESSENCE_REWARD: i128 = 100;
 /// Maximum number of rewards a referrer may claim in a single calendar day.
 pub const MAX_DAILY_CLAIMS: u32 = 10;
 /// Seconds in one day — used to derive the current day bucket.
@@ -18,6 +19,12 @@ pub enum ReferralKey {
     ReferralCount,
     /// Daily claim counter: (referrer, day_number) → u32.
     DailyClaims(Address, u64),
+    /// Lifetime essence rewarded per referrer address.
+    LifetimeRewards(Address),
+    /// Global reward pool balance (essence held for distribution).
+    RewardPool,
+    /// Reward configuration: fixed amount per claim.
+    RewardConfig,
 }
 
 // ─── Data Types ───────────────────────────────────────────────────────────────
@@ -36,6 +43,14 @@ pub struct Referral {
     pub first_scan_done: bool,
 }
 
+/// Admin-configurable reward settings.
+#[derive(Clone)]
+#[contracttype]
+pub struct RewardConfig {
+    /// Fixed essence amount paid out per successful referral claim.
+    pub reward_per_claim: i128,
+}
+
 // ─── Errors ───────────────────────────────────────────────────────────────────
 
 #[contracterror]
@@ -47,9 +62,77 @@ pub enum ReferralError {
     AlreadyClaimed = 4,
     FirstScanNotDone = 5,
     DailyClaimCapReached = 6,
+    InsufficientRewardPool = 7,
 }
 
-// ─── Functions ────────────────────────────────────────────────────────────────
+// ─── Admin Functions ──────────────────────────────────────────────────────────
+
+/// Deposit `amount` essence into the global reward pool.
+///
+/// Only callable by an authorised admin address. The pool balance must be
+/// positive before referral rewards can be claimed.
+pub fn fund_reward_pool(env: &Env, admin: Address, amount: i128) -> Result<i128, ReferralError> {
+    admin.require_auth();
+
+    let current: i128 = env
+        .storage()
+        .instance()
+        .get(&ReferralKey::RewardPool)
+        .unwrap_or(0i128);
+    let new_balance = current + amount;
+    env.storage()
+        .instance()
+        .set(&ReferralKey::RewardPool, &new_balance);
+
+    env.events().publish(
+        (symbol_short!("referral"), symbol_short!("funded")),
+        (admin, amount, new_balance),
+    );
+
+    Ok(new_balance)
+}
+
+/// Update the per-claim reward amount.
+///
+/// Only callable by an authorised admin address.
+pub fn set_reward_config(
+    env: &Env,
+    admin: Address,
+    reward_per_claim: i128,
+) -> Result<(), ReferralError> {
+    admin.require_auth();
+
+    env.storage()
+        .instance()
+        .set(&ReferralKey::RewardConfig, &RewardConfig { reward_per_claim });
+
+    env.events().publish(
+        (symbol_short!("referral"), symbol_short!("cfg")),
+        (admin, reward_per_claim),
+    );
+
+    Ok(())
+}
+
+// ─── View Helpers ─────────────────────────────────────────────────────────────
+
+/// Return the current reward pool balance.
+pub fn get_reward_pool_balance(env: &Env) -> i128 {
+    env.storage()
+        .instance()
+        .get(&ReferralKey::RewardPool)
+        .unwrap_or(0i128)
+}
+
+/// Return lifetime essence rewards earned by `referrer`.
+pub fn get_lifetime_rewards(env: &Env, referrer: Address) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&ReferralKey::LifetimeRewards(referrer))
+        .unwrap_or(0i128)
+}
+
+// ─── Core Functions ───────────────────────────────────────────────────────────
 
 /// Record a referral from `referrer` for `new_nomad`.
 ///
@@ -129,7 +212,9 @@ pub fn mark_first_scan(env: &Env, nomad: Address) -> Result<(), ReferralError> {
 /// Distribute the essence bonus to the referrer.
 ///
 /// One-time claim per referral. Enforces a daily cap of `MAX_DAILY_CLAIMS`
-/// per referrer. Emits `RewardClaimed`. Returns the essence amount awarded.
+/// per referrer. Deducts from the global reward pool and accumulates
+/// `lifetime_rewards` for the referrer. Emits `RewardClaimed`.
+/// Returns the essence amount awarded.
 pub fn claim_referral_reward(
     env: &Env,
     referrer: Address,
@@ -151,6 +236,24 @@ pub fn claim_referral_reward(
         return Err(ReferralError::AlreadyClaimed);
     }
 
+    // Resolve configured reward amount (falls back to default if admin hasn't set it).
+    let reward_amount: i128 = env
+        .storage()
+        .instance()
+        .get::<ReferralKey, RewardConfig>(&ReferralKey::RewardConfig)
+        .map(|c| c.reward_per_claim)
+        .unwrap_or(DEFAULT_ESSENCE_REWARD);
+
+    // Verify the pool can cover the payout.
+    let pool: i128 = env
+        .storage()
+        .instance()
+        .get(&ReferralKey::RewardPool)
+        .unwrap_or(0i128);
+    if pool < reward_amount {
+        return Err(ReferralError::InsufficientRewardPool);
+    }
+
     // Enforce daily claim cap using temporary storage keyed by day bucket.
     let day = env.ledger().timestamp() / SECS_PER_DAY;
     let daily_key = ReferralKey::DailyClaims(referrer.clone(), day);
@@ -162,6 +265,22 @@ pub fn claim_referral_reward(
         .temporary()
         .set(&daily_key, &(daily_count + 1));
 
+    // Deduct from pool.
+    env.storage()
+        .instance()
+        .set(&ReferralKey::RewardPool, &(pool - reward_amount));
+
+    // Accumulate lifetime rewards for the referrer.
+    let lifetime_key = ReferralKey::LifetimeRewards(referrer.clone());
+    let lifetime: i128 = env
+        .storage()
+        .persistent()
+        .get(&lifetime_key)
+        .unwrap_or(0i128);
+    env.storage()
+        .persistent()
+        .set(&lifetime_key, &(lifetime + reward_amount));
+
     referral.claimed = true;
     env.storage()
         .persistent()
@@ -169,10 +288,10 @@ pub fn claim_referral_reward(
 
     env.events().publish(
         (symbol_short!("referral"), symbol_short!("claimed")),
-        (referrer, new_nomad, ESSENCE_REWARD),
+        (referrer, new_nomad, reward_amount),
     );
 
-    Ok(ESSENCE_REWARD)
+    Ok(reward_amount)
 }
 
 /// Retrieve a referral record by the new nomad's address.
