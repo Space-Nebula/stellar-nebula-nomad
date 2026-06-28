@@ -102,6 +102,22 @@ pub enum AccessControlError {
     InitializationFailed = 8,
     /// Not implemented: This function is a placeholder for future DAO integration.
     NotImplemented = 9,
+    /// Multi-sig not configured.
+    MultiSigNotConfigured = 10,
+    /// Proposal not found.
+    ProposalNotFound = 11,
+    /// Proposal already executed.
+    ProposalAlreadyExecuted = 12,
+    /// Proposal expired.
+    ProposalExpired = 13,
+    /// Insufficient approvals.
+    InsufficientApprovals = 14,
+    /// Already approved.
+    AlreadyApproved = 15,
+    /// Timelock not elapsed.
+    TimelockNotElapsed = 16,
+    /// Invalid signer configuration.
+    InvalidSignerConfig = 17,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -114,6 +130,10 @@ pub enum AccessControlError {
 /// - `RoleMember(role, address)`: Stores a RoleRecord indicating membership of address in role.
 /// - `RolePermission(role, action)`: Stores a boolean (or unit ()) indicating the role can perform action.
 /// - `KnownRoles`: Stores a Vec of all defined role names to enable role enumeration.
+/// - `MultiSigConfig`: Configuration for multi-signature admin operations.
+/// - `Proposal(proposal_id)`: Stores proposal data for multi-sig operations.
+/// - `ProposalApproval(proposal_id, approver)`: Records approvals for proposals.
+/// - `ProposalCounter`: Global counter for proposal IDs.
 #[derive(Clone)]
 #[contracttype]
 pub enum AccessControlKey {
@@ -125,6 +145,16 @@ pub enum AccessControlKey {
     RolePermission(Symbol, Symbol),
     /// Enumeration: All known roles (for check_permission iteration).
     KnownRoles,
+    /// Multi-signature configuration.
+    MultiSigConfig,
+    /// Proposal data keyed by proposal ID.
+    Proposal(u64),
+    /// Approval record: (proposal_id, approver) -> bool.
+    ProposalApproval(u64, Address),
+    /// Global proposal counter.
+    ProposalCounter,
+    /// List of all admin signers.
+    AdminSigners,
 }
 
 /// Record of a role membership, including expiry and revocation state.
@@ -145,6 +175,51 @@ impl RoleRecord {
             expiry_ledger,
         }
     }
+}
+
+/// Multi-signature configuration for admin operations.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct MultiSigConfig {
+    /// Number of required approvals (M in M-of-N).
+    pub required_approvals: u32,
+    /// Total number of signers (N in M-of-N).
+    pub total_signers: u32,
+    /// Timelock period in seconds for critical operations.
+    pub timelock_period: u64,
+    /// Whether multi-sig is enabled.
+    pub enabled: bool,
+}
+
+/// Proposal for multi-sig operations.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct Proposal {
+    pub proposal_id: u64,
+    pub proposer: Address,
+    pub operation: ProposalOperation,
+    pub created_at: u64,
+    pub execution_time: u64,  // When it can be executed (after timelock)
+    pub executed: bool,
+    pub approval_count: u32,
+}
+
+/// Type of operation in a proposal.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub enum ProposalOperation {
+    /// Grant a role to an address.
+    GrantRole(Symbol, Address, Option<u32>),
+    /// Revoke a role from an address.
+    RevokeRole(Symbol, Address),
+    /// Grant permission to a role.
+    GrantPermission(Symbol, Symbol),
+    /// Revoke permission from a role.
+    RevokePermission(Symbol, Symbol),
+    /// Transfer admin to a new address.
+    TransferAdmin(Address),
+    /// Update multi-sig configuration.
+    UpdateMultiSig(MultiSigConfig),
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -690,6 +765,335 @@ pub fn propose_role_change(
     proposer.require_auth();
     Err(AccessControlError::NotImplemented)
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MULTI-SIGNATURE ADMIN OPERATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Initialize multi-signature configuration for admin operations.
+///
+/// # Parameters
+/// - `admin`: Current admin address (must authorize).
+/// - `signers`: List of authorized signers.
+/// - `required_approvals`: Number of approvals needed (M in M-of-N).
+/// - `timelock_period`: Seconds to wait before execution of critical operations.
+///
+/// # Errors
+/// - `AdminRequired` if caller is not admin.
+/// - `InvalidSignerConfig` if required_approvals > signers.len() or signers is empty.
+pub fn init_multisig(
+    env: &Env,
+    admin: Address,
+    signers: Vec<Address>,
+    required_approvals: u32,
+    timelock_period: u64,
+) -> Result<(), AccessControlError> {
+    admin.require_auth();
+
+    let stored_admin = get_admin(env).ok_or(AccessControlError::InitializationFailed)?;
+    if admin != stored_admin {
+        return Err(AccessControlError::AdminRequired);
+    }
+
+    if signers.len() == 0 || required_approvals == 0 || required_approvals > signers.len() {
+        return Err(AccessControlError::InvalidSignerConfig);
+    }
+
+    let config = MultiSigConfig {
+        required_approvals,
+        total_signers: signers.len(),
+        timelock_period,
+        enabled: true,
+    };
+
+    env.storage()
+        .persistent()
+        .set(&AccessControlKey::MultiSigConfig, &config);
+
+    env.storage()
+        .persistent()
+        .set(&AccessControlKey::AdminSigners, &signers);
+
+    env.events().publish(
+        (symbol_short!("multisig"), symbol_short!("init")),
+        (required_approvals, signers.len(), timelock_period),
+    );
+
+    Ok(())
+}
+
+/// Create a proposal for a multi-sig admin operation.
+///
+/// # Authorization
+/// - Caller must be one of the configured signers.
+///
+/// # Returns
+/// - Proposal ID if successful.
+pub fn create_proposal(
+    env: &Env,
+    proposer: Address,
+    operation: ProposalOperation,
+) -> Result<u64, AccessControlError> {
+    proposer.require_auth();
+
+    let config: MultiSigConfig = env
+        .storage()
+        .persistent()
+        .get(&AccessControlKey::MultiSigConfig)
+        .ok_or(AccessControlError::MultiSigNotConfigured)?;
+
+    if !config.enabled {
+        return Err(AccessControlError::MultiSigNotConfigured);
+    }
+
+    // Verify proposer is a signer
+    let signers: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&AccessControlKey::AdminSigners)
+        .ok_or(AccessControlError::MultiSigNotConfigured)?;
+
+    let mut is_signer = false;
+    for i in 0..signers.len() {
+        if let Some(signer) = signers.get(i) {
+            if signer == proposer {
+                is_signer = true;
+                break;
+            }
+        }
+    }
+
+    if !is_signer {
+        return Err(AccessControlError::AdminRequired);
+    }
+
+    let proposal_id = next_proposal_id(env);
+    let now = env.ledger().timestamp();
+    let execution_time = now + config.timelock_period;
+
+    let proposal = Proposal {
+        proposal_id,
+        proposer: proposer.clone(),
+        operation,
+        created_at: now,
+        execution_time,
+        executed: false,
+        approval_count: 1, // Proposer auto-approves
+    };
+
+    env.storage()
+        .persistent()
+        .set(&AccessControlKey::Proposal(proposal_id), &proposal);
+
+    // Record proposer's approval
+    env.storage()
+        .persistent()
+        .set(&AccessControlKey::ProposalApproval(proposal_id, proposer.clone()), &true);
+
+    env.events().publish(
+        (symbol_short!("multisig"), symbol_short!("propose")),
+        (proposal_id, proposer, execution_time),
+    );
+
+    Ok(proposal_id)
+}
+
+/// Approve a pending proposal.
+///
+/// # Authorization
+/// - Caller must be one of the configured signers.
+///
+/// # Errors
+/// - `ProposalNotFound` if proposal doesn't exist.
+/// - `ProposalAlreadyExecuted` if already executed.
+/// - `AlreadyApproved` if caller already approved.
+pub fn approve_proposal(
+    env: &Env,
+    approver: Address,
+    proposal_id: u64,
+) -> Result<(), AccessControlError> {
+    approver.require_auth();
+
+    let config: MultiSigConfig = env
+        .storage()
+        .persistent()
+        .get(&AccessControlKey::MultiSigConfig)
+        .ok_or(AccessControlError::MultiSigNotConfigured)?;
+
+    // Verify approver is a signer
+    let signers: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&AccessControlKey::AdminSigners)
+        .ok_or(AccessControlError::MultiSigNotConfigured)?;
+
+    let mut is_signer = false;
+    for i in 0..signers.len() {
+        if let Some(signer) = signers.get(i) {
+            if signer == approver {
+                is_signer = true;
+                break;
+            }
+        }
+    }
+
+    if !is_signer {
+        return Err(AccessControlError::AdminRequired);
+    }
+
+    let mut proposal: Proposal = env
+        .storage()
+        .persistent()
+        .get(&AccessControlKey::Proposal(proposal_id))
+        .ok_or(AccessControlError::ProposalNotFound)?;
+
+    if proposal.executed {
+        return Err(AccessControlError::ProposalAlreadyExecuted);
+    }
+
+    // Check if already approved
+    let already_approved: bool = env
+        .storage()
+        .persistent()
+        .get(&AccessControlKey::ProposalApproval(proposal_id, approver.clone()))
+        .unwrap_or(false);
+
+    if already_approved {
+        return Err(AccessControlError::AlreadyApproved);
+    }
+
+    // Record approval
+    env.storage()
+        .persistent()
+        .set(&AccessControlKey::ProposalApproval(proposal_id, approver.clone()), &true);
+
+    proposal.approval_count += 1;
+
+    env.storage()
+        .persistent()
+        .set(&AccessControlKey::Proposal(proposal_id), &proposal);
+
+    env.events().publish(
+        (symbol_short!("multisig"), symbol_short!("approve")),
+        (proposal_id, approver, proposal.approval_count),
+    );
+
+    Ok(())
+}
+
+/// Execute an approved proposal.
+///
+/// # Errors
+/// - `ProposalNotFound` if proposal doesn't exist.
+/// - `InsufficientApprovals` if not enough approvals.
+/// - `TimelockNotElapsed` if timelock period hasn't passed.
+/// - `ProposalAlreadyExecuted` if already executed.
+pub fn execute_proposal(
+    env: &Env,
+    executor: Address,
+    proposal_id: u64,
+) -> Result<(), AccessControlError> {
+    executor.require_auth();
+
+    let config: MultiSigConfig = env
+        .storage()
+        .persistent()
+        .get(&AccessControlKey::MultiSigConfig)
+        .ok_or(AccessControlError::MultiSigNotConfigured)?;
+
+    let mut proposal: Proposal = env
+        .storage()
+        .persistent()
+        .get(&AccessControlKey::Proposal(proposal_id))
+        .ok_or(AccessControlError::ProposalNotFound)?;
+
+    if proposal.executed {
+        return Err(AccessControlError::ProposalAlreadyExecuted);
+    }
+
+    if proposal.approval_count < config.required_approvals {
+        return Err(AccessControlError::InsufficientApprovals);
+    }
+
+    let now = env.ledger().timestamp();
+    if now < proposal.execution_time {
+        return Err(AccessControlError::TimelockNotElapsed);
+    }
+
+    // Execute the operation
+    match &proposal.operation {
+        ProposalOperation::GrantRole(role, grantee, expiry) => {
+            let record = RoleRecord::new(*expiry);
+            set_role_record(env, role, grantee, &record);
+            register_known_role(env, role);
+        }
+        ProposalOperation::RevokeRole(role, revokee) => {
+            delete_role_record(env, role, revokee);
+        }
+        ProposalOperation::GrantPermission(role, action) => {
+            set_permission(env, role, action);
+        }
+        ProposalOperation::RevokePermission(role, action) => {
+            delete_permission(env, role, action);
+        }
+        ProposalOperation::TransferAdmin(new_admin) => {
+            set_admin(env, new_admin);
+            let admin_sym = admin_role();
+            let old_admin = proposal.proposer.clone();
+            delete_role_record(env, &admin_sym, &old_admin);
+            let record = RoleRecord::new(None);
+            set_role_record(env, &admin_sym, new_admin, &record);
+        }
+        ProposalOperation::UpdateMultiSig(new_config) => {
+            env.storage()
+                .persistent()
+                .set(&AccessControlKey::MultiSigConfig, new_config);
+        }
+    }
+
+    proposal.executed = true;
+    env.storage()
+        .persistent()
+        .set(&AccessControlKey::Proposal(proposal_id), &proposal);
+
+    env.events().publish(
+        (symbol_short!("multisig"), symbol_short!("execute")),
+        (proposal_id, executor, now),
+    );
+
+    Ok(())
+}
+
+/// Get proposal details.
+pub fn get_proposal(env: &Env, proposal_id: u64) -> Result<Proposal, AccessControlError> {
+    env.storage()
+        .persistent()
+        .get(&AccessControlKey::Proposal(proposal_id))
+        .ok_or(AccessControlError::ProposalNotFound)
+}
+
+/// Get multi-sig configuration.
+pub fn get_multisig_config(env: &Env) -> Result<MultiSigConfig, AccessControlError> {
+    env.storage()
+        .persistent()
+        .get(&AccessControlKey::MultiSigConfig)
+        .ok_or(AccessControlError::MultiSigNotConfigured)
+}
+
+/// Get next proposal ID and increment counter.
+fn next_proposal_id(env: &Env) -> u64 {
+    let current: u64 = env
+        .storage()
+        .instance()
+        .get(&AccessControlKey::ProposalCounter)
+        .unwrap_or(0);
+    let next = current + 1;
+    env.storage()
+        .instance()
+        .set(&AccessControlKey::ProposalCounter, &next);
+    next
+}
+
 
 #[cfg(test)]
 mod tests {
