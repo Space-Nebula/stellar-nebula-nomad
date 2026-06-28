@@ -47,6 +47,8 @@ pub struct ShipNft {
     pub ship_type: Symbol,
     pub hull: u32,
     pub scanner_power: u32,
+    pub durability: u32,
+    pub max_durability: u32,
     pub metadata: Bytes,
 }
 
@@ -200,6 +202,8 @@ pub fn mint_ship(
         ship_type: ship_type.clone(),
         hull,
         scanner_power,
+        durability: 100,
+        max_durability: 100,
         metadata: metadata.clone(),
     };
 
@@ -326,4 +330,24 @@ pub fn get_ships_by_owner(env: &Env, owner: &Address) -> Vec<u64> {
         .persistent()
         .get(&DataKey::OwnerShips(owner.clone()))
         .unwrap_or_else(|| Vec::new(env))
+}
+
+pub fn repair_ship(env: &Env, owner: &Address, ship_id: u64) -> Result<ShipNft, ShipError> {
+    owner.require_auth();
+    let key = DataKey::Ship(ship_id);
+    let mut ship: ShipNft = env.storage().persistent().get(&key).ok_or(ShipError::ShipNotFound)?;
+    if ship.owner != *owner { return Err(ShipError::NotOwner); }
+    
+    ship.durability = ship.max_durability;
+    env.storage().persistent().set(&key, &ship);
+    Ok(ship)
+}
+
+pub fn damage_ship(env: &Env, ship_id: u64, amount: u32) -> Result<ShipNft, ShipError> {
+    let key = DataKey::Ship(ship_id);
+    let mut ship: ShipNft = env.storage().persistent().get(&key).ok_or(ShipError::ShipNotFound)?;
+    
+    ship.durability = ship.durability.saturating_sub(amount);
+    env.storage().persistent().set(&key, &ship);
+    Ok(ship)
 }

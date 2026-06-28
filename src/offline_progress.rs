@@ -36,7 +36,8 @@ pub enum OfflineError {
     NotInitialized = 2,
 }
 
-const MAX_ACCRUAL_HOURS: u64 = 48;
+const MAX_OFFLINE_HOURS: u64 = 48;
+const PREMIUM_MAX_OFFLINE_HOURS: u64 = 96;
 const SECONDS_PER_HOUR: u64 = 3600;
 const BASE_YIELD_PER_HOUR: i128 = 100;
 
@@ -65,6 +66,7 @@ impl OfflineProgressTracker {
     pub fn claim_offline_yield(
         env: Env,
         player: Address,
+        is_premium: bool,
     ) -> Result<OfflineYieldClaim, OfflineError> {
         player.require_auth();
 
@@ -81,7 +83,7 @@ impl OfflineProgressTracker {
             return Err(OfflineError::NoAccrualAvailable);
         }
 
-        let max_accrual_seconds = MAX_ACCRUAL_HOURS * SECONDS_PER_HOUR;
+        let max_accrual_seconds = if is_premium { PREMIUM_MAX_OFFLINE_HOURS * SECONDS_PER_HOUR } else { MAX_OFFLINE_HOURS * SECONDS_PER_HOUR };
         let capped_duration = offline_duration.min(max_accrual_seconds);
         let hours_offline = capped_duration / SECONDS_PER_HOUR;
         let yield_amount = (hours_offline as i128) * BASE_YIELD_PER_HOUR;
@@ -128,7 +130,7 @@ impl OfflineProgressTracker {
 
         let now = env.ledger().timestamp();
         let offline_duration = now.saturating_sub(progress.last_active);
-        let max_accrual_seconds = MAX_ACCRUAL_HOURS * SECONDS_PER_HOUR;
+        let max_accrual_seconds = if is_premium { PREMIUM_MAX_OFFLINE_HOURS * SECONDS_PER_HOUR } else { MAX_OFFLINE_HOURS * SECONDS_PER_HOUR };
         let capped_duration = offline_duration.min(max_accrual_seconds);
         let hours_offline = capped_duration / SECONDS_PER_HOUR;
 
@@ -144,7 +146,7 @@ impl OfflineProgressTracker {
 
         for i in 0..players.len() {
             let player = players.get(i).unwrap();
-            if let Ok(claim) = Self::claim_offline_yield(env.clone(), player) {
+            if let Ok(claim) = Self::claim_offline_yield(env.clone(), player, false) {
                 claims.push_back(claim);
             }
         }

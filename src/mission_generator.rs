@@ -35,6 +35,7 @@ pub struct Mission {
     pub completed: bool,
     pub claimed: bool,
     pub expires_at: u64,
+    pub prerequisite_missions: Vec<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -108,6 +109,11 @@ pub fn generate_daily_mission(env: &Env, player: Address) -> Result<Mission, Mis
     let target = ((seed % 10) + 5) as u32;
     let reward = MISSION_REWARD_BASE.saturating_mul(target as i128);
     let expires_at = env.ledger().timestamp() + 86400;
+    
+    let mut prerequisites = Vec::new(env);
+    if mission_counter > 1 {
+        prerequisites.push_back(mission_counter - 1);
+    }
 
     let mission = Mission {
         mission_id: mission_counter,
@@ -119,6 +125,7 @@ pub fn generate_daily_mission(env: &Env, player: Address) -> Result<Mission, Mis
         completed: false,
         claimed: false,
         expires_at,
+        prerequisite_missions: prerequisites,
     };
 
     env.storage()
@@ -230,4 +237,17 @@ pub fn get_player_missions(env: &Env, player: Address) -> Vec<Mission> {
     }
 
     missions
+}
+
+pub fn start_mission(env: &Env, player: Address, mission_id: u64) -> Result<(), MissionError> {
+    player.require_auth();
+    let mission = env.storage().persistent().get::<MissionKey, Mission>(&MissionKey::MissionData(mission_id)).ok_or(MissionError::InvalidMission)?;
+    
+    for prereq_id in mission.prerequisite_missions.iter() {
+        let prereq = env.storage().persistent().get::<MissionKey, Mission>(&MissionKey::MissionData(prereq_id)).ok_or(MissionError::InvalidMission)?;
+        if !prereq.completed {
+            return Err(MissionError::NotCompleted);
+        }
+    }
+    Ok(())
 }
