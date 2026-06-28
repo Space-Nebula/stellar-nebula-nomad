@@ -161,7 +161,7 @@ pub use metadata_resolver::{
 pub use randomness_oracle::{
     get_entropy_pool, request_random_seed, verify_and_fallback, OracleError,
 };
-pub use ship_upgrade::{ShipState, ShipUpgradeError, UpgradeBlueprint};
+pub use ship_upgrade::{ShipState, ShipUpgradeError, UpgradeBlueprint, apply_regen_upgrade};
 pub use treasure_vault::{
     claim_treasure, deposit_treasure, get_vault, TreasureVault, VaultError,
     DEFAULT_MIN_LOCK_DURATION,
@@ -187,7 +187,9 @@ pub use recycling_crafter::{
 };
 
 pub use energy_manager::{
-    consume_energy, get_energy_balance, recharge_energy, EnergyBalance, EnergyError, RechargeResult,
+    consume_energy, get_energy_balance, recharge_energy,
+    apply_passive_regen, set_regen_rate, get_regen_rate,
+    EnergyBalance, EnergyError, RechargeResult, PassiveRegenResult,
 };
 pub use environment_simulator::{
     apply_environmental_modifier, get_nebula_condition, simulate_conditions, EnvironmentCondition,
@@ -1246,6 +1248,15 @@ impl NebulaNomadContract {
         ship_upgrade::get_ship_state(&env, ship_id)
     }
 
+    /// Apply a regeneration upgrade effect (called after a regen upgrade).
+    pub fn apply_regen_upgrade(
+        env: Env,
+        ship_id: u64,
+        bonus: u32,
+    ) -> Result<(), ShipUpgradeError> {
+        ship_upgrade::apply_regen_upgrade(&env, ship_id, bonus)
+    }
+
     // ─── Cross-Player Resource Gifting (#27) ──────────────────────────────
 
     /// Send a resource gift to another player.
@@ -1379,6 +1390,26 @@ impl NebulaNomadContract {
         ship_id: u64,
     ) -> Result<energy_manager::EnergyBalance, energy_manager::EnergyError> {
         energy_manager::get_energy_balance(&env, ship_id)
+    }
+
+    // ─── Passive Energy Regeneration (Issue #190) ─────────────────────────
+
+    /// Apply passive energy recovery for a ship.
+    pub fn apply_passive_regen(
+        env: Env,
+        ship_id: u64,
+    ) -> Result<energy_manager::PassiveRegenResult, energy_manager::EnergyError> {
+        energy_manager::apply_passive_regen(&env, ship_id)
+    }
+
+    /// Set the passive regeneration rate (admin / upgrade system).
+    pub fn set_regen_rate(env: Env, caller: Address, rate: u32) {
+        energy_manager::set_regen_rate(&env, &caller, rate)
+    }
+
+    /// Get the current passive regeneration rate.
+    pub fn get_regen_rate(env: Env) -> u32 {
+        energy_manager::get_regen_rate(&env)
     }
 
     // ─── Environmental Simulation ─────────────────────────────────────────

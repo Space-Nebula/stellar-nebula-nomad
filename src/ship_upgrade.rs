@@ -40,6 +40,8 @@ pub struct ShipState {
     pub scanner_bonus: u32,
     /// Total hull strength bonus from upgrades.
     pub hull_bonus: u32,
+    /// Bonus to passive energy regeneration rate (Issue #190).
+    pub regen_bonus: u32,
 }
 
 /// Per-component upgrade blueprint: cost and stat bonuses.
@@ -56,6 +58,8 @@ pub struct UpgradeBlueprint {
     pub scanner_bonus: u32,
     /// Hull strength bonus granted by this component.
     pub hull_bonus: u32,
+    /// Bonus to passive energy regeneration rate (Issue #190).
+    pub regen_bonus: u32,
 }
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
@@ -148,6 +152,7 @@ fn apply_upgrade_inner(
             total_mass: 0,
             scanner_bonus: 0,
             hull_bonus: 0,
+            regen_bonus: 0,
         });
 
     // Build after-state with saturating arithmetic to prevent overflow exploits.
@@ -157,6 +162,7 @@ fn apply_upgrade_inner(
         total_mass:   before.total_mass.saturating_add(blueprint.mass),
         scanner_bonus: before.scanner_bonus.saturating_add(blueprint.scanner_bonus),
         hull_bonus:    before.hull_bonus.saturating_add(blueprint.hull_bonus),
+        regen_bonus:   before.regen_bonus.saturating_add(blueprint.regen_bonus),
     };
 
     // Validate invariants before committing — revert if violated.
@@ -227,4 +233,39 @@ pub fn get_ship_state(env: &Env, ship_id: u64) -> Option<ShipState> {
 /// Read the registered blueprint map. Returns `None` if not yet initialised.
 pub fn get_upgrade_config(env: &Env) -> Option<Map<Symbol, UpgradeBlueprint>> {
     env.storage().instance().get(&UpgradeDataKey::Config)
+}
+
+/// Apply a regeneration upgrade effect to the ship's energy manager.
+/// This is called after a successful upgrade that has regen_bonus > 0.
+/// It increases the passive regeneration rate in energy_manager.
+pub fn apply_regen_upgrade(
+    env: &Env,
+    ship_id: u64,
+    bonus: u32,
+) -> Result<(), ShipUpgradeError> {
+    if bonus == 0 {
+        return Ok(());
+    }
+
+    let ship_state: ShipState = env
+        .storage()
+        .persistent()
+        .get(&UpgradeDataKey::ShipState(ship_id))
+        .ok_or(ShipUpgradeError::NotInitialized)?;
+
+    let new_regen = ship_state.regen_bonus;
+    // Store the regen bonus so energy_manager can read it
+    env.storage()
+        .persistent()
+        .set(&UpgradeDataKey::ShipState(ship_id), &ShipState {
+            regen_bonus: new_regen,
+            ..ship_state
+        });
+
+    env.events().publish(
+        (symbol_short!("ship_upg"), symbol_short!("regen")),
+        (ship_id, new_regen),
+    );
+
+    Ok(())
 }
