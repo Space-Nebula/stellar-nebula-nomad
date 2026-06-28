@@ -317,6 +317,11 @@ pub use economics::balancer::{
 pub use trading::{
     place_limit_order, cancel_limit_order, get_limit_order, get_trader_orders,
     record_trade, get_trading_history, LimitOrder, OrderSide, TradeRecord, TradingError,
+    // AMM (Issue #189)
+    create_pool, add_liquidity, remove_liquidity, swap_exact_input,
+    get_pool, get_lp_balance, get_all_pools, quote_swap,
+    LiquidityPool, LiquidityProvider, AmmError,
+    MAX_SLIPPAGE_BPS, AMM_MAX_ROUTE_HOPS, SWAP_FEE_BPS,
 };
 
 pub use crafting::{craft, add_xp, get_level, get_xp};
@@ -2617,5 +2622,75 @@ impl NebulaNomadContract {
 
     pub fn get_trading_history(env: Env) -> Vec<TradeRecord> {
         trading::get_trading_history(&env)
+    }
+
+    // ─── AMM — Automated Market Maker (Issue #189) ───────────────────────────
+
+    /// Create a new liquidity pool.
+    pub fn create_pool(
+        env: Env,
+        creator: Address,
+        resource_a: Symbol,
+        resource_b: Symbol,
+    ) -> Result<u64, AmmError> {
+        trading::create_pool(&env, &creator, resource_a, resource_b)
+    }
+
+    /// Add liquidity to a pool and receive LP tokens.
+    pub fn add_liquidity(
+        env: Env,
+        provider: Address,
+        pool_id: u64,
+        amount_a: i128,
+        amount_b: i128,
+    ) -> Result<(i128, LiquidityPool), AmmError> {
+        trading::add_liquidity(&env, &provider, pool_id, amount_a, amount_b)
+    }
+
+    /// Remove liquidity by burning LP tokens.
+    pub fn remove_liquidity(
+        env: Env,
+        provider: Address,
+        pool_id: u64,
+        lp_amount: i128,
+    ) -> Result<(i128, i128), AmmError> {
+        trading::remove_liquidity(&env, &provider, pool_id, lp_amount)
+    }
+
+    /// Swap exact input for output via a pool route.
+    pub fn swap_exact_input(
+        env: Env,
+        trader: Address,
+        resource_in: Symbol,
+        amount_in: i128,
+        min_amount_out: i128,
+        route: Vec<u64>,
+    ) -> Result<i128, AmmError> {
+        trading::swap_exact_input(&env, &trader, resource_in, amount_in, min_amount_out, route)
+    }
+
+    /// Get pool details by ID.
+    pub fn get_pool(env: Env, pool_id: u64) -> Option<LiquidityPool> {
+        trading::get_pool(&env, pool_id)
+    }
+
+    /// Get LP balance for a provider in a pool.
+    pub fn get_lp_balance(env: Env, pool_id: u64, provider: Address) -> i128 {
+        trading::get_lp_balance(&env, pool_id, &provider)
+    }
+
+    /// Get all pool IDs.
+    pub fn get_all_pools(env: Env) -> Vec<u64> {
+        trading::get_all_pools(&env)
+    }
+
+    /// Quote the output amount for a swap without executing.
+    pub fn quote_swap(
+        env: Env,
+        pool_id: u64,
+        resource_in: Symbol,
+        amount_in: i128,
+    ) -> Result<i128, AmmError> {
+        trading::quote_swap(&env, pool_id, resource_in, amount_in)
     }
 }
