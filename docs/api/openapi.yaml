@@ -70,7 +70,8 @@ tags:
     description: Upgradeable contract administration
   - name: Resources
     description: Resource harvesting and yield farming
-  - name: Governance
+  - name: Bonding
+    description: Nomad bonding, delegation, and shared yield flows  - name: Governance
     description: On-chain governance proposals
 
 paths:
@@ -679,6 +680,430 @@ paths:
                 type: integer
                 example: 1
 
+  /nebula/scan:
+    post:
+      tags: [Nebula]
+      operationId: scanNebula
+      summary: Generate, classify, and record a full nebula scan
+      description: |
+        Invokes `scan_nebula` with a 32-byte seed and authenticated player.
+        The contract generates the deterministic layout, calculates rarity,
+        emits the scan event, and updates global analytics counters.
+
+        **Error codes:** `3` (Unauthorized), invalid seed or malformed address input.
+
+        **Example:**
+        ```sh
+        stellar contract invoke \
+          --id $CONTRACT_ID \
+          --source-account $PLAYER \
+          -- scan_nebula \
+          --seed a1b2c3d4e5f60708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20 \
+          --player $PLAYER
+        ```
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seed, player]
+              properties:
+                seed:
+                  $ref: '#/components/schemas/BytesN32'
+                player:
+                  $ref: '#/components/schemas/Address'
+            example:
+              seed: "a1b2c3d4e5f60708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+              player: "GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV4HAODLYJL"
+      responses:
+        "200":
+          description: Generated layout and rarity tier
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanNebulaResult'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /analytics/global-stats:
+    get:
+      tags: [Nebula]
+      operationId: getGlobalStats
+      summary: Return aggregate global scan and minting counters
+      description: Read-only wrapper for `get_global_stats`.
+      responses:
+        "200":
+          description: Aggregate community statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalStats'
+              example:
+                total_scans: 128
+                ships_minted: 42
+                total_essence_accrued: 98765
+
+  # -- Resources ---------------------------------------------------------------
+
+  /resources/mint:
+    post:
+      tags: [Resources]
+      operationId: mintResource
+      summary: Mint harvested resources from a scanned anomaly
+      description: |
+        Invokes `mint_resource` after verifying caller auth, resource amount,
+        rate limits, and the presence of the requested anomaly in the caller's
+        scanned nebula layout.
+
+        **Error codes:** `200` (InvalidAmount), `201` (RateLimitExceeded),
+        `202` (NoLayoutForShip), `203` (NoResourceAtAnomaly).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [caller, ship_id, anomaly_index, resource_type, amount]
+              properties:
+                caller:
+                  $ref: '#/components/schemas/Address'
+                ship_id:
+                  type: integer
+                  format: int64
+                  example: 7
+                anomaly_index:
+                  type: integer
+                  format: int32
+                  minimum: 0
+                  example: 3
+                resource_type:
+                  $ref: '#/components/schemas/ResourceType'
+                amount:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  example: 50
+      responses:
+        "200":
+          description: Resource mint record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceRecord'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "429":
+          $ref: '#/components/responses/RateLimited'
+
+  /resources/balance:
+    get:
+      tags: [Resources]
+      operationId: getResourceBalance
+      summary: Return a player's balance for one resource type
+      parameters:
+        - name: owner
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Address'
+        - name: resource_type
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/ResourceType'
+      responses:
+        "200":
+          description: Resource balance
+          content:
+            application/json:
+              schema:
+                type: integer
+                format: int64
+                example: 250
+
+  /resources/total-supply:
+    get:
+      tags: [Resources]
+      operationId: getResourceTotalSupply
+      summary: Return total minted supply for one resource type
+      parameters:
+        - name: resource_type
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/ResourceType'
+      responses:
+        "200":
+          description: Total minted supply
+          content:
+            application/json:
+              schema:
+                type: integer
+                format: int64
+                example: 100000
+
+  # -- Bonding -----------------------------------------------------------------
+
+  /bonding/bonds:
+    post:
+      tags: [Bonding]
+      operationId: createBond
+      summary: Create a pending nomad bond with another player
+      description: |
+        Invokes `create_bond`. The initiator must authorize the transaction;
+        the bond remains `Pending` until the invited partner accepts.
+
+        **Error codes:** `1` (SelfBond), `12` (ArithmeticOverflow).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [initiator, ship_id, partner]
+              properties:
+                initiator:
+                  $ref: '#/components/schemas/Address'
+                ship_id:
+                  type: integer
+                  format: int64
+                  example: 7
+                partner:
+                  $ref: '#/components/schemas/Address'
+      responses:
+        "200":
+          description: Pending bond record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NomadBond'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /bonding/bonds/{bond_id}:
+    get:
+      tags: [Bonding]
+      operationId: getBond
+      summary: Fetch a nomad bond by ID
+      parameters:
+        - name: bond_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Bond record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NomadBond'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /bonding/bonds/{bond_id}/accept:
+    post:
+      tags: [Bonding]
+      operationId: acceptBond
+      summary: Accept a pending bond as the invited partner
+      description: "Error codes: `2` (BondNotFound), `3` (NotDesignatedPartner), `4` (BondNotPending)."
+      parameters:
+        - name: bond_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partner]
+              properties:
+                partner:
+                  $ref: '#/components/schemas/Address'
+      responses:
+        "200":
+          description: Activated bond
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NomadBond'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /bonding/bonds/{bond_id}/dissolve:
+    post:
+      tags: [Bonding]
+      operationId: dissolveBond
+      summary: Dissolve an active or pending bond
+      description: "Error codes: `2` (BondNotFound), `10` (AlreadyDissolved), `11` (NotBondParty)."
+      parameters:
+        - name: bond_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [caller]
+              properties:
+                caller:
+                  $ref: '#/components/schemas/Address'
+      responses:
+        "200":
+          description: Dissolved bond record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NomadBond'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /bonding/bonds/{bond_id}/delegation:
+    get:
+      tags: [Bonding]
+      operationId: getYieldDelegation
+      summary: Fetch yield delegation configured for a bond
+      parameters:
+        - name: bond_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Yield delegation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YieldDelegation'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Bonding]
+      operationId: delegateYield
+      summary: Delegate a percentage of cosmic essence to the bonded partner
+      description: "Error codes: `5` (InvalidPercentage), `2` (BondNotFound), `6` (BondNotActive), `7` (NotBondMember)."
+      parameters:
+        - name: bond_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delegator, percentage]
+              properties:
+                delegator:
+                  $ref: '#/components/schemas/Address'
+                percentage:
+                  type: integer
+                  format: int32
+                  minimum: 1
+                  maximum: 100
+                  example: 25
+      responses:
+        "200":
+          description: Stored yield delegation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YieldDelegation'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /bonding/bonds/{bond_id}/claim-yield:
+    post:
+      tags: [Bonding]
+      operationId: claimYield
+      summary: Claim delegated yield as the beneficiary
+      description: "Error codes: `2` (BondNotFound), `6` (BondNotActive), `8` (NoDelegation), `9` (NotBeneficiary), `12` (ArithmeticOverflow)."
+      parameters:
+        - name: bond_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [claimer]
+              properties:
+                claimer:
+                  $ref: '#/components/schemas/Address'
+      responses:
+        "200":
+          description: Claimed yield amount
+          content:
+            application/json:
+              schema:
+                type: integer
+                format: int64
+                example: 125
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /bonding/essence-balance:
+    get:
+      tags: [Bonding]
+      operationId: getEssenceBalance
+      summary: Return a player's cosmic essence balance
+      parameters:
+        - name: player
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Address'
+      responses:
+        "200":
+          description: Cosmic essence balance
+          content:
+            application/json:
+              schema:
+                type: integer
+                format: int64
+                example: 5000
+
 components:
   schemas:
 
@@ -861,6 +1286,88 @@ components:
           type: integer
           description: Ledger sequence number
 
+    ScanNebulaResult:
+      type: object
+      properties:
+        layout:
+          $ref: '#/components/schemas/NebulaLayout'
+        rarity:
+          $ref: '#/components/schemas/Rarity'
+
+    GlobalStats:
+      type: object
+      properties:
+        total_scans:
+          type: integer
+          format: int64
+        ships_minted:
+          type: integer
+          format: int64
+        total_essence_accrued:
+          type: integer
+          format: int64
+
+    ResourceType:
+      type: string
+      enum: [StellarDust, DarkMatter, ExoticMatter]
+      example: StellarDust
+
+    ResourceRecord:
+      type: object
+      properties:
+        owner:
+          $ref: '#/components/schemas/Address'
+        resource_type:
+          $ref: '#/components/schemas/ResourceType'
+        amount:
+          type: integer
+          format: int64
+        minted_at:
+          type: integer
+          format: int64
+
+    BondStatus:
+      type: string
+      enum: [Pending, Active, Dissolved]
+      example: Active
+
+    NomadBond:
+      type: object
+      properties:
+        bond_id:
+          type: integer
+          format: int64
+        initiator:
+          $ref: '#/components/schemas/Address'
+        partner:
+          $ref: '#/components/schemas/Address'
+        ship_id:
+          type: integer
+          format: int64
+        status:
+          $ref: '#/components/schemas/BondStatus'
+        created_at:
+          type: integer
+          format: int64
+
+    YieldDelegation:
+      type: object
+      properties:
+        bond_id:
+          type: integer
+          format: int64
+        delegator:
+          $ref: '#/components/schemas/Address'
+        beneficiary:
+          $ref: '#/components/schemas/Address'
+        percentage:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 100
+        total_yielded:
+          type: integer
+          format: int64
     Error:
       type: object
       properties:
@@ -894,6 +1401,13 @@ components:
 
     Forbidden:
       description: Caller is not authorized to perform this action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    RateLimited:
+      description: Caller exceeded the operation rate limit
       content:
         application/json:
           schema:
