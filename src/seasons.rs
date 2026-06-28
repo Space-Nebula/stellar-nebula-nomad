@@ -2,6 +2,11 @@ use soroban_sdk::{contracttype, contracterror, symbol_short, Address, Env};
 
 pub const SEASON_DURATION_SECS: u64 = 30 * 24 * 60 * 60; // 30 days
 
+/// Essence reward per scan during a season.
+pub const REWARD_PER_SCAN: i128 = 10;
+/// Bonus multiplier (in bps) applied to essence collected as a reward.
+pub const ESSENCE_REWARD_BPS: i128 = 500; // 5%
+
 #[derive(Clone)]
 #[contracttype]
 pub enum SeasonKey {
@@ -11,6 +16,10 @@ pub enum SeasonKey {
     SeasonCount,
     /// Player's seasonal participation: (profile_id, season_id) -> ParticipantStats
     ParticipantStats(u64, u64),
+    /// Archived season snapshot: season_id -> SeasonArchive
+    ArchivedSeason(u64),
+    /// Per-player season reward ready to claim: (profile_id, season_id) -> i128
+    SeasonReward(u64, u64),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -31,6 +40,17 @@ pub struct ParticipantStats {
     pub essence_collected: i128,
 }
 
+/// Snapshot of an ended season stored for historical reference.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct SeasonArchive {
+    pub season: Season,
+    pub ended_at: u64,
+    pub total_participants: u32,
+    pub total_essence_collected: i128,
+    pub total_rewards_distributed: i128,
+}
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -38,6 +58,8 @@ pub enum SeasonError {
     NoActiveSeason = 1,
     SeasonAlreadyStarted = 2,
     Unauthorized = 3,
+    SeasonNotExpired = 4,
+    NoRewardToClaim = 5,
 }
 
 /// Initialize the first season.
@@ -107,6 +129,125 @@ pub fn record_participation(
     env.storage().persistent().set(&key, &stats);
 
     Ok(())
+}
+
+/// End the current season, distribute rewards, archive data, and start the next season.
+///
+/// Reward per participant = (total_scans * REWARD_PER_SCAN)
+///                        + (essence_collected * ESSENCE_REWARD_BPS / 10_000)
+///
+/// The caller must pass the profile IDs of all participants so their rewards
+/// can be computed and stored individually for later claiming via
+/// `claim_season_reward`.
+pub fn end_season(
+    env: &Env,
+    admin: Address,
+    new_title: soroban_sdk::String,
+    participant_ids: soroban_sdk::Vec<u64>,
+) -> Result<u64, SeasonError> {
+    admin.require_auth();
+
+    let season = get_current_season(env)?;
+    let now = env.ledger().timestamp();
+
+    if now < season.end_time {
+        return Err(SeasonError::SeasonNotExpired);
+    }
+
+    let mut total_essence: i128 = 0;
+    let mut total_rewards: i128 = 0;
+
+    // Compute and store per-player rewards; clear participation records.
+    for profile_id in participant_ids.iter() {
+        let stats_key = SeasonKey::ParticipantStats(profile_id, season.id);
+        if let Some(stats) = env
+            .storage()
+            .persistent()
+            .get::<SeasonKey, ParticipantStats>(&stats_key)
+        {
+            let reward = (stats.total_scans as i128) * REWARD_PER_SCAN
+                + stats.essence_collected * ESSENCE_REWARD_BPS / 10_000;
+
+            env.storage()
+                .persistent()
+                .set(&SeasonKey::SeasonReward(profile_id, season.id), &reward);
+
+            // Remove the participation record (reset seasonal progress).
+            env.storage().persistent().remove(&stats_key);
+
+            total_essence += stats.essence_collected;
+            total_rewards += reward;
+        }
+    }
+
+    // Archive the ended season.
+    let archive = SeasonArchive {
+        season: season.clone(),
+        ended_at: now,
+        total_participants: participant_ids.len(),
+        total_essence_collected: total_essence,
+        total_rewards_distributed: total_rewards,
+    };
+    env.storage()
+        .instance()
+        .set(&SeasonKey::ArchivedSeason(season.id), &archive);
+
+    env.events().publish(
+        (symbol_short!("season"), symbol_short!("ended")),
+        (season.id, now, total_rewards),
+    );
+
+    // Start the next season immediately.
+    let new_id = season.id + 1;
+    let new_season = Season {
+        id: new_id,
+        start_time: now,
+        end_time: now + SEASON_DURATION_SECS,
+        title: new_title,
+    };
+    env.storage()
+        .instance()
+        .set(&SeasonKey::CurrentSeason, &new_season);
+    env.storage()
+        .instance()
+        .set(&SeasonKey::SeasonCount, &new_id);
+
+    env.events().publish(
+        (symbol_short!("season"), symbol_short!("started")),
+        (new_id, new_season.start_time, new_season.end_time),
+    );
+
+    Ok(new_id)
+}
+
+/// Claim the reward earned by `profile_id` for a completed season.
+pub fn claim_season_reward(env: &Env, season_id: u64, profile_id: u64) -> Result<i128, SeasonError> {
+    let key = SeasonKey::SeasonReward(profile_id, season_id);
+    let reward: i128 = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(SeasonError::NoRewardToClaim)?;
+
+    if reward == 0 {
+        return Err(SeasonError::NoRewardToClaim);
+    }
+
+    env.storage().persistent().remove(&key);
+
+    env.events().publish(
+        (symbol_short!("season"), symbol_short!("claimed")),
+        (profile_id, season_id, reward),
+    );
+
+    Ok(reward)
+}
+
+/// Get an archived season by ID.
+pub fn get_archived_season(env: &Env, season_id: u64) -> Option<SeasonArchive> {
+    env.storage()
+        .instance()
+        .get(&SeasonKey::ArchivedSeason(season_id))
 }
 
 /// Admin-triggered season reset.
