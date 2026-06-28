@@ -1,0 +1,212 @@
+specVersion: 1.2.0
+description: Stellar Nebula Nomad — contract event indexer
+repository: https://github.com/yourusername/stellar-nebula-nomad
+
+# ─── Schema ─────────────────────────────────────────────────────────────────
+schema:
+  file: ./schema.graphql
+
+# ─── Data Sources ───────────────────────────────────────────────────────────
+
+dataSources:
+  - kind: soroban
+    name: StellarNebulaNomad
+    network: testnet
+    source:
+      address: ${CONTRACT_ADDRESS}
+      abi: StellarNebulaNomad
+    mapping:
+      kind: soroban/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/mappings.ts
+      entities:
+        - Player
+        - Ship
+        - NebulaScan
+        - HarvestRecord
+        - Session
+        - MarketplaceListing
+        - DEXOffer
+        - TradeRecord
+        - Alliance
+        - AllianceMember
+        - Proposal
+        - VoteRecord
+        - DaoConfig
+        - StakeRecord
+        - TreasureVault
+        - Blueprint
+        - Referral
+        - TreasuryTransfer
+      abis:
+        - name: StellarNebulaNomad
+          file: ./abis/StellarNebulaNomad.json
+      eventHandlers:
+        # Ship NFT events
+        - event: ship.minted
+          topic0: "0x0000000000000000000000000000000000000000000000000000000073686970"
+          topic1: "0x000000000000000000000000000000000000000000000000000000006d696e74"
+          handler: handleShipMinted
+        - event: ship.xfer
+          topic0: "0x0000000000000000000000000000000000000000000000000000000073686970"
+          topic1: "0x0000000000000000000000000000000000000000000000000000000078666572"
+          handler: handleShipTransfer
+
+        # Nebula generation events
+        - event: NebulaGen.generated
+          topic0: "0x000000000000000000000000000000000000000000000000004e6562756c6147"
+          topic1: "0x0000000000000000000000000000000000000000000000000067656e65726174"
+          handler: handleNebulaGenerated
+        - event: neb_gen.expired
+          topic0: "0x000000000000000000000000000000000000000000000000006e65625f67656e"
+          topic1: "0x0000000000000000000000000000000000000000000000000065787069726564"
+          handler: handleNebulaExpired
+        - event: neb_gen.cleaned
+          topic0: "0x000000000000000000000000000000000000000000000000006e65625f67656e"
+          topic1: "0x00000000000000000000000000000000000000000000000000636c65616e6564"
+          handler: handleNebulaCleaned
+
+        # Resource minting / harvesting events
+        - event: Minter.minted
+          topic0: "0x000000000000000000000000000000000000000000000000004d696e746572"
+          topic1: "0x000000000000000000000000000000000000000000000000006d696e746564"
+          handler: handleResourceMinted
+
+        # Marketplace events
+        - event: market.listed
+          topic0: "0x000000000000000000000000000000000000000000000000006d61726b6574"
+          topic1: "0x000000000000000000000000000000000000000000000000006c6973746564"
+          handler: handleMarketListed
+        - event: market.sold
+          topic0: "0x000000000000000000000000000000000000000000000000006d61726b6574"
+          topic1: "0x00000000000000000000000000000000000000000000000000736f6c64"
+          handler: handleMarketSold
+        - event: market.cancel
+          topic0: "0x000000000000000000000000000000000000000000000000006d61726b6574"
+          topic1: "0x0000000000000000000000000000000000000000000000000063616e63656c"
+          handler: handleMarketCancelled
+
+        # DEX events
+        - event: dex.listed
+          topic0: "0x00000000000000000000000000000000000000000000000000646578"
+          topic1: "0x000000000000000000000000000000000000000000000000006c6973746564"
+          handler: handleDEXListed
+        - event: dex.canceld
+          topic0: "0x00000000000000000000000000000000000000000000000000646578"
+          topic1: "0x0000000000000000000000000000000000000000000000000063616e63656c"
+          handler: handleDEXCancelled
+
+        # Governance events
+        - event: gov.prop_crtd
+          topic0: "0x00000000000000000000000000000000000000000000000000676f76"
+          topic1: "0x0000000000000000000000000000000000000000000000000070726f705f637274"
+          handler: handleProposalCreated
+        - event: gov.vote_cast
+          topic0: "0x00000000000000000000000000000000000000000000000000676f76"
+          topic1: "0x00000000000000000000000000000000000000000000000000766f74655f636173"
+          handler: handleVoteCast
+        - event: dao.prop_crt
+          topic0: "0x0000000000000000000000000000000000000000000000000064616f"
+          topic1: "0x0000000000000000000000000000000000000000000000000070726f705f637274"
+          handler: handleDAOProposalCreated
+        - event: dao.vote
+          topic0: "0x0000000000000000000000000000000000000000000000000064616f"
+          topic1: "0x00000000000000000000000000000000000000000000000000766f7465"
+          handler: handleDAOVote
+        - event: dao.exec
+          topic0: "0x0000000000000000000000000000000000000000000000000064616f"
+          topic1: "0x0000000000000000000000000000000000000000000000000065786563"
+          handler: handleDAOExecuted
+        - event: dao.treas
+          topic0: "0x0000000000000000000000000000000000000000000000000064616f"
+          topic1: "0x000000000000000000000000000000000000000000000000007472656173"
+          handler: handleTreasuryTransfer
+
+        # Alliance events
+        - event: alliance.founded
+          topic0: "0x00000000000000000000000000000000000000000000000000616c6c69616e"
+          topic1: "0x00000000000000000000000000000000000000000000000000666f756e646564"
+          handler: handleAllianceFounded
+        - event: alliance.joined
+          topic0: "0x00000000000000000000000000000000000000000000000000616c6c69616e"
+          topic1: "0x000000000000000000000000000000000000000000000000006a6f696e6564"
+          handler: handleAllianceJoined
+        - event: alliance.left
+          topic0: "0x00000000000000000000000000000000000000000000000000616c6c69616e"
+          topic1: "0x000000000000000000000000000000000000000000000000006c656674"
+          handler: handleAllianceLeft
+        - event: alliance.contrib
+          topic0: "0x00000000000000000000000000000000000000000000000000616c6c69616e"
+          topic1: "0x00000000000000000000000000000000000000000000000000636f6e74726962"
+          handler: handleAllianceContribution
+
+        # Staking events
+        - event: stake.staked
+          topic0: "0x000000000000000000000000000000000000000000000000007374616b65"
+          topic1: "0x000000000000000000000000000000000000000000000000007374616b6564"
+          handler: handleStaked
+        - event: stake.unstaked
+          topic0: "0x000000000000000000000000000000000000000000000000007374616b65"
+          topic1: "0x00000000000000000000000000000000000000000000000000756e7374616b"
+          handler: handleUnstaked
+
+        # Vault events
+        - event: vault.deposit
+          topic0: "0x000000000000000000000000000000000000000000000000007661756c74"
+          topic1: "0x000000000000000000000000000000000000000000000000006465706f736974"
+          handler: handleVaultDeposit
+        - event: vault.claimed
+          topic0: "0x000000000000000000000000000000000000000000000000007661756c74"
+          topic1: "0x00000000000000000000000000000000000000000000000000636c61696d6564"
+          handler: handleVaultClaimed
+
+        # Profile events
+        - event: nomad.joined
+          topic0: "0x000000000000000000000000000000000000000000000000006e6f6d6164"
+          topic1: "0x000000000000000000000000000000000000000000000000006a6f696e6564"
+          handler: handlePlayerJoined
+        - event: profile.updated
+          topic0: "0x0000000000000000000000000000000000000000000000000070726f66696c65"
+          topic1: "0x0000000000000000000000000000000000000000000000000075706461746564"
+          handler: handleProfileUpdated
+
+        # Metadata events
+        - event: meta.updated
+          topic0: "0x000000000000000000000000000000000000000000000000006d657461"
+          topic1: "0x0000000000000000000000000000000000000000000000000075706461746564"
+          handler: handleMetadataUpdated
+        - event: meta.pinned
+          topic0: "0x000000000000000000000000000000000000000000000000006d657461"
+          topic1: "0x0000000000000000000000000000000000000000000000000070696e6e6564"
+          handler: handleMetadataPinned
+
+        # RBAC events
+        - event: rbac.grant
+          topic0: "0x0000000000000000000000000000000000000000000000000072626163"
+          topic1: "0x000000000000000000000000000000000000000000000000006772616e74"
+          handler: handleRBACGrant
+        - event: rbac.revoke
+          topic0: "0x0000000000000000000000000000000000000000000000000072626163"
+          topic1: "0x000000000000000000000000000000000000000000000000007265766f6b65"
+          handler: handleRBACRevoke
+
+        # Economics events
+        - event: econ.supply
+          topic0: "0x0000000000000000000000000000000000000000000000000065636f6e"
+          topic1: "0x00000000000000000000000000000000000000000000000000737570706c79"
+          handler: handleEconomicSupply
+
+        # Bond events
+        - event: bond.created
+          topic0: "0x00000000000000000000000000000000000000000000000000626f6e64"
+          topic1: "0x0000000000000000000000000000000000000000000000000063726561746564"
+          handler: handleBondCreated
+        - event: bond.accepted
+          topic0: "0x00000000000000000000000000000000000000000000000000626f6e64"
+          topic1: "0x0000000000000000000000000000000000000000000000000061636365707465"
+          handler: handleBondAccepted
+        - event: bond.dissolve
+          topic0: "0x00000000000000000000000000000000000000000000000000626f6e64"
+          topic1: "0x00000000000000000000000000000000000000000000000000646973736f6c76"
+          handler: handleBondDissolved

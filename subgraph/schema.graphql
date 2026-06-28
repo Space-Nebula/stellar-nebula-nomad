@@ -1,0 +1,454 @@
+# ─── Core Entities ─────────────────────────────────────────────────────────
+
+type Player @entity {
+  """Player address (Stellar public key or contract address)."""
+  id: ID!
+
+  """Profile ID assigned by the contract."""
+  profileId: BigInt
+
+  """Total nebula scans performed."""
+  totalScans: Int!
+
+  """Total cosmic essence earned."""
+  essenceEarned: BigInt!
+
+  """Ship IDs owned by this player."""
+  ships: [Ship!]! @derivedFrom(field: "owner")
+
+  """Sessions started by this player."""
+  sessions: [Session!]! @derivedFrom(field: "player")
+
+  """Alliances the player belongs to."""
+  alliances: [AllianceMember!]! @derivedFrom(field: "player")
+
+  """Proposals created by this player."""
+  proposalsCreated: [Proposal!]! @derivedFrom(field: "proposer")
+
+  """Votes cast by this player."""
+  votes: [VoteRecord!]! @derivedFrom(field: "voter")
+
+  """Stake records for this player."""
+  stakes: [StakeRecord!]! @derivedFrom(field: "staker")
+
+  """Treasure vaults owned by this player."""
+  vaults: [TreasureVault!]! @derivedFrom(field: "owner")
+
+  """Timestamp of first on-chain activity."""
+  createdAt: BigInt!
+
+  """Timestamp of last profile update."""
+  lastUpdatedAt: BigInt!
+}
+
+# ─── Ship NFT ──────────────────────────────────────────────────────────────
+
+type Ship @entity {
+  """Ship token ID."""
+  id: ID!
+
+  """Current owner address."""
+  owner: Player!
+
+  """Ship type symbol (e.g. fighter, explorer, hauler)."""
+  shipType: String!
+
+  """Hull integrity value."""
+  hull: Int!
+
+  """Scanner power rating."""
+  scannerPower: Int!
+
+  """Ship level for progression tracking."""
+  level: Int!
+
+  """Scan range capability."""
+  scanRange: Int!
+
+  """IPFS metadata CID."""
+  metadataCID: String
+
+  """Listings for this ship on the marketplace."""
+  listings: [MarketplaceListing!]! @derivedFrom(field: "ship")
+
+  """Blueprints applied to this ship."""
+  appliedBlueprints: [Blueprint!]! @derivedFrom(field: "appliedToShip")
+
+  """Timestamp when this ship was minted."""
+  mintedAt: BigInt!
+}
+
+# ─── Nebula / Exploration ──────────────────────────────────────────────────
+
+type NebulaScan @entity {
+  """Unique scan identifier (composite of ship + ledger)."""
+  id: ID!
+
+  """Player who initiated the scan."""
+  player: Player!
+
+  """Ship used for scanning."""
+  ship: Ship!
+
+  """Layout hash identifying the generated nebula."""
+  layoutHash: String!
+
+  """Computed rarity tier of the scan result."""
+  rarity: String!
+
+  """Total energy discovered in this layout."""
+  totalEnergy: Int!
+
+  """Number of anomalies detected."""
+  anomalyCount: Int!
+
+  """Resources harvested from this scan."""
+  harvestedResources: [HarvestRecord!]! @derivedFrom(field: "scan")
+
+  """Ledger sequence when the scan occurred."""
+  scannedAt: BigInt!
+}
+
+type HarvestRecord @entity {
+  """Unique harvest record ID."""
+  id: ID!
+
+  """The nebula scan this harvest belongs to."""
+  scan: NebulaScan!
+
+  """Ship that performed the harvest."""
+  ship: Ship!
+
+  """Resource type harvested."""
+  resourceType: String!
+
+  """Amount harvested."""
+  amount: BigInt!
+
+  """Ledger sequence of the harvest."""
+  harvestedAt: BigInt!
+}
+
+# ─── Session ───────────────────────────────────────────────────────────────
+
+type Session @entity {
+  """Session ID."""
+  id: ID!
+
+  """Player who owns this session."""
+  player: Player!
+
+  """Ship assigned to this session."""
+  ship: Ship
+
+  """Ledger sequence when the session started."""
+  startedAt: BigInt!
+
+  """Ledger sequence when the session expires."""
+  expiresAt: BigInt!
+
+  """Whether the session is still active."""
+  active: Boolean!
+}
+
+# ─── Marketplace / Trading ─────────────────────────────────────────────────
+
+type MarketplaceListing @entity {
+  """Listing ID (composite of seller + ship)."""
+  id: ID!
+
+  """Ship being listed."""
+  ship: Ship!
+
+  """Seller address."""
+  seller: Player!
+
+  """Listing price in native token units."""
+  price: BigInt!
+
+  """Whether the listing is still active."""
+  active: Boolean!
+
+  """Timestamp when the listing was created."""
+  listedAt: BigInt!
+
+  """Timestamp when the listing was sold or cancelled."""
+  closedAt: BigInt
+
+  """Buyer if the listing was sold."""
+  buyer: Player
+
+  """Royalty amount taken on sale."""
+  royaltyAmount: BigInt
+
+  """Seller proceeds after royalty deduction."""
+  sellerProceeds: BigInt
+}
+
+type DEXOffer @entity {
+  """DEX offer ID."""
+  id: ID!
+
+  """Player who created the offer."""
+  player: Player!
+
+  """Resource asset being offered."""
+  resourceType: String!
+
+  """Amount listed."""
+  listedAmount: BigInt!
+
+  """Minimum acceptable price."""
+  minPrice: BigInt!
+
+  """Whether the offer is still active."""
+  active: Boolean!
+
+  """Timestamp when the offer was created."""
+  listedAt: BigInt!
+}
+
+type TradeRecord @entity {
+  """Trade record ID."""
+  id: ID!
+
+  """Trader address."""
+  trader: Player!
+
+  """Order side (Buy or Sell)."""
+  side: String!
+
+  """Resource symbol traded."""
+  resource: String!
+
+  """Quantity traded."""
+  quantity: BigInt!
+
+  """Execution price."""
+  price: BigInt!
+
+  """Timestamp of the trade."""
+  executedAt: BigInt!
+}
+
+# ─── Alliance / Social ─────────────────────────────────────────────────────
+
+type Alliance @entity {
+  """Alliance ID."""
+  id: ID!
+
+  """Alliance name."""
+  name: String!
+
+  """Founder address."""
+  founder: Player!
+
+  """Current members of the alliance."""
+  members: [AllianceMember!]! @derivedFrom(field: "alliance")
+
+  """Alliance treasury balance."""
+  treasury: BigInt!
+
+  """Voting threshold for alliance decisions."""
+  votingThreshold: Int!
+
+  """Whether the alliance is active."""
+  isActive: Boolean!
+
+  """Timestamp when the alliance was founded."""
+  createdAt: BigInt!
+}
+
+type AllianceMember @entity {
+  """Composite ID of alliance + member."""
+  id: ID!
+
+  """The alliance this membership belongs to."""
+  alliance: Alliance!
+
+  """The player who is a member."""
+  player: Player!
+
+  """Timestamp when the player joined."""
+  joinedAt: BigInt!
+
+  """Total contributions made by this member."""
+  contribution: BigInt!
+}
+
+# ─── Governance / DAO ──────────────────────────────────────────────────────
+
+type Proposal @entity {
+  """Proposal ID."""
+  id: ID!
+
+  """Player who created the proposal."""
+  proposer: Player!
+
+  """Description of the proposal."""
+  description: String!
+
+  """Ledger sequence when voting starts."""
+  votingStartLedger: BigInt!
+
+  """Ledger sequence when voting ends."""
+  votingEndLedger: BigInt!
+
+  """Ledger sequence when the timelock ends."""
+  timelockEndLedger: BigInt
+
+  """Current proposal status."""
+  status: String!
+
+  """Total votes in favor."""
+  forVotes: BigInt!
+
+  """Total votes against."""
+  againstVotes: BigInt!
+
+  """Individual vote records for this proposal."""
+  votes: [VoteRecord!]! @derivedFrom(field: "proposal")
+
+  """Timestamp when the proposal was created."""
+  createdAt: BigInt!
+}
+
+type VoteRecord @entity {
+  """Composite ID of proposal + voter."""
+  id: ID!
+
+  """The proposal this vote belongs to."""
+  proposal: Proposal!
+
+  """Player who cast the vote."""
+  voter: Player!
+
+  """Vote direction (For or Against)."""
+  direction: String!
+
+  """Voting power used for this vote."""
+  power: BigInt!
+
+  """Timestamp when the vote was cast."""
+  votedAt: BigInt!
+}
+
+type DaoConfig @entity {
+  """Singleton — always "config"."""
+  id: ID!
+
+  """Quorum requirement in basis points."""
+  quorumBasisPoints: Int!
+
+  """Voting period in ledger sequences."""
+  votingPeriodLedgers: BigInt!
+
+  """Timelock duration in ledger sequences."""
+  timelockDurationLedgers: BigInt!
+
+  """Minimum proposal threshold."""
+  proposalThreshold: BigInt!
+}
+
+# ─── Staking / Treasury ────────────────────────────────────────────────────
+
+type StakeRecord @entity {
+  """Composite ID of staker + ledger."""
+  id: ID!
+
+  """Player who staked."""
+  staker: Player!
+
+  """Amount staked."""
+  amount: BigInt!
+
+  """Ledger sequence when staking occurred."""
+  createdLedger: BigInt!
+
+  """Ledger sequence when the stake unlocks."""
+  unlockLedger: BigInt!
+}
+
+type TreasureVault @entity {
+  """Vault ID."""
+  id: ID!
+
+  """Owner of the vault."""
+  owner: Player!
+
+  """Ship associated with this vault."""
+  ship: Ship
+
+  """Deposited amount."""
+  amount: BigInt!
+
+  """Ledger sequence when the vault unlocks."""
+  lockUntil: BigInt!
+
+  """Bonus multiplier applied on claim."""
+  bonusMultiplier: Int!
+
+  """Whether the vault has been claimed."""
+  claimed: Boolean!
+
+  """Timestamp when the vault was created."""
+  depositedAt: BigInt!
+}
+
+type TreasuryTransfer @entity {
+  """Transfer ID."""
+  id: ID!
+
+  """Recipient address."""
+  recipient: Player!
+
+  """Amount transferred."""
+  amount: BigInt!
+
+  """Timestamp of the transfer."""
+  timestamp: BigInt!
+}
+
+# ─── Blueprint / Crafting ──────────────────────────────────────────────────
+
+type Blueprint @entity {
+  """Blueprint ID."""
+  id: ID!
+
+  """Player who crafted this blueprint."""
+  crafter: Player!
+
+  """Rarity tier of the blueprint."""
+  rarity: String!
+
+  """Component symbols used in crafting."""
+  components: [String!]!
+
+  """Ship this blueprint was applied to (if any)."""
+  appliedToShip: Ship
+
+  """Timestamp when the blueprint was crafted."""
+  craftedAt: BigInt!
+}
+
+# ─── Referral ──────────────────────────────────────────────────────────────
+
+type Referral @entity {
+  """Referral ID."""
+  id: ID!
+
+  """Player who referred."""
+  referrer: Player!
+
+  """Player who was referred."""
+  newNomad: Player!
+
+  """Whether the referral reward has been claimed."""
+  claimed: Boolean!
+
+  """Whether the referred player completed their first scan."""
+  firstScanDone: Boolean!
+
+  """Timestamp when the referral was registered."""
+  registeredAt: BigInt!
+}
