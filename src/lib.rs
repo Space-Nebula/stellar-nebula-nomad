@@ -129,9 +129,10 @@ pub use leaderboards::{
 };
 pub use content_tools::{
     CreatedContent, ContentMetadata, MarketplaceListing, VoteResult,
-    ContentToolsError,
+    ContentToolsError, RevenueSplitConfig, PurchaseResult,
     CONTENT_TYPE_NEBULA, CONTENT_TYPE_MISSION, CONTENT_TYPE_EVENT,
     MAX_CONTENT_PER_CREATOR, MAX_MARKETPLACE_LISTINGS,
+    DEFAULT_CREATOR_SHARE_BPS, DEFAULT_PLATFORM_SHARE_BPS, MAX_CONTENT_PRICE,
 };
 pub use pvp_combat::{
     CombatStats, Challenge, CombatState, CombatMove, CombatHistory,
@@ -612,6 +613,60 @@ impl NebulaNomadContract {
     /// Set content tools admin (admin only).
     pub fn set_content_admin(env: Env, admin: Address) {
         content_tools::set_admin(&env, &admin)
+    }
+
+    // ─── Content Revenue Sharing (Issue #192) ────────────────────────────────
+
+    /// Set the price of a content item (creator only).
+    pub fn set_content_price(
+        env: Env,
+        creator: Address,
+        content_id: u64,
+        price: i128,
+    ) -> Result<(), ContentToolsError> {
+        content_tools::set_content_price(&env, &creator, content_id, price)
+    }
+
+    /// Purchase content. Revenue split between creator and platform.
+    pub fn purchase_content(
+        env: Env,
+        buyer: Address,
+        content_id: u64,
+    ) -> Result<PurchaseResult, ContentToolsError> {
+        content_tools::purchase_content(&env, &buyer, content_id)
+    }
+
+    /// Get the revenue split configuration.
+    pub fn get_revenue_split_config(env: Env) -> RevenueSplitConfig {
+        content_tools::get_revenue_split_config(&env)
+    }
+
+    /// Set the revenue split configuration (admin only).
+    pub fn set_revenue_split_config(
+        env: Env,
+        caller: Address,
+        config: RevenueSplitConfig,
+    ) -> Result<(), ContentToolsError> {
+        content_tools::set_revenue_split_config(&env, &caller, config)
+    }
+
+    /// Get accumulated revenue for a creator.
+    pub fn get_creator_revenue(env: Env, creator: Address) -> i128 {
+        content_tools::get_creator_revenue(&env, &creator)
+    }
+
+    /// Get accumulated platform revenue.
+    pub fn get_platform_revenue(env: Env) -> i128 {
+        content_tools::get_platform_revenue(&env)
+    }
+
+    /// Withdraw creator revenue (creator only).
+    pub fn withdraw_creator_revenue(
+        env: Env,
+        creator: Address,
+        amount: i128,
+    ) -> Result<i128, ContentToolsError> {
+        content_tools::withdraw_creator_revenue(&env, &creator, amount)
     }
 
     // === PvP Combat API (Issue #152) ===
