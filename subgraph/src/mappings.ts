@@ -644,6 +644,25 @@ export function handleMetadataUpdated(event: any): void {
   }
 }
 
+/**
+ * Handles `("meta", "pinned")` → (token_id: u64, cid: Bytes)
+ *
+ * Emitted when a CID is queued for IPFS pinning. Tracks the pin request
+ * for monitoring decentralized metadata availability.
+ */
+export function handleMetadataPinned(event: any): void {
+  const tokenId = event.parameters[0].value.toU64().toString();
+  const cid = event.parameters[1].value.toBytes().toHexString();
+
+  const ship = Ship.load(tokenId);
+  if (ship != null && ship.metadataCID == null) {
+    ship.metadataCID = cid;
+    ship.save();
+  }
+
+  log.info("IPFS pin requested for token {} (CID: {})", [tokenId, cid]);
+}
+
 // ─── RBAC Handlers ─────────────────────────────────────────────────────────
 
 /**
