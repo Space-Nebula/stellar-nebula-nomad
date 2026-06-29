@@ -1071,6 +1071,21 @@ impl NebulaNomadContract {
         ship_nft::get_ships_by_owner(&env, &owner)
     }
 
+    /// Set a ship NFT metadata URI for external marketplace compatibility.
+    pub fn set_metadata(
+        env: Env,
+        owner: Address,
+        ship_id: u64,
+        metadata_uri: Bytes,
+    ) -> Result<ShipNft, ShipError> {
+        ship_nft::set_metadata(&env, &owner, ship_id, &metadata_uri)
+    }
+
+    /// Read a ship NFT metadata URI for marketplace listings.
+    pub fn get_metadata(env: Env, ship_id: u64) -> Result<Bytes, ShipError> {
+        ship_nft::get_metadata(&env, ship_id)
+    }
+
     /// Gas-optimized harvest.
     pub fn harvest_resources(
         env: Env,
