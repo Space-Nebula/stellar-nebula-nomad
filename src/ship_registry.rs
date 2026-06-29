@@ -9,4 +9,6 @@ pub struct Ship {
     pub name: String,
     pub level: u32,
     pub scan_range: u32,
+    /// Marketplace-compatible NFT metadata URI (for example, ipfs://..., https://..., or ar://...).
+    pub metadata_uri: String,
 }

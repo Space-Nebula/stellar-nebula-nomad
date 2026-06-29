@@ -35,6 +35,8 @@ pub enum ShipError {
     InvalidShipType = 6,
     /// Reentrancy guard is active.
     ReentrancyDetected = 7,
+    /// Metadata URI must use a marketplace-compatible URI scheme.
+    InvalidMetadataUri = 8,
 }
 
 // ─── Ship NFT Data ───────────────────────────────────────────────────────
@@ -50,6 +52,7 @@ pub struct ShipNft {
     pub durability: u32,
     pub max_durability: u32,
     pub metadata: Bytes,
+    pub metadata_uri: Bytes,
 }
 
 // ─── Ship Type Stats ─────────────────────────────────────────────────────
@@ -69,6 +72,32 @@ fn stats_for_type(ship_type: &Symbol) -> (u32, u32) {
         // Default stats for custom / future ship types.
         (100, 30)
     }
+}
+
+fn has_prefix(bytes: &Bytes, prefix: &[u8]) -> bool {
+    if bytes.len() < prefix.len() as u32 {
+        return false;
+    }
+
+    for (i, expected) in prefix.iter().enumerate() {
+        if bytes.get(i as u32).unwrap() != *expected {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Validate NFT metadata URIs accepted by common external marketplaces.
+///
+/// Supported standards-friendly schemes are:
+/// - `ipfs://` for decentralized IPFS JSON metadata.
+/// - `https://` for web-hosted JSON metadata.
+/// - `ar://` for Arweave-hosted JSON metadata.
+fn is_valid_metadata_uri(metadata_uri: &Bytes) -> bool {
+    has_prefix(metadata_uri, b"ipfs://")
+        || has_prefix(metadata_uri, b"https://")
+        || has_prefix(metadata_uri, b"ar://")
 }
 
 fn is_valid_ship_type(ship_type: &Symbol) -> bool {
@@ -205,6 +234,7 @@ pub fn mint_ship(
         durability: 100,
         max_durability: 100,
         metadata: metadata.clone(),
+        metadata_uri: Bytes::new(env),
     };
 
     store_ship(env, &ship);
@@ -259,6 +289,7 @@ pub fn batch_mint_ships(
             durability: 100,
             max_durability: 100,
             metadata: metadata.clone(),
+            metadata_uri: Bytes::new(env),
         };
 
         store_ship(env, &ship);
@@ -364,4 +395,46 @@ pub fn damage_ship(env: &Env, ship_id: u64, amount: u32) -> Result<ShipNft, Ship
     ship.durability = ship.durability.saturating_sub(amount);
     env.storage().persistent().set(&key, &ship);
     Ok(ship)
+}
+
+
+/// Set the marketplace-compatible metadata URI for a ship NFT.
+///
+/// The current ship owner must authorize this call. URI values must use a
+/// standard NFT metadata scheme (`ipfs://`, `https://`, or `ar://`) so external
+/// marketplaces can resolve the ship metadata JSON.
+pub fn set_metadata(
+    env: &Env,
+    owner: &Address,
+    ship_id: u64,
+    metadata_uri: &Bytes,
+) -> Result<ShipNft, ShipError> {
+    owner.require_auth();
+
+    if !is_valid_metadata_uri(metadata_uri) {
+        return Err(ShipError::InvalidMetadataUri);
+    }
+
+    let key = DataKey::Ship(ship_id);
+    let mut ship: ShipNft = env.storage().persistent().get(&key).ok_or(ShipError::ShipNotFound)?;
+
+    if ship.owner != *owner {
+        return Err(ShipError::NotOwner);
+    }
+
+    ship.metadata_uri = metadata_uri.clone();
+    env.storage().persistent().set(&key, &ship);
+
+    env.events().publish(
+        (symbol_short!("ship"), symbol_short!("meta")),
+        (ship_id, metadata_uri.clone(), owner.clone()),
+    );
+
+    Ok(ship)
+}
+
+/// Read the marketplace-compatible metadata URI for a ship NFT.
+pub fn get_metadata(env: &Env, ship_id: u64) -> Result<Bytes, ShipError> {
+    let ship = get_ship(env, ship_id)?;
+    Ok(ship.metadata_uri)
 }

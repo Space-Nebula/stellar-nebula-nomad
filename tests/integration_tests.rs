@@ -418,6 +418,7 @@ fn test_fleet_register_and_sync() {
         name: String::from_str(&env, "Voyager"),
         level: 2,
         scan_range: 4,
+        metadata_uri: String::from_str(&env, "ipfs://ships/1"),
     };
     let ship_2 = Ship {
         id: 2,
@@ -425,6 +426,7 @@ fn test_fleet_register_and_sync() {
         name: String::from_str(&env, "Pioneer"),
         level: 3,
         scan_range: 5,
+        metadata_uri: String::from_str(&env, "ipfs://ships/2"),
     };
 
     client.register_ship_for_owner(&owner, &ship_1);
@@ -456,6 +458,7 @@ fn test_fleet_rejects_too_many_ships() {
             name: String::from_str(&env, "Scout"),
             level: 1,
             scan_range: 2,
+            metadata_uri: String::from_str(&env, "ipfs://ships/scout"),
         };
         client.register_ship_for_owner(&owner, &ship);
         ship_ids.push_back(i);
@@ -1338,6 +1341,7 @@ fn test_progression_to_exploration_full_flow() {
         name: String::from_str(&env, "Nebula Runner"),
         level: 1,
         scan_range: 2,
+        metadata_uri: String::from_str(&env, "ipfs://ships/nebula-runner"),
     };
     client.register_ship_for_owner(&player, &registered_ship);
 
