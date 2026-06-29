@@ -157,9 +157,9 @@ pub fn emit_ship_minted(env: &Env, ship: &ShipNft) {
     );
 }
 
-pub fn emit_ownership_transferred(env: &Env, ship_id: u64, from: &Address, to: &Address) {
+pub fn emit_ship_transferred(env: &Env, ship_id: u64, from: &Address, to: &Address) {
     env.events().publish(
-        (symbol_short!("ship"), symbol_short!("xfer")),
+        (symbol_short!("ship"), symbol_short!("transfer")),
         (ship_id, from.clone(), to.clone()),
     );
 }
@@ -256,6 +256,8 @@ pub fn batch_mint_ships(
             ship_type: st.clone(),
             hull,
             scanner_power,
+            durability: 100,
+            max_durability: 100,
             metadata: metadata.clone(),
         };
 
@@ -269,15 +271,16 @@ pub fn batch_mint_ships(
     Ok(ships)
 }
 
-/// Transfer ownership of a Ship NFT.
+/// Transfer ownership of a Ship NFT from one player to another.
 ///
-/// The current `owner` must authorize. The new owner's address is
-/// validated (must differ from current owner). Emits an
-/// `OwnershipTransferred` event.
-pub fn transfer_ownership(
+/// The `from` address must authorize the transfer and must be the current
+/// owner. The recipient must differ from the current owner. Ownership indices
+/// are updated atomically and a `ShipTransferred` event is emitted.
+pub fn transfer_ship(
     env: &Env,
     ship_id: u64,
-    new_owner: &Address,
+    from: &Address,
+    to: &Address,
 ) -> Result<ShipNft, ShipError> {
     enter_lock(env)?;
 
@@ -292,28 +295,39 @@ pub fn transfer_ownership(
             e
         })?;
 
-    // Only the current owner can initiate a transfer.
-    ship.owner.require_auth();
+    from.require_auth();
 
-    if ship.owner == *new_owner {
+    if ship.owner != *from {
+        exit_lock(env);
+        return Err(ShipError::NotOwner);
+    }
+
+    if ship.owner == *to {
         exit_lock(env);
         return Err(ShipError::SameOwner);
     }
 
-    let old_owner = ship.owner.clone();
+    remove_ship_from_owner(env, from, ship_id);
+    add_ship_to_owner(env, to, ship_id);
 
-    // Update ownership indices.
-    remove_ship_from_owner(env, &old_owner, ship_id);
-    add_ship_to_owner(env, new_owner, ship_id);
-
-    ship.owner = new_owner.clone();
+    ship.owner = to.clone();
     store_ship(env, &ship);
 
-    emit_ownership_transferred(env, ship_id, &old_owner, new_owner);
+    emit_ship_transferred(env, ship_id, from, to);
 
     exit_lock(env);
 
     Ok(ship)
+}
+
+/// Backwards-compatible alias for older callers.
+pub fn transfer_ownership(
+    env: &Env,
+    ship_id: u64,
+    new_owner: &Address,
+) -> Result<ShipNft, ShipError> {
+    let ship = get_ship(env, ship_id)?;
+    transfer_ship(env, ship_id, &ship.owner, new_owner)
 }
 
 /// Read a ship by ID (view function — no auth required).

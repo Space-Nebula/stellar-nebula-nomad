@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use soroban_sdk::testutils::{Address as _, Events, Ledger, LedgerInfo};
-use soroban_sdk::{symbol_short, vec, Address, Bytes, BytesN, Env, String, Vec};
+use soroban_sdk::{symbol_short, vec, Address, Bytes, BytesN, Env, IntoVal, String, Vec};
 use stellar_nebula_nomad::{
     Blueprint, BlueprintError, BlueprintRarity, CellType, NebulaCell, NebulaLayout,
     NebulaNomadContract, NebulaNomadContractClient, ProfileError, ProgressUpdate, Rarity,
@@ -477,6 +477,56 @@ fn test_mint_ship_and_transfer_ownership() {
     let new_owner = Address::generate(&env);
     let transferred = client.transfer_ownership(&ship.id, &new_owner);
     assert_eq!(transferred.owner, new_owner);
+}
+
+#[test]
+fn test_transfer_ship_updates_ownership_tracking_and_emits_event() {
+    let (env, client, player) = setup_env();
+    let metadata = Bytes::from_slice(&env, &[0u8; 4]);
+    let ship = client.mint_ship(&player, &symbol_short!("fighter"), &metadata);
+    let new_owner = Address::generate(&env);
+
+    let transferred = client.transfer_ship(&ship.id, &player, &new_owner);
+
+    assert_eq!(transferred.owner, new_owner);
+    assert_eq!(client.get_ship(&ship.id).owner, new_owner);
+    assert_eq!(client.get_ships_by_owner(&player).len(), 0);
+    let new_owner_ships = client.get_ships_by_owner(&new_owner);
+    assert_eq!(new_owner_ships.len(), 1);
+    assert_eq!(new_owner_ships.get(0).unwrap(), ship.id);
+
+    let events = env.events().all();
+    let (_, topics, _) = events.get(events.len() - 2).unwrap();
+    assert_eq!(topics.get(0).unwrap(), symbol_short!("ship").into_val(&env));
+    assert_eq!(topics.get(1).unwrap(), symbol_short!("transfer").into_val(&env));
+}
+
+#[test]
+fn test_transfer_ship_rejects_non_owner_sender() {
+    let (env, client, player) = setup_env();
+    let metadata = Bytes::from_slice(&env, &[0u8; 4]);
+    let ship = client.mint_ship(&player, &symbol_short!("explorer"), &metadata);
+    let not_owner = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+
+    let result = client.try_transfer_ship(&ship.id, &not_owner, &new_owner);
+
+    assert_eq!(result, Err(Ok(ShipError::NotOwner)));
+    assert_eq!(client.get_ship(&ship.id).owner, player);
+}
+
+#[test]
+fn test_transfer_ship_rejects_same_owner_and_missing_ship() {
+    let (env, client, player) = setup_env();
+    let metadata = Bytes::from_slice(&env, &[0u8; 4]);
+    let ship = client.mint_ship(&player, &symbol_short!("hauler"), &metadata);
+    let new_owner = Address::generate(&env);
+
+    let same_owner = client.try_transfer_ship(&ship.id, &player, &player);
+    assert_eq!(same_owner, Err(Ok(ShipError::SameOwner)));
+
+    let missing = client.try_transfer_ship(&999_999, &player, &new_owner);
+    assert_eq!(missing, Err(Ok(ShipError::ShipNotFound)));
 }
 
 #[test]
