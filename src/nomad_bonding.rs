@@ -65,7 +65,7 @@ pub enum BondStatus {
 
 /// ── Nomad Bond ────────────────────────────────────────────────────────────
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct NomadBond {
     pub bond_id: u64,
@@ -78,7 +78,7 @@ pub struct NomadBond {
 
 /// ── Yield Delegation ──────────────────────────────────────────────────────
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct YieldDelegation {
     pub bond_id: u64,
@@ -268,6 +268,8 @@ pub fn delegate_yield(
 /// # Errors
 /// * [`BondError::ArithmeticOverflow`] if the new balance overflows `u64`.
 pub fn accrue_essence(env: &Env, player: &Address, amount: u64) -> Result<(), BondError> {
+    player.require_auth();
+
     let balance: u64 = env
         .storage()
         .instance()
@@ -420,21 +422,21 @@ pub fn dissolve_bond(env: &Env, caller: &Address, bond_id: u64) -> Result<NomadB
 /// ── get_bond ──────────────────────────────────────────────────────────────
 ///
 /// Read-only view of a bond by its ID.
-pub fn get_bond(env: &Env, bond_id: u64) -> NomadBond {
+pub fn get_bond(env: &Env, bond_id: u64) -> Result<NomadBond, BondError> {
     env.storage()
         .instance()
         .get(&DataKey::Bond(bond_id))
-        .expect("bond not found")
+        .ok_or(BondError::BondNotFound)
 }
 
 /// ── get_yield_delegation ──────────────────────────────────────────────────
 ///
 /// Read-only view of a yield delegation by its bond ID.
-pub fn get_yield_delegation(env: &Env, bond_id: u64) -> YieldDelegation {
+pub fn get_yield_delegation(env: &Env, bond_id: u64) -> Result<YieldDelegation, BondError> {
     env.storage()
         .instance()
         .get(&DataKey::YieldDel(bond_id))
-        .expect("no yield delegation for this bond")
+        .ok_or(BondError::NoDelegation)
 }
 
 /// ── get_essence_balance ───────────────────────────────────────────────────
@@ -508,5 +510,190 @@ mod tests {
     fn max_balance_full_percentage_overflows() {
         // u64::MAX * 100 overflows and must be reported, not wrapped.
         assert_eq!(calculate_yield_amount(u64::MAX, 100), None);
+    }
+
+    // ── Storage & auth tests ──────────────────────────────────────────────────
+    use soroban_sdk::{testutils::Address as _, contract, contractimpl};
+
+    #[contract]
+    struct Stub;
+    #[contractimpl]
+    impl Stub {}
+
+    fn make_env() -> (Env, Address) {
+        let env = Env::default();
+        let contract_id = env.register(Stub, ());
+        (env, contract_id)
+    }
+
+    #[test]
+    fn test_get_bond_not_found_returns_error() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let result = get_bond(&env, 999);
+            assert_eq!(result, Err(BondError::BondNotFound));
+        });
+    }
+
+    #[test]
+    fn test_get_yield_delegation_not_found_returns_error() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let result = get_yield_delegation(&env, 999);
+            assert_eq!(result, Err(BondError::NoDelegation));
+        });
+    }
+
+    #[test]
+    fn test_get_essence_balance_defaults_to_zero() {
+        let (env, contract_id) = make_env();
+        let player = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let balance = get_essence_balance(&env, &player);
+            assert_eq!(balance, 0);
+        });
+    }
+
+    #[test]
+    fn test_create_bond_success() {
+        let (env, contract_id) = make_env();
+        let initiator = Address::generate(&env);
+        let partner = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        env.as_contract(&contract_id, || {
+            let bond = create_bond(&env, &initiator, 1, &partner)
+                .expect("create_bond should succeed");
+
+            assert_eq!(bond.initiator, initiator);
+            assert_eq!(bond.partner, partner);
+            assert_eq!(bond.status, BondStatus::Pending);
+            assert_eq!(bond.ship_id, 1);
+        });
+    }
+
+    #[test]
+    fn test_create_bond_self_bond_rejected() {
+        let (env, contract_id) = make_env();
+        let player = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        env.as_contract(&contract_id, || {
+            let result = create_bond(&env, &player, 1, &player);
+            assert_eq!(result, Err(BondError::SelfBond));
+        });
+    }
+
+    #[test]
+    fn test_accept_bond_invalid_partner_rejected() {
+        let (env, contract_id) = make_env();
+        let initiator = Address::generate(&env);
+        let partner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        env.as_contract(&contract_id, || {
+            let bond = create_bond(&env, &initiator, 1, &partner)
+                .expect("create_bond should succeed");
+
+            let result = accept_bond(&env, &stranger, bond.bond_id);
+            assert_eq!(result, Err(BondError::NotDesignatedPartner));
+        });
+    }
+
+    #[test]
+    fn test_dissolve_bond_non_member_rejected() {
+        let (env, contract_id) = make_env();
+        let initiator = Address::generate(&env);
+        let partner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        env.as_contract(&contract_id, || {
+            let bond = create_bond(&env, &initiator, 1, &partner)
+                .expect("create_bond should succeed");
+            let _ = accept_bond(&env, &partner, bond.bond_id);
+
+            let result = dissolve_bond(&env, &stranger, bond.bond_id);
+            assert_eq!(result, Err(BondError::NotBondParty));
+        });
+    }
+
+    #[test]
+    fn test_claim_yield_no_delegation_rejected() {
+        let (env, contract_id) = make_env();
+        let initiator = Address::generate(&env);
+        let partner = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        env.as_contract(&contract_id, || {
+            let bond = create_bond(&env, &initiator, 1, &partner)
+                .expect("create_bond should succeed");
+            let _ = accept_bond(&env, &partner, bond.bond_id);
+
+            let result = claim_yield(&env, &partner, bond.bond_id);
+            assert_eq!(result, Err(BondError::NoDelegation));
+        });
+    }
+
+    #[test]
+    fn test_delegate_yield_invalid_percentage_rejected() {
+        let (env, contract_id) = make_env();
+        let initiator = Address::generate(&env);
+        let partner = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        env.as_contract(&contract_id, || {
+            let bond = create_bond(&env, &initiator, 1, &partner)
+                .expect("create_bond should succeed");
+            let _ = accept_bond(&env, &partner, bond.bond_id);
+
+            let result = delegate_yield(&env, &initiator, bond.bond_id, 0);
+            assert_eq!(result, Err(BondError::InvalidPercentage));
+
+            let result = delegate_yield(&env, &initiator, bond.bond_id, 101);
+            assert_eq!(result, Err(BondError::InvalidPercentage));
+        });
+    }
+
+    #[test]
+    fn test_full_bond_lifecycle_with_yield() {
+        let (env, contract_id) = make_env();
+        let initiator = Address::generate(&env);
+        let partner = Address::generate(&env);
+
+        env.mock_all_auths();
+
+        env.as_contract(&contract_id, || {
+            let bond = create_bond(&env, &initiator, 1, &partner)
+                .expect("create_bond should succeed");
+            assert_eq!(bond.status, BondStatus::Pending);
+
+            let bond = accept_bond(&env, &partner, bond.bond_id)
+                .expect("accept_bond should succeed");
+            assert_eq!(bond.status, BondStatus::Active);
+
+            let delegation = delegate_yield(&env, &initiator, bond.bond_id, 50)
+                .expect("delegate_yield should succeed");
+            assert_eq!(delegation.percentage, 50);
+            assert_eq!(delegation.beneficiary, partner);
+
+            let _ = accrue_essence(&env, &initiator, 1000)
+                .expect("accrue_essence should succeed");
+
+            let amount = claim_yield(&env, &partner, bond.bond_id)
+                .expect("claim_yield should succeed");
+            assert_eq!(amount, 500);
+
+            let bond = dissolve_bond(&env, &initiator, bond.bond_id)
+                .expect("dissolve_bond should succeed");
+            assert_eq!(bond.status, BondStatus::Dissolved);
+        });
     }
 }
