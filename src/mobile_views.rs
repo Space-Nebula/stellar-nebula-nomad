@@ -1,5 +1,5 @@
 use crate::player_profile::ProfileKey;
-use crate::resource_minter::ResourceKey;
+use crate::resource_minter::{MinterKey, ResourceType};
 use crate::ship_nft::DataKey as ShipDataKey;
 use soroban_sdk::{contracttype, contracterror, symbol_short, Address, Env, Vec};
 
@@ -55,6 +55,21 @@ pub struct QuickScanPreview {
     pub estimated_energy_max: u32,
     /// Predicted rarity index: 0 = Common … 4 = Legendary.
     pub predicted_rarity_index: u32,
+}
+
+/// Combined result returned by `batch_get_mobile_info` — dashboard plus the
+/// primary ship's scan preview in a single RPC round-trip.
+///
+/// When the player owns no ships, `has_scan_preview` is `false` and all
+/// `scan_*` fields are zero — matching the same zero-default convention used
+/// by `MobileDashboard`.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct MobileBatchInfo {
+    pub dashboard: MobileDashboard,
+    /// Whether the scan preview fields contain valid data.
+    pub has_scan_preview: bool,
+    pub scan_preview: QuickScanPreview,
 }
 
 // ─── Errors ───────────────────────────────────────────────────────────────────
@@ -154,28 +169,19 @@ pub fn get_mobile_dashboard(env: &Env, player: &Address) -> MobileDashboard {
     // ── Resource balances ─────────────────────────────────────────────────────
     let dust_balance: u32 = env
         .storage()
-        .instance()
-        .get(&ResourceKey::ResourceBalance(
-            player.clone(),
-            symbol_short!("dust"),
-        ))
-        .unwrap_or(0);
+        .persistent()
+        .get(&MinterKey::Balance(player.clone(), ResourceType::StellarDust))
+        .unwrap_or(0u64) as u32;
     let ore_balance: u32 = env
         .storage()
-        .instance()
-        .get(&ResourceKey::ResourceBalance(
-            player.clone(),
-            symbol_short!("ore"),
-        ))
-        .unwrap_or(0);
+        .persistent()
+        .get(&MinterKey::Balance(player.clone(), ResourceType::DarkMatter))
+        .unwrap_or(0u64) as u32;
     let gas_balance: u32 = env
         .storage()
-        .instance()
-        .get(&ResourceKey::ResourceBalance(
-            player.clone(),
-            symbol_short!("gas"),
-        ))
-        .unwrap_or(0);
+        .persistent()
+        .get(&MinterKey::Balance(player.clone(), ResourceType::ExoticMatter))
+        .unwrap_or(0u64) as u32;
 
     MobileDashboard {
         player: player.clone(),
@@ -226,4 +232,40 @@ pub fn get_quick_scan_preview(
         estimated_energy_max,
         predicted_rarity_index,
     })
+}
+
+/// Return dashboard + primary-ship scan preview in a single call, minimising
+/// RPC round-trips for mobile clients.
+pub fn batch_get_mobile_info(env: &Env, player: &Address) -> MobileBatchInfo {
+    let dashboard = get_mobile_dashboard(env, player);
+    let (has_scan_preview, scan_preview) = if dashboard.primary_ship_id != 0 {
+        match get_quick_scan_preview(env, dashboard.primary_ship_id) {
+            Ok(p) => (true, p),
+            Err(_) => (false, QuickScanPreview {
+                ship_id: 0,
+                scanner_power: 0,
+                estimated_energy_min: 0,
+                estimated_energy_max: 0,
+                predicted_rarity_index: 0,
+            }),
+        }
+    } else {
+        (false, QuickScanPreview {
+            ship_id: 0,
+            scanner_power: 0,
+            estimated_energy_min: 0,
+            estimated_energy_max: 0,
+            predicted_rarity_index: 0,
+        })
+    };
+    MobileBatchInfo { dashboard, has_scan_preview, scan_preview }
+}
+
+/// Emit a mobile-subscription event so off-chain indexers know this player
+/// wants push notifications for on-chain state changes.
+pub fn subscribe_mobile_events(env: &Env, player: &Address) {
+    env.events().publish(
+        (symbol_short!("mobile"), symbol_short!("sub")),
+        player.clone(),
+    );
 }
