@@ -1,7 +1,5 @@
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol};
 
-use crate::player_profile::{self, PlayerProfile};
-
 // ─── Configuration ─────────────────────────────────────────────────────────
 
 /// Maximum number of sponsorships allowed per day (burst limit).
@@ -23,6 +21,12 @@ pub enum DataKey {
     SponsoredStatus(Address),
     /// Config for minimum fund threshold and daily cap.
     Config,
+    /// Lifetime sponsored amount per user (in stroops).
+    UserLifetimeSponsored(Address),
+    /// Per-user daily sponsorship count (resets each day).
+    UserDailyCount(Address),
+    /// Last reset timestamp for per-user daily counter.
+    UserLastResetTimestamp(Address),
 }
 
 // ─── Error Handling ────────────────────────────────────────────────────────
@@ -45,6 +49,10 @@ pub enum SponsorError {
     InvalidAmount = 6,
     /// Sponsorship not initialized.
     NotInitialized = 7,
+    /// Per-user lifetime sponsorship cap reached.
+    PerUserCapReached = 8,
+    /// Per-user daily sponsorship cap reached.
+    PerUserDailyCapReached = 9,
 }
 
 // ─── Data Structures ───────────────────────────────────────────────────────
@@ -59,6 +67,10 @@ pub struct SponsorConfig {
     pub sponsor_amount: i128,
     /// Daily sponsorship cap.
     pub daily_cap: u32,
+    /// Per-user lifetime sponsorship cap (in stroops). 0 = unlimited.
+    pub per_user_cap: i128,
+    /// Per-user daily sponsorship cap (number of sponsorships). 0 = unlimited.
+    pub per_user_daily_cap: u32,
 }
 
 impl Default for SponsorConfig {
@@ -67,6 +79,8 @@ impl Default for SponsorConfig {
             min_threshold: 10_000_000, // 1 XLM in stroops
             sponsor_amount: 100_000,   // 0.01 XLM per scan
             daily_cap: MAX_DAILY_SPONSORSHIPS,
+            per_user_cap: 1_000_000,   // 0.1 XLM lifetime per user
+            per_user_daily_cap: 3,     // 3 sponsorships per user per day
         }
     }
 }
@@ -144,6 +158,31 @@ pub fn sponsor_first_scan(env: &Env, player: &Address) -> Result<i128, SponsorEr
         return Err(SponsorError::DailyCapReached);
     }
 
+    // Check per-user lifetime cap
+    if config.per_user_cap > 0 {
+        let user_lifetime: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UserLifetimeSponsored(player.clone()))
+            .unwrap_or(0);
+        if user_lifetime + config.sponsor_amount > config.per_user_cap {
+            return Err(SponsorError::PerUserCapReached);
+        }
+    }
+
+    // Check per-user daily cap
+    if config.per_user_daily_cap > 0 {
+        reset_user_daily_counter_if_needed(env, player);
+        let user_daily: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::UserDailyCount(player.clone()))
+            .unwrap_or(0);
+        if user_daily >= config.per_user_daily_cap {
+            return Err(SponsorError::PerUserDailyCapReached);
+        }
+    }
+
     // Check fund balance
     let fund_balance: i128 = env
         .storage()
@@ -166,6 +205,27 @@ pub fn sponsor_first_scan(env: &Env, player: &Address) -> Result<i128, SponsorEr
     env.storage()
         .instance()
         .set(&DataKey::DailyCounter, &(current_count + 1));
+
+    // Track per-user lifetime amount
+    let user_lifetime: i128 = env
+        .storage()
+        .instance()
+        .get(&DataKey::UserLifetimeSponsored(player.clone()))
+        .unwrap_or(0);
+    env.storage().instance().set(
+        &DataKey::UserLifetimeSponsored(player.clone()),
+        &(user_lifetime + config.sponsor_amount),
+    );
+
+    // Track per-user daily count
+    let user_daily: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::UserDailyCount(player.clone()))
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&DataKey::UserDailyCount(player.clone()), &(user_daily + 1));
 
     // Emit SponsorshipGranted event
     env.events().publish(
@@ -264,6 +324,23 @@ pub fn get_config(env: &Env) -> Option<SponsorConfig> {
     env.storage().instance().get(&DataKey::Config)
 }
 
+/// Get the lifetime sponsored amount for a user.
+pub fn get_user_lifetime_sponsored(env: &Env, player: &Address) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::UserLifetimeSponsored(player.clone()))
+        .unwrap_or(0)
+}
+
+/// Get the daily sponsorship count for a user.
+pub fn get_user_daily_count(env: &Env, player: &Address) -> u32 {
+    reset_user_daily_counter_if_needed(env, player);
+    env.storage()
+        .instance()
+        .get(&DataKey::UserDailyCount(player.clone()))
+        .unwrap_or(0)
+}
+
 // ─── Internal Helpers ─────────────────────────────────────────────────────
 
 /// Check if a player has a verified profile by checking if they have any profile data.
@@ -295,13 +372,32 @@ fn reset_daily_counter_if_needed(env: &Env) {
         .get(&DataKey::LastResetTimestamp)
         .unwrap_or(0);
     let current_time = env.ledger().timestamp();
-    
+
     // 24 hours = 86400 seconds
     if current_time >= last_reset + 86400 {
         env.storage().instance().set(&DataKey::DailyCounter, &0u32);
         env.storage()
             .instance()
             .set(&DataKey::LastResetTimestamp, &current_time);
+    }
+}
+
+/// Reset per-user daily counter if 24 hours have passed.
+fn reset_user_daily_counter_if_needed(env: &Env, player: &Address) {
+    let last_reset: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::UserLastResetTimestamp(player.clone()))
+        .unwrap_or(0);
+    let current_time = env.ledger().timestamp();
+
+    if current_time >= last_reset + 86400 {
+        env.storage()
+            .instance()
+            .set(&DataKey::UserDailyCount(player.clone()), &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::UserLastResetTimestamp(player.clone()), &current_time);
     }
 }
 
@@ -320,6 +416,8 @@ pub fn update_config(
     min_threshold: i128,
     sponsor_amount: i128,
     daily_cap: u32,
+    per_user_cap: i128,
+    per_user_daily_cap: u32,
 ) -> Result<SponsorConfig, SponsorError> {
     admin.require_auth();
 
@@ -341,13 +439,15 @@ pub fn update_config(
         min_threshold,
         sponsor_amount,
         daily_cap,
+        per_user_cap,
+        per_user_daily_cap,
     };
 
     env.storage().instance().set(&DataKey::Config, &config);
 
     env.events().publish(
         (symbol_short!("sponsor"), symbol_short!("config")),
-        (min_threshold, sponsor_amount, daily_cap),
+        (min_threshold, sponsor_amount, daily_cap, per_user_cap, per_user_daily_cap),
     );
 
     Ok(config)
