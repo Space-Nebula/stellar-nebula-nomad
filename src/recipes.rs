@@ -1,4 +1,11 @@
-use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, Address, Env, Symbol, Vec};
+
+#[contracterror]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum RecipeError {
+    RecipeNotFound = 1,
+}
 
 // ── Rare rarity threshold ─────────────────────────────────────────────────────
 
@@ -43,11 +50,11 @@ pub fn is_unlocked(env: &Env, player: &Address, recipe_id: u32) -> bool {
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
-pub fn get_recipe(env: &Env, id: u32) -> Recipe {
+pub fn get_recipe(env: &Env, id: u32) -> Result<Recipe, RecipeError> {
     env.storage()
         .instance()
         .get(&RecipeKey::Recipe(id))
-        .expect("Recipe not found")
+        .ok_or(RecipeError::RecipeNotFound)
 }
 
 pub fn set_recipe(env: &Env, recipe: &Recipe) {

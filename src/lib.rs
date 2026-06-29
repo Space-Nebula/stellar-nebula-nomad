@@ -98,6 +98,7 @@ mod gas_optimized_storage;
 mod gas_optimized_compute;
 
 // Cross-contract safety: reentrancy guard + composable call helpers.
+mod nomad_bonding;
 mod reentrancy_guard;
 mod composability_examples;
 pub use reentrancy_guard::ReentrancyError;
@@ -210,7 +211,7 @@ pub use escrow_trader::{
     cancel_escrow, complete_escrow, confirm_escrow, get_escrow, initiate_escrow, Escrow,
     EscrowError, EscrowResult, TradeAsset,
 };
-pub use audit_logger::{AuditEntry, AuditLoggerError, get_audit_count, log_audit_event, query_audit_logs};
+pub use audit_logger::{AuditEntry, AuditLoggerError, MAX_QUERY_LIMIT, get_audit_count, log_audit_event, query_audit_logs};
 pub use sustainability_metrics::{claim_sustainability_reward, get_footprint, record_transaction_footprint, FootprintRecord, SustainabilityError};
 pub use anomaly_classifier::{classify_anomaly, classify_batch, get_classification, refine_classification, AnomalyError, ClassificationRecord};
 pub use shared_lib::{calculate_yield, validate_address, SharedError};
@@ -334,7 +335,12 @@ pub use trading::{
 };
 
 pub use crafting::{craft, add_xp, get_level, get_xp};
-pub use recipes::{Recipe, get_recipe, set_recipe, unlock_rare_recipe};
+pub use recipes::{RecipeError, set_recipe, unlock_rare_recipe};
+pub use nomad_bonding::{
+    BondError, BondStatus, NomadBond, YieldDelegation,
+    create_bond, accept_bond, delegate_yield, claim_yield, dissolve_bond,
+    accrue_essence, get_bond, get_yield_delegation, get_essence_balance,
+};
 pub use notifications::push_service::{Notification, emit_notification};
 pub use notifications::alerts::{check_low_resources, notify_rare_discovery, notify_crafting_complete};
 pub use mobile_views::{
@@ -1718,7 +1724,7 @@ impl NebulaNomadContract {
         audit_logger::log_audit_event(&env, actor.as_ref(), action, details)
     }
 
-    pub fn query_audit_logs(env: Env, filter: Symbol, limit: u32) -> Vec<AuditEntry> {
+    pub fn query_audit_logs(env: Env, filter: Symbol, limit: u32) -> Result<Vec<AuditEntry>, AuditLoggerError> {
         audit_logger::query_audit_logs(&env, filter, limit)
     }
 
