@@ -1044,6 +1044,23 @@ impl NebulaNomadContract {
         result
     }
 
+    /// Transfer a ship NFT from `from` to `to`.
+    pub fn transfer_ship(
+        env: Env,
+        ship_id: u64,
+        from: Address,
+        to: Address,
+    ) -> Result<ShipNft, ShipError> {
+        let result = ship_nft::transfer_ship(&env, ship_id, &from, &to);
+        if result.is_ok() {
+            let mut b = [0u8; 128];
+            b[0..8].copy_from_slice(&ship_id.to_be_bytes());
+            let details = BytesN::from_array(&env, &b);
+            let _ = audit_logger::log_audit_event(&env, Some(&from), symbol_short!("ts"), details);
+        }
+        result
+    }
+
     /// Read a ship by ID.
     pub fn get_ship(env: Env, ship_id: u64) -> Result<ShipNft, ShipError> {
         ship_nft::get_ship(&env, ship_id)
