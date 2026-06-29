@@ -86,6 +86,11 @@ pub mod notifications {
     pub mod alerts;
 }
 
+pub mod mobile_views;
+
+#[path = "../integrations/mod.rs"]
+pub mod integrations;
+
 mod economics;
 
 // Gas optimization modules
@@ -332,6 +337,9 @@ pub use crafting::{craft, add_xp, get_level, get_xp};
 pub use recipes::{Recipe, get_recipe, set_recipe, unlock_rare_recipe};
 pub use notifications::push_service::{Notification, emit_notification};
 pub use notifications::alerts::{check_low_resources, notify_rare_discovery, notify_crafting_complete};
+pub use mobile_views::{
+    MobileDashboard, MobileBatchInfo, MobileViewError, QuickScanPreview,
+};
 
 #[contract]
 pub struct NebulaNomadContract;
@@ -2814,5 +2822,31 @@ impl NebulaNomadContract {
         amount_in: i128,
     ) -> Result<i128, AmmError> {
         trading::quote_swap(&env, pool_id, resource_in, amount_in)
+    }
+
+    // ── Mobile interface (Issue #199) ─────────────────────────────────────────
+
+    /// Return a compact dashboard summary for the given player.
+    pub fn get_mobile_dashboard(env: Env, player: Address) -> MobileDashboard {
+        mobile_views::get_mobile_dashboard(&env, &player)
+    }
+
+    /// Return a lightweight scan-result estimate for a specific ship.
+    pub fn get_quick_scan_preview(
+        env: Env,
+        ship_id: u64,
+    ) -> Result<QuickScanPreview, MobileViewError> {
+        mobile_views::get_quick_scan_preview(&env, ship_id)
+    }
+
+    /// Batch dashboard + primary-ship scan preview into a single RPC call.
+    pub fn batch_get_mobile_info(env: Env, player: Address) -> MobileBatchInfo {
+        mobile_views::batch_get_mobile_info(&env, &player)
+    }
+
+    /// Emit a mobile-event subscription marker for off-chain indexers.
+    pub fn subscribe_mobile_events(env: Env, player: Address) {
+        player.require_auth();
+        mobile_views::subscribe_mobile_events(&env, &player);
     }
 }
