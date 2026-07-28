@@ -96,6 +96,7 @@ mod seasons;
 mod battle_pass;
 
 pub mod achievements;
+pub mod badges;
 
 mod ship_customization;
 mod skins;
@@ -129,7 +130,13 @@ mod gas_optimized_compute;
 mod nomad_bonding;
 mod reentrancy_guard;
 mod composability_examples;
+mod reputation;
+
 pub use reentrancy_guard::ReentrancyError;
+pub use reputation::{
+    ReputationScore, BehaviorRecord, DisputeReport, BehaviorType, ReportStatus,
+    ReputationError,
+};
 
 pub use analytics::{AnalyticsError, GlobalStats};
 pub use access_control::{AccessControlError};
@@ -3609,5 +3616,77 @@ impl NebulaNomadContract {
         request_id: u64,
     ) -> Result<loot_system::OpenRequest, loot_system::LootError> {
         loot_system::get_open_request(&env, request_id)
+    }
+
+    // ── Player Reputation System (Issue #261) ────────────────────────────────
+
+    pub fn initialize_reputation_system(env: Env, admin: Address) -> Result<(), ReputationError> {
+        reputation::initialize_reputation(&env, &admin)
+    }
+
+    pub fn create_player_reputation(env: Env, player: Address) -> Result<(), ReputationError> {
+        reputation::create_player_reputation(&env, &player)
+    }
+
+    pub fn get_player_reputation_score(env: Env, player: Address) -> Result<u32, ReputationError> {
+        reputation::get_reputation_score(&env, &player)
+    }
+
+    pub fn get_player_reputation_details(env: Env, player: Address) -> Result<ReputationScore, ReputationError> {
+        reputation::get_reputation_details(&env, &player)
+    }
+
+    pub fn record_player_behavior(
+        env: Env,
+        player: Address,
+        behavior_type: BehaviorType,
+        description: String,
+        points: i32,
+        reporter: Address,
+    ) -> Result<(), ReputationError> {
+        reputation::record_behavior(&env, &player, behavior_type, description, points, reporter)
+    }
+
+    pub fn submit_dispute_report(
+        env: Env,
+        reporter: Address,
+        accused: Address,
+        reason: String,
+        evidence: String,
+    ) -> Result<u64, ReputationError> {
+        reputation::submit_report(&env, &reporter, &accused, reason, evidence)
+    }
+
+    pub fn resolve_dispute_report(
+        env: Env,
+        admin: Address,
+        report_id: u64,
+        resolved: bool,
+    ) -> Result<(), ReputationError> {
+        reputation::resolve_report(&env, &admin, report_id, resolved)
+    }
+
+    pub fn ban_player_account(env: Env, admin: Address, player: Address) -> Result<(), ReputationError> {
+        reputation::ban_player(&env, &admin, &player)
+    }
+
+    pub fn check_player_ban_status(env: Env, player: Address) -> bool {
+        reputation::is_player_banned(&env, &player)
+    }
+
+    pub fn get_player_behavior_history(env: Env, player: Address) -> Vec<BehaviorRecord> {
+        reputation::get_player_history(&env, &player)
+    }
+
+    pub fn get_player_report_count(env: Env, player: Address) -> u32 {
+        reputation::get_player_report_count(&env, &player)
+    }
+
+    pub fn get_all_dispute_reports(env: Env) -> Vec<DisputeReport> {
+        reputation::get_all_reports(&env)
+    }
+
+    pub fn claim_reputation_reward(env: Env, player: Address) -> Result<i128, ReputationError> {
+        reputation::claim_reputation_reward(&env, &player)
     }
 }
