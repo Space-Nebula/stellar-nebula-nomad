@@ -1,0 +1,13 @@
+# Cargo-audit configuration
+# See: https://docs.rs/cargo-audit/latest/cargo_audit/struct.Config.html
+
+[advisories]
+# Ignore specific advisories by ID (use with caution)
+# ignore = ["RUSTSEC-2023-0001"]
+
+# Severity threshold: only report advisories at this level or higher
+# Options: "none", "low", "medium", "high", "critical"
+severity_threshold = "low"
+
+# Informational advisories (e.g., unmaintained, notices) are warnings, not errors
+informational_warnings = ["unmaintained", "notice"]
