@@ -1,0 +1,214 @@
+name: Contract Size Regression
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  WASM_BASELINE_FILE: .wasm-sizes.json
+
+jobs:
+  size-regression:
+    name: Contract Size Regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch main branch so we can compare against the baseline
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm-size-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-wasm-size-
+
+      - name: Build WASM (release)
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Install soroban-cli
+        run: cargo install soroban-cli --locked
+
+      - name: Optimize WASM
+        run: |
+          mkdir -p wasm
+          for f in target/wasm32-unknown-unknown/release/*.wasm; do
+            out="wasm/$(basename ${f%.wasm}.optimized.wasm)"
+            soroban contract optimize --wasm "$f" --wasm-out "$out" 2>/dev/null || cp "$f" "$out"
+          done
+
+      - name: Measure WASM sizes
+        id: measure
+        run: |
+          SIZES=$(python3 -c "
+import json, os, glob
+sizes = {}
+for f in glob.glob('wasm/*.optimized.wasm'):
+    name = os.path.basename(f)
+    size = os.path.getsize(f)
+    sizes[name] = size
+print(json.dumps(sizes))
+")
+          echo "sizes=$SIZES" >> $GITHUB_OUTPUT
+          echo "$SIZES" | python3 -m json.tool
+
+      - name: Compare against baseline
+        id: compare
+        run: |
+          python3 << 'PYEOF'
+import json, os
+
+baseline_file = os.environ.get('WASM_BASELINE_FILE', '.wasm-sizes.json')
+sizes_raw = os.environ.get('SIZES')
+if not sizes_raw:
+    print("No sizes data available")
+    exit(0)
+
+sizes = json.loads(sizes_raw)
+baseline = {}
+if os.path.exists(baseline_file):
+    with open(baseline_file) as f:
+        baseline = json.load(f)
+
+MAX_INCREASE_PCT = 10
+failed = False
+report_lines = []
+
+for name, current_size in sorted(sizes.items()):
+    if name in baseline:
+        prev_size = baseline[name]
+        if prev_size > 0:
+            pct_change = ((current_size - prev_size) / prev_size) * 100
+            if pct_change > MAX_INCREASE_PCT:
+                failed = True
+                report_lines.append(f"❌ **{name}**: {prev_size} → {current_size} bytes (+{pct_change:.1f}%) — exceeds {MAX_INCREASE_PCT}% threshold")
+            elif pct_change > 0:
+                report_lines.append(f"⚠️ **{name}**: {prev_size} → {current_size} bytes (+{pct_change:.1f}%)")
+            elif pct_change < 0:
+                report_lines.append(f"✅ **{name}**: {prev_size} → {current_size} bytes ({pct_change:.1f}%) — size decreased")
+            else:
+                report_lines.append(f"✅ **{name}**: {current_size} bytes (unchanged)")
+        else:
+            report_lines.append(f"📄 **{name}**: {current_size} bytes (new, previous was 0)")
+    else:
+        report_lines.append(f"📄 **{name}**: {current_size} bytes (new — no baseline)")
+
+# Check 64KB limit
+MAX_BYTES = 65536
+for name, current_size in sizes.items():
+    if current_size > MAX_BYTES:
+        failed = True
+        report_lines.append(f"❌ **{name}**: {current_size} bytes exceeds 64 KB limit")
+
+report = "\n".join(report_lines)
+print(f"report={report}")
+print(f"failed={'true' if failed else 'false'}")
+
+# Save sizes as new baseline
+with open(baseline_file, 'w') as f:
+    json.dump(sizes, f, indent=2)
+PYEOF
+        env:
+          SIZES: ${{ steps.measure.outputs.sizes }}
+          WASM_BASELINE_FILE: ${{ env.WASM_BASELINE_FILE }}
+
+      - name: Upload optimized WASM
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimized-wasm
+          path: wasm/*.optimized.wasm
+          retention-days: 7
+
+      - name: Post size report to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const baselineFile = process.env.WASM_BASELINE_FILE || '.wasm-sizes.json';
+            const sizesRaw = process.env.SIZES;
+            let body = '## 📦 Contract Size Report\n\n';
+
+            try {
+              const sizes = JSON.parse(sizesRaw);
+              let totalBefore = 0, totalAfter = 0;
+              const baseline = fs.existsSync(baselineFile) ? JSON.parse(fs.readFileSync(baselineFile, 'utf8')) : {};
+              const hasBaseline = Object.keys(baseline).length > 0;
+
+              if (hasBaseline) {
+                body += '| Contract | Before | After | Change |\n';
+                body += '|----------|--------|-------|--------|\n';
+                for (const [name, after] of Object.entries(sizes)) {
+                  const before = baseline[name] || 0;
+                  totalBefore += before;
+                  totalAfter += after;
+                  const pct = before > 0 ? ((after - before) / before * 100).toFixed(1) : '—';
+                  const icon = before > 0 && after > before ? '❌' : before > 0 && after < before ? '✅' : '—';
+                  body += `| \`${name}\` | ${before > 0 ? before + ' B' : '—'} | ${after} B | ${icon} ${pct !== '—' ? pct + '%' : '—'} |\n`;
+                }
+                if (Object.keys(sizes).length > 1) {
+                  const pct = totalBefore > 0 ? ((totalAfter - totalBefore) / totalBefore * 100).toFixed(1) : '—';
+                  body += `| **Total** | **${totalBefore} B** | **${totalAfter} B** | **${pct}%** |\n`;
+                }
+              } else {
+                body += 'No baseline found. This is the first measurement.\n\n';
+                body += '| Contract | Size |\n';
+                body += '|----------|------|\n';
+                for (const [name, size] of Object.entries(sizes)) {
+                  body += `| \`${name}\` | ${size} B |\n`;
+                }
+              }
+
+              const failed = process.env.FAILED === 'true';
+              if (failed) {
+                body += '\n### ❌ Size regression detected. Some contracts increased by more than 10%.\n';
+              } else {
+                body += '\n✅ All contract sizes within limits.\n';
+              }
+
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body
+              });
+            } catch (err) {
+              body += 'Could not generate size report.';
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body
+              });
+            }
+        env:
+          WASM_BASELINE_FILE: ${{ env.WASM_BASELINE_FILE }}
+          SIZES: ${{ steps.measure.outputs.sizes }}
+          FAILED: ${{ steps.compare.outputs.failed }}
+
+      - name: Enforce size regression threshold
+        if: steps.compare.outputs.failed == 'true'
+        run: |
+          echo "❌ Contract size regression detected (>10% increase)."
+          echo "${{ steps.compare.outputs.report }}"
+          exit 1
+
+      - name: Commit updated baseline
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add $WASM_BASELINE_FILE
+          git diff --cached --quiet || git commit -m "chore: update WASM size baseline [skip ci]"
+          git push
