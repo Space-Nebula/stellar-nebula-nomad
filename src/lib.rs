@@ -7,6 +7,7 @@ use crate::nebula_explorer::{NebulaLayout, Rarity};
 mod access_control;
 pub mod error_standard;
 mod analytics;
+mod churn_prediction;
 mod blueprint_factory;
 mod gifting_system;
 mod nebula_explorer;
@@ -119,6 +120,13 @@ pub use reputation::{
 };
 
 pub use analytics::{AnalyticsError, GlobalStats};
+pub use churn_prediction::{
+    ChurnPredictionError, ChurnRiskLevel, ChurnRiskPrediction, ChurnIntervention,
+    ChurnPredictionModel, ChurnPredictionMetrics,
+    initialize_churn_model, predict_churn_risk, send_intervention, record_intervention_response,
+    update_model_parameters, get_churn_risk, get_intervention_history, get_at_risk_players,
+    get_churn_model, get_churn_metrics, update_churn_metrics,
+};
 pub use access_control::{AccessControlError};
 pub use nebula_gen::{
     NebulaError as NebulaGenError, Anomaly, AnomalyType, NebulaLayout as NebulaGenLayout,
