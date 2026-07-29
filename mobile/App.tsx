@@ -7,6 +7,7 @@ import {
   parseWalletConnectSessionMessage,
   subscribeToWalletConnectDeepLinks,
 } from "./src/wallet-connect-bridge";
+import { createOfflineStatusMonitor, type OfflineStatusState } from "./src/offline-status";
 
 // WalletConnect Cloud Project ID — required for the web content's
 // WalletConnectSigner to initialize. See https://cloud.walletconnect.com.
@@ -111,7 +112,12 @@ export default function App() {
     const [walletStatus, setWalletStatus] = useState<
         "disconnected" | "connected"
     >("disconnected");
+    const [offlineStatus, setOfflineStatus] = useState<OfflineStatusState>({
+        isOnline: true,
+        lastChangedTimestamp: null,
+    });
     const pendingWalletConnectUri = useRef<string | null>(null);
+    const offlineMonitorRef = useRef<ReturnType<typeof createOfflineStatusMonitor> | null>(null);
 
     // Intercept wc:/universal-link deep links at the native app-shell level
     // (tapped from a wallet app, a QR scanner, or a cold start) and relay
@@ -131,6 +137,30 @@ export default function App() {
         });
         return () => subscription.remove();
     }, [ready]);
+
+    // Monitor network connectivity for offline mode support and relay
+    // status into the WebView bridge so the SDK's offline queue can react.
+    useEffect(() => {
+        const monitor = createOfflineStatusMonitor((status) => {
+            setOfflineStatus(status);
+            if (webViewRef.current) {
+                webViewRef.current.injectJavaScript(`
+                    (function() {
+                        if (window.__stellarMobile) {
+                            window.__stellarMobile.isOnline = ${status.isOnline};
+                            window.__stellarMobile.offlineStatus = ${JSON.stringify(status)};
+                        }
+                        if (window.__stellarMobile && typeof window.__stellarMobile.onNetworkChange === 'function') {
+                            window.__stellarMobile.onNetworkChange(${status.isOnline});
+                        }
+                        true;
+                    })();
+                `);
+            }
+        });
+        offlineMonitorRef.current = monitor;
+        return () => monitor.stop();
+    }, []);
 
     const handleLoad = () => {
         setReady(true);
@@ -164,6 +194,10 @@ export default function App() {
                         : "Loading…"}
                     {"  •  Wallet: "}
                     {walletStatus === "connected" ? "connected" : "not connected"}
+                    {"  •  "}
+                    <Text style={offlineStatus.isOnline ? styles.online : styles.offline}>
+                        {offlineStatus.isOnline ? "Online" : "Offline"}
+                    </Text>
                 </Text>
             </View>
             <WebView
@@ -183,5 +217,7 @@ const styles = StyleSheet.create({
     chrome: { padding: 12, borderBottomWidth: 1, borderBottomColor: "#273054" },
     title: { color: "#e8eefc", fontSize: 18, fontWeight: "600" },
     sub: { color: "#a8b6da", fontSize: 12, marginTop: 6, lineHeight: 18 },
+    online: { color: "#4ade80" },
+    offline: { color: "#f87171" },
     web: { flex: 1 },
 });
