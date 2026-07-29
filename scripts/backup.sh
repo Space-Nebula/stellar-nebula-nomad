@@ -12,6 +12,23 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_NAME="nebula_backup_${TIMESTAMP}"
 LOG_FILE="${BACKUP_DIR}/backup.log"
 
+SCHEDULE=false
+TEST_RESTORE=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --schedule) SCHEDULE=true ;;
+        --test-restore) TEST_RESTORE=true ;;
+    esac
+done
+
+if [ "$SCHEDULE" = true ]; then
+    echo "Setting up daily cron schedule for backup script..."
+    (crontab -l 2>/dev/null | grep -v "$SCRIPT_DIR/backup.sh"; echo "0 2 * * * $SCRIPT_DIR/backup.sh") | crontab -
+    echo "Cron schedule configured to run daily at 2:00 AM."
+    exit 0
+fi
+
 # Stellar configuration
 NETWORK="${STELLAR_NETWORK:-testnet}"
 CONTRACT_ID="${CONTRACT_ID:-}"
@@ -286,6 +303,19 @@ main() {
     verify_backup
     upload_to_storage
     cleanup_old_backups
+    
+    if [ "$TEST_RESTORE" = true ]; then
+        log "Running automated restore test..."
+        if [ -x "$SCRIPT_DIR/restore.sh" ]; then
+            bash "$SCRIPT_DIR/restore.sh" --backup "$BACKUP_NAME" --test-mode || {
+                log_error "Automated restore test failed!"
+                return 1
+            }
+            log_success "Automated restore test passed."
+        else
+            log_warning "restore.sh not found or not executable. Skipping restore test."
+        fi
+    fi
     
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))

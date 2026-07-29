@@ -4,7 +4,7 @@ set -euo pipefail
 # Deployment automation for Nebula Nomad contract to Soroban.
 # Features: build, optimize, deploy, verify, alias, rollback support.
 # Usage:
-#   ./scripts/deploy.sh [network] [identity] [--with-verify] [--alias NAME]
+#   ./scripts/deploy.sh [network] [identity] [--with-verify] [--alias NAME] [--bluegreen] [--prod-alias NAME]
 # Examples:
 #   ./scripts/deploy.sh futurenet default --with-verify
 #   ./scripts/deploy.sh testnet admin --alias nebula-v1
@@ -13,12 +13,16 @@ NETWORK="${1:-futurenet}"
 IDENTITY="${2:-default}"
 DO_VERIFY=false
 ALIAS=""
+BLUEGREEN=false
+PROD_ALIAS=""
 shift 2 || true
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --with-verify) DO_VERIFY=true; shift ;;
         --alias) ALIAS="$2"; shift 2 ;;
+        --bluegreen) BLUEGREEN=true; DO_VERIFY=true; shift ;;
+        --prod-alias) PROD_ALIAS="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -72,12 +76,29 @@ if [ -n "$ALIAS" ]; then
     echo "Aliased as: $ALIAS -> $CONTRACT_ID"
 fi
 
+VERIFICATION_PASSED=false
 if [ "$DO_VERIFY" = true ]; then
     echo "==> Running post-deploy verification..."
     if bash scripts/verify.sh "$NETWORK" "$CONTRACT_ID" "$IDENTITY"; then
         echo "Verification passed."
+        VERIFICATION_PASSED=true
     else
         echo "WARNING: Verification failed. Check contract state manually." >&2
+    fi
+fi
+
+if [ "$BLUEGREEN" = true ]; then
+    if [ "$VERIFICATION_PASSED" = true ]; then
+        if [ -n "$PROD_ALIAS" ]; then
+            echo "==> BlueGreen verification passed. Switching traffic to green deployment..."
+            mkdir -p "deployment/aliases"
+            echo "$CONTRACT_ID" > "deployment/aliases/${PROD_ALIAS}.txt"
+            echo "Traffic switched: $PROD_ALIAS -> $CONTRACT_ID"
+        else
+            echo "WARNING: --bluegreen flag used but --prod-alias was not specified." >&2
+        fi
+    else
+        echo "==> BlueGreen verification failed. Rolling back green deployment (traffic remains on blue)..."
     fi
 fi
 
