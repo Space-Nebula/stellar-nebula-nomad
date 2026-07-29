@@ -21,3 +21,11 @@ k6 run tests/load/k6_stress_test.js
 ### Metrics and Thresholds
 - By default, the script ramps up to 20 concurrent Virtual Users (VUs).
 - The p95 response time threshold is set to `< 500ms`. If the RPC nodes take longer, the test will be marked as failed.
+This directory contains load tests for the Stellar Nebula Nomad project using k6.
+
+## Running tests
+To run the load tests locally, ensure you have k6 installed and run:
+
+```sh
+k6 run k6-script.js
+```
