@@ -7,6 +7,12 @@ import {
   parseWalletConnectSessionMessage,
   subscribeToWalletConnectDeepLinks,
 } from "./src/wallet-connect-bridge";
+import {
+  ARViewerMessage,
+  buildARViewerInjection,
+  isARViewerEnabled,
+  parseARViewerMessage,
+} from "./src/ar-nebula-viewer";
 
 // WalletConnect Cloud Project ID — required for the web content's
 // WalletConnectSigner to initialize. See https://cloud.walletconnect.com.
@@ -25,6 +31,23 @@ const GAME_URL =
     process.env.EXPO_PUBLIC_GAME_URL
         ? process.env.EXPO_PUBLIC_GAME_URL
         : "https://stellar.org";
+
+// Experimental AR nebula viewer — off unless explicitly enabled via
+// EXPO_PUBLIC_EXPERIMENTAL_AR_VIEWER=1 (see src/ar-nebula-viewer.ts).
+const AR_VIEWER_ENABLED = isARViewerEnabled(
+    typeof process !== "undefined" && process.env
+        ? process.env.EXPO_PUBLIC_EXPERIMENTAL_AR_VIEWER
+        : null,
+);
+
+// Optional USDZ model powering the ARKit Quick Look fallback on iOS
+// WebViews without WebXR support.
+const AR_QUICK_LOOK_MODEL_URL =
+    typeof process !== "undefined" &&
+    process.env &&
+    process.env.EXPO_PUBLIC_AR_QUICK_LOOK_MODEL_URL
+        ? process.env.EXPO_PUBLIC_AR_QUICK_LOOK_MODEL_URL
+        : null;
 
 // Contract RPC endpoint — override via EXPO_PUBLIC_RPC_URL for custom nodes.
 const RPC_URL =
@@ -105,12 +128,36 @@ const MOBILE_BRIDGE_SCRIPT = `
 })();
 `;
 
+// Injected before content load: the contract bridge always, plus the AR
+// nebula viewer bridge only when the experimental flag is on.
+const INJECTED_SCRIPT = AR_VIEWER_ENABLED
+    ? MOBILE_BRIDGE_SCRIPT +
+      buildARViewerInjection({ quickLookModelUrl: AR_QUICK_LOOK_MODEL_URL })
+    : MOBILE_BRIDGE_SCRIPT;
+
+function describeARStatus(message: ARViewerMessage | null): string {
+    if (!message) return "detecting…";
+    switch (message.status) {
+        case "supported":
+            return message.mode === "webxr" ? "ready (WebXR)" : "ready (ARKit)";
+        case "unsupported":
+            return "unsupported";
+        case "session_started":
+            return "viewing";
+        case "session_ended":
+            return "ready";
+        case "error":
+            return "error";
+    }
+}
+
 export default function App() {
     const webViewRef = useRef<WebView>(null);
     const [ready, setReady] = useState(false);
     const [walletStatus, setWalletStatus] = useState<
         "disconnected" | "connected"
     >("disconnected");
+    const [arStatus, setArStatus] = useState<ARViewerMessage | null>(null);
     const pendingWalletConnectUri = useRef<string | null>(null);
 
     // Intercept wc:/universal-link deep links at the native app-shell level
@@ -150,6 +197,13 @@ export default function App() {
             setWalletStatus(
                 message.status === "connected" ? "connected" : "disconnected",
             );
+            return;
+        }
+        if (AR_VIEWER_ENABLED) {
+            const arMessage = parseARViewerMessage(event.nativeEvent.data);
+            if (arMessage) {
+                setArStatus(arMessage);
+            }
         }
     };
 
@@ -164,13 +218,16 @@ export default function App() {
                         : "Loading…"}
                     {"  •  Wallet: "}
                     {walletStatus === "connected" ? "connected" : "not connected"}
+                    {AR_VIEWER_ENABLED
+                        ? "  •  AR (experimental): " + describeARStatus(arStatus)
+                        : null}
                 </Text>
             </View>
             <WebView
                 ref={webViewRef}
                 source={{ uri: GAME_URL }}
                 style={styles.web}
-                injectedJavaScriptBeforeContentLoaded={MOBILE_BRIDGE_SCRIPT}
+                injectedJavaScriptBeforeContentLoaded={INJECTED_SCRIPT}
                 onLoad={handleLoad}
                 onMessage={handleMessage}
             />
