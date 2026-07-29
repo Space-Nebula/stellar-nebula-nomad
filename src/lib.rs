@@ -339,6 +339,14 @@ pub use economics::balancer::{
     detect_imbalance, suggest_adjustment, apply_adjustment, generate_report,
     BalanceAdjustment, SupplyDemandRatio,
 };
+pub use economics::health_dashboard::{
+    initialize_dashboard, update_supply_demand, update_inflation_metrics,
+    set_alert_threshold, deactivate_alert, recalculate_health,
+    get_supply_demand, get_inflation_metrics, get_health_dashboard, get_recent_alerts,
+    get_alert_threshold,
+    SupplyDemandMetrics, InflationMetrics, AlertThreshold, AlertEvent, EconomyHealth,
+    EconomyHealthDashboard,
+};
 
 pub use trading::{
     place_limit_order, cancel_limit_order, get_limit_order, get_trader_orders,
