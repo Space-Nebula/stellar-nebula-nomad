@@ -4,4 +4,4 @@ export * from "./signer";
 export * from "./wallet-connect";
 export * from "./qrcode";
 export * from "./hooks";
-export * from "./offline";
+export * from "./social-sharing";

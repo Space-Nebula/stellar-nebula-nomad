@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <title>Offline — Stellar Nebula Nomad</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at 30% 25%, #273054 0%, #0b1020 70%);
+      color: #e8eefc;
+      font-family: Helvetica, Arial, sans-serif;
+      text-align: center;
+    }
+    main { padding: 32px; max-width: 420px; }
+    h1 { font-size: 22px; margin: 0 0 12px; }
+    p { color: #a8b6da; font-size: 15px; line-height: 1.6; margin: 0 0 24px; }
+    button {
+      background: #4da3ff;
+      color: #0b1020;
+      border: 0;
+      border-radius: 8px;
+      padding: 12px 24px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:active { opacity: 0.8; }
+    .orbit { font-size: 48px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="orbit">🛰️</div>
+    <h1>Signal lost in the nebula</h1>
+    <p>
+      You're offline, and the ledger is out of reach. Your ships and
+      discoveries are safe on-chain — reconnect to resume exploring.
+    </p>
+    <button onclick="location.reload()">Retry connection</button>
+  </main>
+</body>
+</html>
