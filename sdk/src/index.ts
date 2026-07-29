@@ -3,3 +3,4 @@ export * from "./types";
 export * from "./signer";
 export * from "./wallet-connect";
 export * from "./qrcode";
+export * from "./hooks";
