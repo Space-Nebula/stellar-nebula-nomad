@@ -26,7 +26,7 @@ jobs:
           sudo apt-get install -y valgrind jq
 
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
