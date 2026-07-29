@@ -1,0 +1,213 @@
+[
+  {
+    "name": "ship_minted",
+    "inputs": [
+      { "name": "id", "type": "u64" },
+      { "name": "owner", "type": "address" },
+      { "name": "ship_type", "type": "symbol" },
+      { "name": "hull", "type": "u32" },
+      { "name": "scanner_power", "type": "u32" }
+    ]
+  },
+  {
+    "name": "ship_xfer",
+    "inputs": [
+      { "name": "ship_id", "type": "u64" },
+      { "name": "from", "type": "address" },
+      { "name": "to", "type": "address" }
+    ]
+  },
+  {
+    "name": "nebula_generated",
+    "inputs": [
+      { "name": "ship_id", "type": "u64" },
+      { "name": "layout_hash", "type": "bytes" },
+      { "name": "size", "type": "u32" }
+    ]
+  },
+  {
+    "name": "nebula_expired",
+    "inputs": [
+      { "name": "ship_id", "type": "u64" }
+    ]
+  },
+  {
+    "name": "nebula_cleaned",
+    "inputs": [
+      { "name": "ship_id", "type": "u64" }
+    ]
+  },
+  {
+    "name": "resource_minted",
+    "inputs": [
+      { "name": "caller", "type": "address" },
+      { "name": "resource_type", "type": "symbol" },
+      { "name": "amount", "type": "i128" }
+    ]
+  },
+  {
+    "name": "resource_harvested",
+    "inputs": [
+      { "name": "player", "type": "address" },
+      { "name": "ship_id", "type": "u64" },
+      { "name": "resource_type", "type": "symbol" },
+      { "name": "amount", "type": "i128" }
+    ]
+  },
+  {
+    "name": "market_listed",
+    "inputs": [
+      { "name": "seller", "type": "address" },
+      { "name": "ship_id", "type": "u64" },
+      { "name": "price", "type": "i128" }
+    ]
+  },
+  {
+    "name": "market_sold",
+    "inputs": [
+      { "name": "buyer", "type": "address" },
+      { "name": "seller", "type": "address" },
+      { "name": "ship_id", "type": "u64" },
+      { "name": "price", "type": "i128" },
+      { "name": "royalty", "type": "i128" },
+      { "name": "seller_proceeds", "type": "i128" }
+    ]
+  },
+  {
+    "name": "market_cancelled",
+    "inputs": [
+      { "name": "seller", "type": "address" },
+      { "name": "ship_id", "type": "u64" }
+    ]
+  },
+  {
+    "name": "dex_listed",
+    "inputs": [
+      { "name": "offer_id", "type": "u64" },
+      { "name": "player", "type": "address" },
+      { "name": "resource", "type": "symbol" },
+      { "name": "listed_amount", "type": "i128" },
+      { "name": "min_price", "type": "i128" }
+    ]
+  },
+  {
+    "name": "dex_cancelled",
+    "inputs": [
+      { "name": "offer_id", "type": "u64" },
+      { "name": "owner", "type": "address" }
+    ]
+  },
+  {
+    "name": "proposal_created",
+    "inputs": [
+      { "name": "proposal_id", "type": "u64" },
+      { "name": "creator", "type": "address" }
+    ]
+  },
+  {
+    "name": "vote_cast",
+    "inputs": [
+      { "name": "proposal_id", "type": "u64" },
+      { "name": "voter", "type": "address" },
+      { "name": "support", "type": "bool" },
+      { "name": "power", "type": "i128" }
+    ]
+  },
+  {
+    "name": "alliance_founded",
+    "inputs": [
+      { "name": "alliance_id", "type": "u64" },
+      { "name": "name", "type": "string" },
+      { "name": "founder", "type": "address" }
+    ]
+  },
+  {
+    "name": "alliance_joined",
+    "inputs": [
+      { "name": "alliance_id", "type": "u64" },
+      { "name": "player", "type": "address" }
+    ]
+  },
+  {
+    "name": "alliance_left",
+    "inputs": [
+      { "name": "alliance_id", "type": "u64" },
+      { "name": "player", "type": "address" }
+    ]
+  },
+  {
+    "name": "alliance_contribution",
+    "inputs": [
+      { "name": "alliance_id", "type": "u64" },
+      { "name": "player", "type": "address" },
+      { "name": "amount", "type": "i128" },
+      { "name": "new_treasury", "type": "i128" }
+    ]
+  },
+  {
+    "name": "stake_staked",
+    "inputs": [
+      { "name": "staker", "type": "address" },
+      { "name": "amount", "type": "i128" },
+      { "name": "resource_type", "type": "symbol" },
+      { "name": "duration", "type": "u32" }
+    ]
+  },
+  {
+    "name": "stake_unstaked",
+    "inputs": [
+      { "name": "staker", "type": "address" },
+      { "name": "amount", "type": "i128" }
+    ]
+  },
+  {
+    "name": "vault_deposit",
+    "inputs": [
+      { "name": "vault_id", "type": "u64" },
+      { "name": "owner", "type": "address" },
+      { "name": "ship_id", "type": "u64" },
+      { "name": "amount", "type": "i128" },
+      { "name": "lock_until", "type": "u32" }
+    ]
+  },
+  {
+    "name": "vault_claimed",
+    "inputs": [
+      { "name": "vault_id", "type": "u64" },
+      { "name": "owner", "type": "address" },
+      { "name": "total_payout", "type": "i128" }
+    ]
+  },
+  {
+    "name": "profile_updated",
+    "inputs": [
+      { "name": "caller", "type": "address" },
+      { "name": "profile_id", "type": "u64" },
+      { "name": "total_scans", "type": "u32" },
+      { "name": "essence_earned", "type": "i128" }
+    ]
+  },
+  {
+    "name": "notification_emitted",
+    "inputs": [
+      { "name": "player", "type": "address" },
+      { "name": "message", "type": "symbol" },
+      { "name": "timestamp", "type": "u64" }
+    ]
+  },
+  {
+    "name": "yield_claimed",
+    "inputs": [
+      { "name": "player", "type": "address" },
+      { "name": "stake_id", "type": "u64" },
+      { "name": "amount", "type": "i128" }
+    ]
+  },
+  {
+    "name": "referral_registered",
+    "inputs": [
+      { "name": "referrer", "type": "address" },
+      { "name": "new_nomad", "type": "address" }
+    ]
+  }
+]

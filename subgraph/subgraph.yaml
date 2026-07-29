@@ -1,12 +1,9 @@
 specVersion: 1.2.0
-description: Stellar Nebula Nomad — contract event indexer
+description: Stellar Nebula Nomad — contract event indexer with real-time subscriptions
 repository: https://github.com/yourusername/stellar-nebula-nomad
 
-# ─── Schema ─────────────────────────────────────────────────────────────────
 schema:
   file: ./schema.graphql
-
-# ─── Data Sources ───────────────────────────────────────────────────────────
 
 dataSources:
   - kind: soroban
@@ -25,7 +22,11 @@ dataSources:
         - Ship
         - NebulaScan
         - HarvestRecord
+        - ResourceBalance
         - Session
+        - Notification
+        - YieldRecord
+        - EconomicMetric
         - MarketplaceListing
         - DEXOffer
         - TradeRecord
@@ -72,6 +73,28 @@ dataSources:
           topic0: "0x000000000000000000000000000000000000000000000000004d696e746572"
           topic1: "0x000000000000000000000000000000000000000000000000006d696e746564"
           handler: handleResourceMinted
+        - event: resource.harvested
+          topic0: "0x000000000000000000000000000000000000000000000000007265736f757263"
+          topic1: "0x0000000000000000000000000000000000000000000000000068617276657374"
+          handler: handleResourceHarvested
+
+        # Notification events
+        - event: notify.emitted
+          topic0: "0x000000000000000000000000000000000000000000000000006e6f74696679"
+          topic1: "0x00000000000000000000000000000000000000000000000000656d6974746564"
+          handler: handleNotificationEmitted
+
+        # Yield events
+        - event: yield.claimed
+          topic0: "0x000000000000000000000000000000000000000000000000007969656c64"
+          topic1: "0x00000000000000000000000000000000000000000000000000636c61696d6564"
+          handler: handleYieldClaimed
+
+        # Referral events
+        - event: referral.registered
+          topic0: "0x00000000000000000000000000000000000000000000000000726566657272"
+          topic1: "0x00000000000000000000000000000000000000000000000000726567697374"
+          handler: handleReferralRegistered
 
         # Marketplace events
         - event: market.listed

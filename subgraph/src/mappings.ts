@@ -13,7 +13,11 @@ import {
   Ship,
   NebulaScan,
   HarvestRecord,
+  ResourceBalance,
   Session,
+  Notification,
+  YieldRecord,
+  EconomicMetric,
   MarketplaceListing,
   DEXOffer,
   TradeRecord,
@@ -188,13 +192,18 @@ export function handleResourceMinted(event: any): void {
 
   ensurePlayer(caller, now);
 
-  const record = new HarvestRecord(makeId("harvest", caller, now.toString()));
-  record.scan = "";
-  record.ship = "";
-  record.resourceType = resourceType;
-  record.amount = amount;
-  record.harvestedAt = now;
-  record.save();
+  // Update resource balance
+  const balId = makeId("balance", caller, resourceType);
+  let balance = ResourceBalance.load(balId);
+  if (balance == null) {
+    balance = new ResourceBalance(balId);
+    balance.player = caller;
+    balance.resourceType = resourceType;
+    balance.balance = BigInt.fromI32(0);
+  }
+  balance.balance = balance.balance.plus(amount);
+  balance.updatedAt = now;
+  balance.save();
 }
 
 // ─── Marketplace Handlers ──────────────────────────────────────────────────
@@ -528,18 +537,27 @@ export function handleAllianceContribution(event: any): void {
 // ─── Staking Handlers ──────────────────────────────────────────────────────
 
 /**
- * Handles `("stake", "staked")` → (staker: Address, amount: i128)
+ * Handles `("stake", "staked")` → (staker: Address, amount: i128,
+ *                                   resource_type: Symbol, duration: u32)
  */
 export function handleStaked(event: any): void {
   const now = eventTimestamp();
   const staker = event.parameters[0].value.toAddress().toHexString();
   const amount = event.parameters[1].value.toBigInt();
+  const resourceType = event.parameters.length > 2
+    ? event.parameters[2].value.toSymbol().toString()
+    : "Unknown";
+  const duration = event.parameters.length > 3
+    ? event.parameters[3].value.toU32()
+    : 0;
 
   ensurePlayer(staker, now);
 
   const stake = new StakeRecord(makeId("stake", staker, now.toString()));
   stake.staker = staker;
+  stake.resourceType = resourceType;
   stake.amount = amount;
+  stake.duration = i32(duration);
   stake.createdLedger = now;
   stake.unlockLedger = BigInt.fromI32(0);
   stake.save();
@@ -727,4 +745,107 @@ export function handleBondDissolved(event: any): void {
   const bondId = event.parameters[0].value.toU64().toString();
   const caller = event.parameters[1].value.toAddress().toHexString();
   log.info("Bond {} dissolved by {}", [bondId, caller]);
+}
+
+// ─── Notification Handlers ────────────────────────────────────────────────
+
+/**
+ * Handles `("notify", <player>)` → (message: Symbol)
+ * Emitted by the contract's push_service to notify players of events.
+ */
+export function handleNotificationEmitted(event: any): void {
+  const now = eventTimestamp();
+  const playerAddr = event.topic1.toHexString();
+  const message = event.parameters[0].value.toSymbol().toString();
+
+  ensurePlayer(playerAddr, now);
+
+  const notif = new Notification(makeId("notif", playerAddr, now.toString()));
+  notif.player = playerAddr;
+  notif.message = message;
+  notif.data = null;
+  notif.read = false;
+  notif.timestamp = now;
+  notif.save();
+}
+
+// ─── Yield Handlers ───────────────────────────────────────────────────────
+
+/**
+ * Handles `("yield", "claimed")` → (player: Address, stake_id: u64, amount: i128)
+ */
+export function handleYieldClaimed(event: any): void {
+  const now = eventTimestamp();
+  const player = event.parameters[0].value.toAddress().toHexString();
+  const stakeId = event.parameters[1].value.toU64();
+  const amount = event.parameters[2].value.toBigInt();
+
+  ensurePlayer(player, now);
+
+  const record = new YieldRecord(makeId("yield", player, now.toString()));
+  record.player = player;
+  record.stakeId = BigInt.fromU64(stakeId);
+  record.amount = amount;
+  record.claimedAt = now;
+  record.save();
+}
+
+// ─── Resource Harvest Handlers ─────────────────────────────────────────────
+
+/**
+ * Handles `("resource", "harvested")` → (player: Address, ship_id: u64,
+ *                                         resource_type: Symbol, amount: i128)
+ */
+export function handleResourceHarvested(event: any): void {
+  const now = eventTimestamp();
+  const playerAddr = event.parameters[0].value.toAddress().toHexString();
+  const shipId = event.parameters[1].value.toU64().toString();
+  const resourceType = event.parameters[2].value.toSymbol().toString();
+  const amount = event.parameters[3].value.toBigInt();
+
+  ensurePlayer(playerAddr, now);
+
+  // Create harvest record
+  const record = new HarvestRecord(makeId("harvest", playerAddr, shipId, now.toString()));
+  record.scan = "";
+  record.ship = shipId;
+  record.resourceType = resourceType;
+  record.amount = amount;
+  record.harvestedAt = now;
+  record.save();
+
+  // Update resource balance
+  const balId = makeId("balance", playerAddr, resourceType);
+  let balance = ResourceBalance.load(balId);
+  if (balance == null) {
+    balance = new ResourceBalance(balId);
+    balance.player = playerAddr;
+    balance.resourceType = resourceType;
+    balance.balance = BigInt.fromI32(0);
+  }
+  balance.balance = balance.balance.plus(amount);
+  balance.updatedAt = now;
+  balance.save();
+}
+
+// ─── Referral Handlers ─────────────────────────────────────────────────────
+
+/**
+ * Handles `("referral", "registered")` → (referrer: Address, new_nomad: Address)
+ */
+export function handleReferralRegistered(event: any): void {
+  const now = eventTimestamp();
+  const referrer = event.parameters[0].value.toAddress().toHexString();
+  const newNomad = event.parameters[1].value.toAddress().toHexString();
+
+  ensurePlayer(referrer, now);
+  ensurePlayer(newNomad, now);
+
+  const referral = new Referral(makeId("ref", referrer, newNomad));
+  referral.referrer = referrer;
+  referral.newNomad = newNomad;
+  referral.claimed = false;
+  referral.firstScanDone = false;
+  referral.registeredAt = now;
+  referral.save();
 }

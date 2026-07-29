@@ -1,3 +1,39 @@
+# ─── Stellar Nebula Nomad — GraphQL Schema ──────────────────────────────────
+#
+# This schema defines all indexable entities for the Stellar Nebula Nomad
+# game protocol. The Graph Protocol automatically generates a GraphQL API
+# including queries, mutations, and real-time subscriptions for every entity
+# defined here with the @entity directive.
+#
+# Subscriptions: Every entity supports real-time change events:
+#   subscription { entity(id: "...") { id } }        — single entity changes
+#   subscription { entities(where: { ... }) { ... } } — filtered entity changes
+# No explicit subscription type declarations are needed; The Graph generates
+# them automatically from @entity types.
+#
+# ─── Indexing & Performance ─────────────────────────────────────────────────
+# - @derivedFrom creates reverse lookups without extra storage cost
+# - @fulltext enables efficient text search on specified fields
+# - Immutable entity IDs use deterministic composite hashes for fast lookups
+# ─────────────────────────────────────────────────────────────────────────────
+
+type _Schema_
+  @fulltext(
+    name: "shipSearch"
+    language: en
+    fields: [{ name: "shipType", includeInOverview: true }]
+  )
+  @fulltext(
+    name: "allianceSearch"
+    language: en
+    fields: [{ name: "name", includeInOverview: true }]
+  )
+  @fulltext(
+    name: "proposalSearch"
+    language: en
+    fields: [{ name: "description", includeInOverview: false }]
+  )
+
 # ─── Core Entities ─────────────────────────────────────────────────────────
 
 type Player @entity {
@@ -12,6 +48,9 @@ type Player @entity {
 
   """Total cosmic essence earned."""
   essenceEarned: BigInt!
+
+  """Resource balances indexed by resource type symbol."""
+  resourceBalances: [ResourceBalance!]! @derivedFrom(field: "player")
 
   """Ship IDs owned by this player."""
   ships: [Ship!]! @derivedFrom(field: "owner")
@@ -33,6 +72,9 @@ type Player @entity {
 
   """Treasure vaults owned by this player."""
   vaults: [TreasureVault!]! @derivedFrom(field: "owner")
+
+  """Notifications received by this player."""
+  notifications: [Notification!]! @derivedFrom(field: "player")
 
   """Timestamp of first on-chain activity."""
   createdAt: BigInt!
@@ -73,6 +115,9 @@ type Ship @entity {
 
   """Blueprints applied to this ship."""
   appliedBlueprints: [Blueprint!]! @derivedFrom(field: "appliedToShip")
+
+  """Harvest records performed by this ship."""
+  harvests: [HarvestRecord!]! @derivedFrom(field: "ship")
 
   """Timestamp when this ship was minted."""
   mintedAt: BigInt!
@@ -129,6 +174,25 @@ type HarvestRecord @entity {
   harvestedAt: BigInt!
 }
 
+# ─── Resource Balances ─────────────────────────────────────────────────────
+
+type ResourceBalance @entity {
+  """Composite ID of player + resource type."""
+  id: ID!
+
+  """Player who owns the resources."""
+  player: Player!
+
+  """Resource type symbol (e.g. fuel, minerals, alloys, crystals)."""
+  resourceType: String!
+
+  """Current balance."""
+  balance: BigInt!
+
+  """Timestamp when the balance was last updated."""
+  updatedAt: BigInt!
+}
+
 # ─── Session ───────────────────────────────────────────────────────────────
 
 type Session @entity {
@@ -149,6 +213,78 @@ type Session @entity {
 
   """Whether the session is still active."""
   active: Boolean!
+}
+
+# ─── Notifications ─────────────────────────────────────────────────────────
+
+type Notification @entity {
+  """Unique notification ID."""
+  id: ID!
+
+  """Player who received the notification."""
+  player: Player!
+
+  """Notification message symbol (e.g. low_res, rare_find, craft_ok)."""
+  message: String!
+
+  """Optional metadata payload."""
+  data: String
+
+  """Whether the notification has been read."""
+  read: Boolean!
+
+  """Ledger timestamp when the notification was emitted."""
+  timestamp: BigInt!
+}
+
+# ─── Yield Records ─────────────────────────────────────────────────────────
+
+type YieldRecord @entity {
+  """Unique yield record ID."""
+  id: ID!
+
+  """Player who claimed the yield."""
+  player: Player!
+
+  """Stake ID associated with this yield."""
+  stakeId: BigInt!
+
+  """Amount of yield claimed."""
+  amount: BigInt!
+
+  """Ledger timestamp when the yield was claimed."""
+  claimedAt: BigInt!
+}
+
+# ─── Economic Metrics ──────────────────────────────────────────────────────
+
+type EconomicMetric @entity {
+  """Metric type identifier (singleton per metric name)."""
+  id: ID!
+
+  """Total token supply."""
+  totalSupply: BigInt!
+
+  """Circulating supply."""
+  circulatingSupply: BigInt!
+
+  """Total amount staked."""
+  stakedSupply: BigInt!
+
+  """Number of active players."""
+  activePlayers: Int!
+
+  """Total ships minted."""
+  totalShips: Int!
+
+  """Total nebula scans performed."""
+  totalScans: Int!
+
+  """Average essence earned per player."""
+  avgEssencePerPlayer: BigInt!
+
+  """Timestamp when this metric was recorded."""
+  recordedAt: BigInt!
 }
 
 # ─── Marketplace / Trading ─────────────────────────────────────────────────
@@ -359,8 +495,14 @@ type StakeRecord @entity {
   """Player who staked."""
   staker: Player!
 
+  """Resource type staked."""
+  resourceType: String!
+
   """Amount staked."""
   amount: BigInt!
+
+  """Duration of the stake in ledger sequences."""
+  duration: Int!
 
   """Ledger sequence when staking occurred."""
   createdLedger: BigInt!
