@@ -1,0 +1,12 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-failure-example
+  namespace: default
+spec:
+  action: pod-failure
+  mode: one
+  selector:
+    labelSelectors:
+      "app": "stellar-nebula-nomad"
+  duration: '60s'
