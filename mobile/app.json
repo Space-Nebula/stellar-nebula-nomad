@@ -3,7 +3,7 @@
     "name": "Stellar Nebula Nomad",
     "slug": "stellar-nebula-nomad",
     "version": "0.1.0",
-    "scheme": ["stellarnebulanomad", "wc"],
+    "scheme": ["stellarnebulanomad", "wc", "stellar"],
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "splash": {
@@ -12,14 +12,61 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "network.stellar.nebula.nomad"
+      "bundleIdentifier": "network.stellar.nebula.nomad",
+      "associatedDomains": [
+        "applinks:stellar-nebula-nomad.app",
+        "applinks:www.stellar-nebula-nomad.app"
+      ]
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#0b1020"
       },
-      "package": "network.stellar.nebula.nomad"
+      "package": "network.stellar.nebula.nomad",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "stellar-nebula-nomad.app",
+              "pathPrefix": "/"
+            },
+            {
+              "scheme": "https",
+              "host": "www.stellar-nebula-nomad.app",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "stellarnebulanomad",
+              "host": "*",
+              "pathPrefix": "/"
+            },
+            {
+              "scheme": "wc",
+              "host": "*",
+              "pathPrefix": "/"
+            },
+            {
+              "scheme": "stellar",
+              "host": "*",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
-    "plugins": []
+    "plugins": [
+      "expo-linking"
+    ]
   }
 }

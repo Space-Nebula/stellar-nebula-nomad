@@ -214,4 +214,45 @@ describe("subscribeToWalletConnectDeepLinks", () => {
 
     expect(removeMock).toHaveBeenCalled();
   });
+
+  it("calls onWalletCallback for wallet callback URLs", () => {
+    let registeredHandler: ((event: { url: string }) => void) | undefined;
+    mockAddEventListener.mockImplementation(
+      (_event: string, handler: (e: { url: string }) => void) => {
+        registeredHandler = handler;
+        return { remove: jest.fn() };
+      },
+    );
+    const onPairingUri = jest.fn();
+    const onWalletCallback = jest.fn();
+
+    subscribeToWalletConnectDeepLinks({ onPairingUri, onWalletCallback });
+
+    registeredHandler?.({
+      url: "stellarnebulanomad://wallet-connect?result=approved",
+    });
+    expect(onPairingUri).not.toHaveBeenCalled();
+    expect(onWalletCallback).toHaveBeenCalledWith(
+      "stellarnebulanomad://wallet-connect?result=approved",
+      { result: "approved" },
+    );
+  });
+
+  it("does not call onWalletCallback for wc: pairing URIs", () => {
+    let registeredHandler: ((event: { url: string }) => void) | undefined;
+    mockAddEventListener.mockImplementation(
+      (_event: string, handler: (e: { url: string }) => void) => {
+        registeredHandler = handler;
+        return { remove: jest.fn() };
+      },
+    );
+    const onPairingUri = jest.fn();
+    const onWalletCallback = jest.fn();
+
+    subscribeToWalletConnectDeepLinks({ onPairingUri, onWalletCallback });
+
+    registeredHandler?.({ url: SAMPLE_PAIRING_URI });
+    expect(onPairingUri).toHaveBeenCalledWith(SAMPLE_PAIRING_URI);
+    expect(onWalletCallback).not.toHaveBeenCalled();
+  });
 });

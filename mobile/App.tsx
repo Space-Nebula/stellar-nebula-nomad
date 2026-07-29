@@ -159,10 +159,12 @@ export default function App() {
     >("disconnected");
     const [arStatus, setArStatus] = useState<ARViewerMessage | null>(null);
     const pendingWalletConnectUri = useRef<string | null>(null);
+    const offlineMonitorRef = useRef<ReturnType<typeof createOfflineStatusMonitor> | null>(null);
 
     // Intercept wc:/universal-link deep links at the native app-shell level
     // (tapped from a wallet app, a QR scanner, or a cold start) and relay
-    // the pairing URI into the WebView's WalletConnectSigner.
+    // the pairing URI into the WebView's WalletConnectSigner. Also handles
+    // transaction approval and wallet callback deep links.
     useEffect(() => {
         const subscription = subscribeToWalletConnectDeepLinks({
             onPairingUri: (uri) => {
@@ -171,13 +173,52 @@ export default function App() {
                         buildWalletConnectUriInjection(uri),
                     );
                 } else {
-                    // WebView isn't loaded yet (cold start race) — flush once ready.
                     pendingWalletConnectUri.current = uri;
+                }
+            },
+            onWalletCallback: (uri, params) => {
+                if (!ready || !webViewRef.current) return;
+                const route = parseDeepLink(uri);
+                if (route.type === "transaction_approval") {
+                    const approval = parseTransactionApprovalLink(uri);
+                    if (approval) {
+                        webViewRef.current.injectJavaScript(
+                            buildTransactionApprovalInjection(approval),
+                        );
+                    }
+                } else if (route.type === "wallet_callback") {
+                    webViewRef.current.injectJavaScript(
+                        buildWalletCallbackInjection(uri, params),
+                    );
                 }
             },
         });
         return () => subscription.remove();
     }, [ready]);
+
+    // Monitor network connectivity for offline mode support and relay
+    // status into the WebView bridge so the SDK's offline queue can react.
+    useEffect(() => {
+        const monitor = createOfflineStatusMonitor((status) => {
+            setOfflineStatus(status);
+            if (webViewRef.current) {
+                webViewRef.current.injectJavaScript(`
+                    (function() {
+                        if (window.__stellarMobile) {
+                            window.__stellarMobile.isOnline = ${status.isOnline};
+                            window.__stellarMobile.offlineStatus = ${JSON.stringify(status)};
+                        }
+                        if (window.__stellarMobile && typeof window.__stellarMobile.onNetworkChange === 'function') {
+                            window.__stellarMobile.onNetworkChange(${status.isOnline});
+                        }
+                        true;
+                    })();
+                `);
+            }
+        });
+        offlineMonitorRef.current = monitor;
+        return () => monitor.stop();
+    }, []);
 
     const handleLoad = () => {
         setReady(true);
@@ -240,5 +281,7 @@ const styles = StyleSheet.create({
     chrome: { padding: 12, borderBottomWidth: 1, borderBottomColor: "#273054" },
     title: { color: "#e8eefc", fontSize: 18, fontWeight: "600" },
     sub: { color: "#a8b6da", fontSize: 12, marginTop: 6, lineHeight: 18 },
+    online: { color: "#4ade80" },
+    offline: { color: "#f87171" },
     web: { flex: 1 },
 });

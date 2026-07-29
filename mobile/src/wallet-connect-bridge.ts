@@ -132,6 +132,7 @@ export function parseWalletConnectSessionMessage(
 
 export interface WalletConnectDeepLinkHandlers {
   onPairingUri: (uri: string) => void;
+  onWalletCallback?: (uri: string, params: Record<string, string>) => void;
 }
 
 export interface WalletConnectDeepLinkSubscription {
@@ -142,6 +143,8 @@ export interface WalletConnectDeepLinkSubscription {
  * Wires up expo-linking so any `wc:`/universal-link deep link that opens
  * this app (cold start via getInitialURL, or a link tapped while the app
  * is already running) is parsed and forwarded to `onPairingUri`.
+ *
+ * Also handles wallet callback redirects for transaction approval flows.
  */
 export function subscribeToWalletConnectDeepLinks(
   handlers: WalletConnectDeepLinkHandlers,
@@ -150,6 +153,12 @@ export function subscribeToWalletConnectDeepLinks(
     const pairingUri = parseWalletConnectDeepLink(event.url);
     if (pairingUri) {
       handlers.onPairingUri(pairingUri);
+      return;
+    }
+
+    if (handlers.onWalletCallback && isWalletCallback(event.url)) {
+      const params = extractQueryParams(event.url);
+      handlers.onWalletCallback(event.url, params);
     }
   };
 
@@ -165,4 +174,41 @@ export function subscribeToWalletConnectDeepLinks(
   // App was already running / backgrounded when the link was opened.
   const subscription = Linking.addEventListener("url", handleUrl);
   return { remove: () => subscription.remove() };
+}
+
+/**
+ * Checks whether a URL is a wallet callback redirect (e.g. after a
+ * user approves/rejects a transaction in their wallet).
+ */
+function isWalletCallback(url: string): boolean {
+  const trimmed = url.trim().toLowerCase();
+  return (
+    trimmed.includes("/wallet-connect") ||
+    trimmed.includes("/wallet_callback") ||
+    trimmed.startsWith("stellar:") ||
+    trimmed.includes("/wc/callback")
+  );
+}
+
+/**
+ * Extracts query parameters from a URL string.
+ */
+function extractQueryParams(url: string): Record<string, string> {
+  const params: Record<string, string> = {};
+  const queryStart = url.indexOf("?");
+  if (queryStart === -1) return params;
+  const query = url.slice(queryStart + 1);
+  const segments = query.split("&");
+  for (const segment of segments) {
+    if (!segment) continue;
+    const eq = segment.indexOf("=");
+    const rawKey = eq === -1 ? segment : segment.slice(0, eq);
+    const rawValue = eq === -1 ? "" : segment.slice(eq + 1);
+    try {
+      params[decodeURIComponent(rawKey)] = decodeURIComponent(rawValue);
+    } catch {
+      params[rawKey] = rawValue;
+    }
+  }
+  return params;
 }
