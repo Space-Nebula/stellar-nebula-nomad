@@ -24,7 +24,7 @@ jobs:
     outputs:
       wasm-name: ${{ steps.find-wasm.outputs.name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -70,7 +70,7 @@ jobs:
       name: ${{ github.event.inputs.network || 'futurenet' }}
       url: https://stellar.expert/explorer/futurenet
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Soroban CLI
         run: cargo install soroban-cli --locked
