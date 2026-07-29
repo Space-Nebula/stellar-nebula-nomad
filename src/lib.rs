@@ -7,6 +7,7 @@ use crate::nebula_explorer::{NebulaLayout, Rarity};
 mod access_control;
 pub mod error_standard;
 mod analytics;
+mod player_segmentation;
 mod blueprint_factory;
 mod gifting_system;
 mod nebula_explorer;
@@ -119,6 +120,9 @@ pub use reputation::{
 };
 
 pub use analytics::{AnalyticsError, GlobalStats};
+pub use player_segmentation::{
+    SegmentationError, PlayerSegment, PlayerEngagementMetrics, SegmentMetrics,
+};
 pub use access_control::{AccessControlError};
 pub use nebula_gen::{
     NebulaError as NebulaGenError, Anomaly, AnomalyType, NebulaLayout as NebulaGenLayout,
