@@ -30,7 +30,7 @@ libm = "0.2"
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0", features = ["testutils"] }
-proptest = "=1.6.0"
+proptest = "=1.11.0"
 rand = "=0.8.5"
 
 [profile.release]
