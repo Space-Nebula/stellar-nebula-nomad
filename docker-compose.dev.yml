@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgres://user:password@db:5432/sandbox_db
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=sandbox_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - sandbox_pgdata:/var/lib/postgresql/data
+      # Optionally, you can map seed scripts if any exist
+      # - ./migrations/seed.sql:/docker-entrypoint-initdb.d/seed.sql
+
+  # Mock service for external APIs
+  mock-service:
+    image: mockserver/mockserver:mockserver-5.14.0
+    ports:
+      - "1080:1080"
+    environment:
+      - MOCKSERVER_INITIALIZATION_JSON_PATH=/config/mockserver-initialization.json
+    # volumes:
+    #   - ./tests/mocks/initialization.json:/config/mockserver-initialization.json
+
+volumes:
+  sandbox_pgdata:
