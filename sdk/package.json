@@ -26,6 +26,10 @@
     "bignumber.js": "^9.1.2",
     "qrcode": "^1.5.4"
   },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
   "devDependencies": {
     "@types/jest": "^29.5.11",
     "@types/node": "^20.10.0",

@@ -76,7 +76,7 @@ impl NebulaGenError {
         let ctx = self.with_context(ship_id, region_id);
         log!(
             env,
-            "NebulaGenError {:?}: ship_id={} region_id={} — {}",
+            "[ERROR] NebulaGen: {:?} | ship_id={} region_id={} | msg={}",
             ctx.error, ctx.ship_id, ctx.region_id, ctx.detail
         );
         self
@@ -136,7 +136,7 @@ impl RateLimitError {
         let ctx = self.with_context(call_count, max_calls, window_secs);
         log!(
             env,
-            "RateLimitError {:?}: calls={}/{} window={}s — {}",
+            "[ERROR] RateLimit: {:?} | calls={}/{} window={}s | msg={}",
             ctx.error, ctx.call_count, ctx.max_calls, ctx.window_secs, ctx.detail
         );
         self
@@ -197,7 +197,7 @@ impl MinterError {
         let ctx = self.with_context(ship_id, anomaly_index, amount);
         log!(
             env,
-            "MinterError {:?}: ship_id={} anomaly={} amount={} — {}",
+            "[ERROR] Minter: {:?} | ship_id={} anomaly={} amount={} | msg={}",
             ctx.error, ctx.ship_id, ctx.anomaly_index, ctx.amount, ctx.detail
         );
         self
@@ -266,7 +266,7 @@ impl ShipRegistryError {
         let ctx = self.with_context(ship_id, ship_level, max_level);
         log!(
             env,
-            "ShipRegistryError {:?}: ship_id={} level={}/{} — {}",
+            "[ERROR] ShipRegistry: {:?} | ship_id={} level={}/{} | msg={}",
             ctx.error, ctx.ship_id, ctx.ship_level, ctx.max_level, ctx.detail
         );
         self
