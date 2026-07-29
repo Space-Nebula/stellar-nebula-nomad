@@ -489,7 +489,7 @@ seed % 4 → color selection
 density range → resource classification
 ```
 
-**Benefits**:
+**Benefits** :
 
 - Deterministic: Same region always generates same properties
 - Fair: No server-side manipulation possible
