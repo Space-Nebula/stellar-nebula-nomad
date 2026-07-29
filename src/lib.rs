@@ -7,6 +7,7 @@ use crate::nebula_explorer::{NebulaLayout, Rarity};
 mod access_control;
 pub mod error_standard;
 mod analytics;
+mod conversion_funnel;
 mod blueprint_factory;
 mod gifting_system;
 mod nebula_explorer;
@@ -119,6 +120,13 @@ pub use reputation::{
 };
 
 pub use analytics::{AnalyticsError, GlobalStats};
+pub use conversion_funnel::{
+    FunnelError, FunnelHealth, FunnelStage, ConversionFunnel, StageMetrics,
+    PlayerFunnelProgress, ConversionEvent, DropoffAnalysis, FunnelPerformanceSummary,
+    create_funnel, record_stage_entry, record_stage_completion, record_funnel_abandonment,
+    analyze_funnel_performance, get_funnel, get_stage_metrics, get_player_progress,
+    get_dropoff_analysis, get_conversion_events, get_funnel_performance,
+};
 pub use access_control::{AccessControlError};
 pub use nebula_gen::{
     NebulaError as NebulaGenError, Anomaly, AnomalyType, NebulaLayout as NebulaGenLayout,
