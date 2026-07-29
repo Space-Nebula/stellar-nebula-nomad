@@ -7,6 +7,12 @@ import {
   parseWalletConnectSessionMessage,
   subscribeToWalletConnectDeepLinks,
 } from "./src/wallet-connect-bridge";
+import {
+  buildTransactionApprovalInjection,
+  buildWalletCallbackInjection,
+  parseTransactionApprovalLink,
+  parseDeepLink,
+} from "./src/deep-links";
 import { createOfflineStatusMonitor, type OfflineStatusState } from "./src/offline-status";
 
 // WalletConnect Cloud Project ID — required for the web content's
@@ -121,7 +127,8 @@ export default function App() {
 
     // Intercept wc:/universal-link deep links at the native app-shell level
     // (tapped from a wallet app, a QR scanner, or a cold start) and relay
-    // the pairing URI into the WebView's WalletConnectSigner.
+    // the pairing URI into the WebView's WalletConnectSigner. Also handles
+    // transaction approval and wallet callback deep links.
     useEffect(() => {
         const subscription = subscribeToWalletConnectDeepLinks({
             onPairingUri: (uri) => {
@@ -130,8 +137,23 @@ export default function App() {
                         buildWalletConnectUriInjection(uri),
                     );
                 } else {
-                    // WebView isn't loaded yet (cold start race) — flush once ready.
                     pendingWalletConnectUri.current = uri;
+                }
+            },
+            onWalletCallback: (uri, params) => {
+                if (!ready || !webViewRef.current) return;
+                const route = parseDeepLink(uri);
+                if (route.type === "transaction_approval") {
+                    const approval = parseTransactionApprovalLink(uri);
+                    if (approval) {
+                        webViewRef.current.injectJavaScript(
+                            buildTransactionApprovalInjection(approval),
+                        );
+                    }
+                } else if (route.type === "wallet_callback") {
+                    webViewRef.current.injectJavaScript(
+                        buildWalletCallbackInjection(uri, params),
+                    );
                 }
             },
         });

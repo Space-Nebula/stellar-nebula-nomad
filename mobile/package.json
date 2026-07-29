@@ -10,8 +10,6 @@
     "test": "jest"
   },
   "dependencies": {
-    "@react-native-community/netinfo": "^11.4.1",
-    "@stellar-nebula/sdk": "*",
     "expo": "~52.0.0",
     "expo-linking": "~7.0.2",
     "expo-status-bar": "~2.0.0",
