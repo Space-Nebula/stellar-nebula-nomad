@@ -112,3 +112,87 @@ pub fn get_footprint(env: &Env, player: &Address) -> FootprintRecord {
             last_update_ts: env.ledger().timestamp(),
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl, testutils::Address as _};
+
+    #[contract]
+    struct Stub;
+    #[contractimpl]
+    impl Stub {}
+
+    fn make_env() -> (Env, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, Stub);
+        (env, id)
+    }
+
+    #[test]
+    fn test_record_transaction_footprint_rejects_zero_gas() {
+        let (env, contract_id) = make_env();
+        let player = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let result = record_transaction_footprint(&env, &player, 0);
+            assert_eq!(result, Err(SustainabilityError::InvalidGasValue));
+        });
+    }
+
+    #[test]
+    fn test_record_transaction_footprint_accumulates() {
+        let (env, contract_id) = make_env();
+        let player = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            record_transaction_footprint(&env, &player, 100).unwrap();
+            let rec = record_transaction_footprint(&env, &player, 50).unwrap();
+            assert_eq!(rec.gas_used, 150);
+            assert_eq!(rec.tx_count, 2);
+            assert_eq!(rec.co2_emissions, (100 * 42 / 1000) + (50 * 42 / 1000));
+        });
+    }
+
+    #[test]
+    fn test_get_footprint_defaults_to_zero_when_unset() {
+        let (env, contract_id) = make_env();
+        let player = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let rec = get_footprint(&env, &player);
+            assert_eq!(rec.gas_used, 0);
+            assert_eq!(rec.tx_count, 0);
+        });
+    }
+
+    #[test]
+    fn test_claim_sustainability_reward_below_threshold_is_eligible() {
+        let (env, contract_id) = make_env();
+        let player = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            record_transaction_footprint(&env, &player, 100).unwrap();
+            let reward = claim_sustainability_reward(&env, &player).unwrap();
+            assert_eq!(reward, (WEEKLY_GAS_THRESHOLD - 100) as i128 / 100);
+        });
+    }
+
+    #[test]
+    fn test_claim_sustainability_reward_at_threshold_boundary_ineligible() {
+        let (env, contract_id) = make_env();
+        let player = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            record_transaction_footprint(&env, &player, WEEKLY_GAS_THRESHOLD).unwrap();
+            let result = claim_sustainability_reward(&env, &player);
+            assert_eq!(result, Err(SustainabilityError::NoRewardEligible));
+        });
+    }
+
+    #[test]
+    fn test_claim_sustainability_reward_never_recorded_still_eligible() {
+        let (env, contract_id) = make_env();
+        let player = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let reward = claim_sustainability_reward(&env, &player).unwrap();
+            assert_eq!(reward, WEEKLY_GAS_THRESHOLD as i128 / 100);
+        });
+    }
+}

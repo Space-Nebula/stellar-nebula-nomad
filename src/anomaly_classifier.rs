@@ -135,3 +135,100 @@ pub fn get_classification(env: &Env, anomaly_id: u64) -> Option<ClassificationRe
         .instance()
         .get::<AnomalyKey, ClassificationRecord>(&AnomalyKey::Classification(anomaly_id))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl, vec, Env};
+
+    #[contract]
+    struct Stub;
+    #[contractimpl]
+    impl Stub {}
+
+    fn make_env() -> (Env, Address) {
+        let env = Env::default();
+        let id = env.register_contract(None, Stub);
+        (env, id)
+    }
+
+    #[test]
+    fn test_classify_anomaly_rejects_too_few_features() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let result = classify_anomaly(&env, 1, vec![&env, 1u32, 2u32]);
+            assert_eq!(result, Err(AnomalyError::InsufficientFeatures));
+        });
+    }
+
+    #[test]
+    fn test_classify_anomaly_boundary_scores() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            // score exactly 120 -> "nebula" (not > 120)
+            let r = classify_anomaly(&env, 1, vec![&env, 40u32, 40u32, 40u32]).unwrap();
+            assert_eq!(r.anomaly_type, symbol_short!("nebula"));
+
+            // score exactly 201 -> "blackhole" (> 200)
+            let r = classify_anomaly(&env, 2, vec![&env, 100u32, 100u32, 1u32]).unwrap();
+            assert_eq!(r.anomaly_type, symbol_short!("blackhole"));
+
+            // score exactly 121 -> "wormhole" (> 120, <= 200)
+            let r = classify_anomaly(&env, 3, vec![&env, 100u32, 20u32, 1u32]).unwrap();
+            assert_eq!(r.anomaly_type, symbol_short!("wormhole"));
+        });
+    }
+
+    #[test]
+    fn test_classify_anomaly_saturates_on_overflow() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let r = classify_anomaly(&env, 1, vec![&env, u32::MAX, u32::MAX, u32::MAX]).unwrap();
+            // confidence must clamp to 100, never overflow/panic.
+            assert_eq!(r.confidence, 100);
+        });
+    }
+
+    #[test]
+    fn test_refine_classification_missing_record() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let result = refine_classification(&env, 999, vec![&env, 1u32]);
+            assert_eq!(result, Err(AnomalyError::NotFound));
+        });
+    }
+
+    #[test]
+    fn test_refine_classification_rejects_empty_data() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            classify_anomaly(&env, 1, vec![&env, 1u32, 2u32, 3u32]).unwrap();
+            let result = refine_classification(&env, 1, vec![&env]);
+            assert_eq!(result, Err(AnomalyError::InsufficientFeatures));
+        });
+    }
+
+    #[test]
+    fn test_classify_batch_skips_invalid_entries() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let batch = vec![
+                &env,
+                (1u64, vec![&env, 1u32, 2u32, 3u32]),
+                (2u64, vec![&env, 1u32]), // invalid: too few features, silently skipped
+            ];
+            let out = classify_batch(&env, batch);
+            assert_eq!(out.len(), 1);
+            assert_eq!(out.get(0).unwrap().anomaly_id, 1);
+            assert!(get_classification(&env, 2).is_none());
+        });
+    }
+
+    #[test]
+    fn test_get_classification_missing_returns_none() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            assert!(get_classification(&env, 42).is_none());
+        });
+    }
+}

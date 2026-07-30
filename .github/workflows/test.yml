@@ -20,12 +20,25 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           targets: wasm32-unknown-unknown
+          components: clippy
+
+      - name: Run clippy (pedantic, warn-level)
+        # Non-blocking for now: pedantic was just turned on across a large
+        # pre-existing codebase (Issue #309) and the warning backlog hasn't
+        # been triaged file-by-file yet. Flip to `-D warnings` (removing
+        # continue-on-error) once the backlog is clean, so new pedantic
+        # regressions start failing CI.
+        continue-on-error: true
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Run tests
         run: cargo test --all
 
       - name: Run fuzz tests
         run: cargo test --test fuzz --test fuzz_navigation --test fuzz_trading --test fuzz_yield -- --test-threads=1
+
+      - name: Run performance benchmarks (regression gate)
+        run: cargo test --benches -- --test-threads=1 --nocapture
 
       - name: Build release
         run: cargo build --target wasm32-unknown-unknown --release

@@ -211,3 +211,107 @@ pub fn apply_curve_to_layout(
 
     Ok(difficulty)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl, testutils::Address as _};
+
+    #[contract]
+    struct Stub;
+    #[contractimpl]
+    impl Stub {}
+
+    fn make_env() -> (Env, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, Stub);
+        (env, id)
+    }
+
+    #[test]
+    fn test_calculate_progressive_difficulty_rejects_zero_level() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let result = calculate_progressive_difficulty(&env, 0);
+            assert_eq!(result, Err(CurveError::InvalidLevel));
+        });
+    }
+
+    #[test]
+    fn test_calculate_progressive_difficulty_rejects_above_max_level() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let result = calculate_progressive_difficulty(&env, MAX_LEVEL + 1);
+            assert_eq!(result, Err(CurveError::InvalidLevel));
+        });
+    }
+
+    #[test]
+    fn test_calculate_progressive_difficulty_accepts_max_level_boundary() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let result = calculate_progressive_difficulty(&env, MAX_LEVEL);
+            assert!(result.is_ok());
+        });
+    }
+
+    #[test]
+    fn test_calculate_progressive_difficulty_level_one_uses_base_coefficient() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let difficulty = calculate_progressive_difficulty(&env, 1).unwrap();
+            let config = get_curve_config(&env);
+            assert_eq!(difficulty.curve_score, config.base_coefficient);
+            assert_eq!(difficulty.difficulty_multiplier, 100);
+        });
+    }
+
+    #[test]
+    fn test_adjust_curve_parameter_rejects_non_positive_value() {
+        let (env, contract_id) = make_env();
+        let admin = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let result = adjust_curve_parameter(&env, &admin, symbol_short!("base"), 0);
+            assert_eq!(result, Err(CurveError::InvalidValue));
+        });
+    }
+
+    #[test]
+    fn test_adjust_curve_parameter_rejects_unknown_param() {
+        let (env, contract_id) = make_env();
+        let admin = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let result = adjust_curve_parameter(&env, &admin, symbol_short!("bogus"), 10);
+            assert_eq!(result, Err(CurveError::InvalidParameter));
+        });
+    }
+
+    #[test]
+    fn test_adjust_curve_parameter_rejects_second_admin() {
+        let (env, contract_id) = make_env();
+        let admin = Address::generate(&env);
+        let other = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            adjust_curve_parameter(&env, &admin, symbol_short!("base"), 50).unwrap();
+            let result = adjust_curve_parameter(&env, &other, symbol_short!("base"), 60);
+            assert_eq!(result, Err(CurveError::Unauthorized));
+        });
+    }
+
+    #[test]
+    fn test_adjust_curve_parameter_rejects_floor_above_cap() {
+        let (env, contract_id) = make_env();
+        let admin = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let config = get_curve_config(&env);
+            let result = adjust_curve_parameter(
+                &env,
+                &admin,
+                symbol_short!("floor"),
+                config.cap + 1,
+            );
+            assert_eq!(result, Err(CurveError::InvalidValue));
+        });
+    }
+}
