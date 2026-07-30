@@ -17,6 +17,180 @@ harness = false
 name = "performance_regression"
 harness = false
 
+# ─── Integration tests, grouped by module under tests/<group>/ ────────────
+# Explicit paths so binary names (and existing `cargo test --test <name>`
+# invocations in CI/docs) are unaffected by the directory grouping.
+
+# Fuzz / property-based tests (require --features fuzz for some)
+[[test]]
+name = "fuzz"
+path = "tests/fuzz/fuzz.rs"
+
+[[test]]
+name = "fuzz_navigation"
+path = "tests/fuzz/fuzz_navigation.rs"
+
+[[test]]
+name = "fuzz_trading"
+path = "tests/fuzz/fuzz_trading.rs"
+
+[[test]]
+name = "fuzz_yield"
+path = "tests/fuzz/fuzz_yield.rs"
+
+# Economy & DeFi mechanics: staking, yield, DEX, sponsorship, batching
+[[test]]
+name = "test_batch_processor"
+path = "tests/economy/test_batch_processor.rs"
+
+[[test]]
+name = "test_dex_integration"
+path = "tests/economy/test_dex_integration.rs"
+
+[[test]]
+name = "test_fractional_resources"
+path = "tests/economy/test_fractional_resources.rs"
+
+[[test]]
+name = "test_gas_sponsor"
+path = "tests/economy/test_gas_sponsor.rs"
+
+[[test]]
+name = "test_staking"
+path = "tests/economy/test_staking.rs"
+
+[[test]]
+name = "test_treasure_vault"
+path = "tests/economy/test_treasure_vault.rs"
+
+[[test]]
+name = "test_yield_forecast"
+path = "tests/economy/test_yield_forecast.rs"
+
+# DAO, RBAC, emergency controls
+[[test]]
+name = "test_dao"
+path = "tests/governance/test_dao.rs"
+
+[[test]]
+name = "test_emergency_controls"
+path = "tests/governance/test_emergency_controls.rs"
+
+[[test]]
+name = "test_governance"
+path = "tests/governance/test_governance.rs"
+
+[[test]]
+name = "test_rbac"
+path = "tests/governance/test_rbac.rs"
+
+# Player-facing gameplay systems: ships, seasons, gifting, exploration
+[[test]]
+name = "test_difficulty_scaler"
+path = "tests/gameplay/test_difficulty_scaler.rs"
+
+[[test]]
+name = "test_gameplay_systems"
+path = "tests/gameplay/test_gameplay_systems.rs"
+
+[[test]]
+name = "test_gifting_system"
+path = "tests/gameplay/test_gifting_system.rs"
+
+[[test]]
+name = "test_mobile_views"
+path = "tests/gameplay/test_mobile_views.rs"
+
+[[test]]
+name = "test_nebula_archive"
+path = "tests/gameplay/test_nebula_archive.rs"
+
+[[test]]
+name = "test_offline_progress"
+path = "tests/gameplay/test_offline_progress.rs"
+
+[[test]]
+name = "test_seasonal_content"
+path = "tests/gameplay/test_seasonal_content.rs"
+
+[[test]]
+name = "test_ship_upgrade"
+path = "tests/gameplay/test_ship_upgrade.rs"
+
+[[test]]
+name = "test_soul_binding"
+path = "tests/gameplay/test_soul_binding.rs"
+
+[[test]]
+name = "test_wormhole_traveler"
+path = "tests/gameplay/test_wormhole_traveler.rs"
+
+# Platform infra: storage, snapshots, recovery, oracles, event scheduling
+[[test]]
+name = "memory_leak_tests"
+path = "tests/infra/memory_leak_tests.rs"
+
+[[test]]
+name = "test_disaster_recovery"
+path = "tests/infra/test_disaster_recovery.rs"
+
+[[test]]
+name = "test_event_scheduler"
+path = "tests/infra/test_event_scheduler.rs"
+
+[[test]]
+name = "test_horizon_integration"
+path = "tests/infra/test_horizon_integration.rs"
+
+[[test]]
+name = "test_metadata_resolver"
+path = "tests/infra/test_metadata_resolver.rs"
+
+[[test]]
+name = "test_privacy_stats"
+path = "tests/infra/test_privacy_stats.rs"
+
+[[test]]
+name = "test_randomness_oracle"
+path = "tests/infra/test_randomness_oracle.rs"
+
+[[test]]
+name = "test_state_snapshot"
+path = "tests/infra/test_state_snapshot.rs"
+
+[[test]]
+name = "test_storage_optim"
+path = "tests/infra/test_storage_optim.rs"
+
+[[test]]
+name = "test_transaction_ordering"
+path = "tests/infra/test_transaction_ordering.rs"
+
+# Cross-cutting / multi-issue regression suites
+[[test]]
+name = "integration_tests"
+path = "tests/misc/integration_tests.rs"
+
+[[test]]
+name = "test_composability"
+path = "tests/misc/test_composability.rs"
+
+[[test]]
+name = "test_issues_127_130_141_142"
+path = "tests/misc/test_issues_127_130_141_142.rs"
+
+[[test]]
+name = "test_new_features"
+path = "tests/misc/test_new_features.rs"
+
+[[test]]
+name = "test_new_features_combined"
+path = "tests/misc/test_new_features_combined.rs"
+
+[[test]]
+name = "test_new_modules"
+path = "tests/misc/test_new_modules.rs"
+
 [features]
 # Enable advanced fuzz / property-based testing helpers.
 # Usage: cargo test --features fuzz
