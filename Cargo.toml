@@ -9,6 +9,38 @@ repository = "https://github.com/yourusername/stellar-nebula-nomad"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# ─── Clippy pedantic lints (Issue #309) ────────────────────────────────────
+# `pedantic` is warn-level (not deny) so it surfaces in CI/local builds
+# without hard-failing the build on every new pedantic nit. Specific lints
+# that don't fit this codebase's Soroban/no_std contract style are downgraded
+# back to `allow` below, each with a reason.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+# Contract entry points and pub(crate) helpers return values that Soroban
+# invokes across the WASM host boundary; "must_use" doesn't apply the way it
+# does to a typical Rust API, and enforcing it everywhere would mean
+# thousands of `#[must_use]` annotations with no real bug-catching value.
+must_use_candidate = "allow"
+
+# Soroban contract errors are `#[contracterror] enum ... #[repr(u32)]`; every
+# variant is already self-explanatory from its name (see error_standard.rs
+# for the shared error convention), and requiring `# Errors` doc sections on
+# every `Result`-returning contract fn (dozens per module) is not worth the
+# churn for an already-documented, consistent error convention.
+missing_errors_doc = "allow"
+
+# Module names intentionally repeat their domain noun (e.g.
+# `ship_nft::ShipNft`, `staking::StakingError`) because each module is
+# re-exported flatly at the crate root (see `pub use` list in lib.rs) — the
+# repetition is what keeps flattened names unambiguous to callers.
+module_name_repetitions = "allow"
+
+# Soroban's `#[contracttype]`/`#[contracterror]` macros expand into code this
+# lint flags (e.g. multiple inherent impls, repr wrappers); these are
+# generated, not hand-written, so there's nothing actionable to fix.
+similar_names = "allow"
+
 [[bench]]
 name = "gas_benchmarks"
 harness = false
