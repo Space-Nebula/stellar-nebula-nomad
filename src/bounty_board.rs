@@ -1,7 +1,7 @@
 //! Bounty publication, claiming, and settlement.
 //!
 use soroban_sdk::{
-    contracterror, contracttype, symbol_short, Address, BytesN, Env, Vec, Map, String,
+    contracterror, contracttype, symbol_short, Address, BytesN, Env, String,
 };
 
 /// Default bounty expiry duration: 14 days in seconds.

@@ -249,7 +249,7 @@ pub fn invalidate_namespace(
 
 /// Automatic cleanup of expired entries (called periodically).
 pub fn clear_stale_entries(env: &Env, namespace: Symbol) -> u32 {
-    let mut cleared = 0u32;
+    let cleared = 0u32;
 
     // In a real implementation, iterate through all entries in the namespace
     // and remove those where age > ttl_seconds. For this example, we track

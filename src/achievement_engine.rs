@@ -1,6 +1,6 @@
 //! Achievement eligibility evaluation and badge issuance.
 //!
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, String, Vec};
 
 use crate::health_monitor;
 use crate::player_profile::{get_profile_by_owner, mark_achievement_unlocked};

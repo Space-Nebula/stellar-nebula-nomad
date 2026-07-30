@@ -48,7 +48,7 @@ pub struct ComposableResponse {
 }
 
 impl ComposableResponse {
-    pub fn new(env: &Env, success: bool, data: Bytes, gas_used: u64) -> Self {
+    pub fn new(_env: &Env, success: bool, data: Bytes, gas_used: u64) -> Self {
         Self {
             success,
             data,
@@ -296,7 +296,7 @@ pub struct CompositionBuilder {
 }
 
 impl CompositionBuilder {
-    pub fn new(env: &Env) -> Self {
+    pub fn new(_env: &Env) -> Self {
         Self {
             target: None,
             method: None,

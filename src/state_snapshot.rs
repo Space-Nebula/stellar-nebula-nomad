@@ -539,7 +539,7 @@ pub fn export_state(
     caller.require_auth();
 
     // Verify backup exists
-    let backup: AutomatedBackup = env
+    let _backup: AutomatedBackup = env
         .storage()
         .persistent()
         .get(&SnapshotKey::AutomatedBackup(backup_id))
@@ -593,7 +593,7 @@ pub fn restore_from_backup(
         .ok_or(SnapshotError::SnapshotNotFound)?;
 
     // Verify backup exists
-    let backup: AutomatedBackup = env
+    let _backup: AutomatedBackup = env
         .storage()
         .persistent()
         .get(&SnapshotKey::AutomatedBackup(metadata.backup_id))

@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Vec, BytesN};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env};
 
 const WEEKLY_GAS_THRESHOLD: u64 = 10_000;
 const CO2_PER_GAS: u64 = 42; // 42 gCO2 per gas unit approximated

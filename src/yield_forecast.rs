@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 // ─── Configuration ─────────────────────────────────────────────────────────
 
@@ -345,7 +345,7 @@ fn get_recent_data(
 }
 
 /// Calculate simple moving average.
-fn calculate_moving_average(env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
+fn calculate_moving_average(_env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
     if data.is_empty() {
         return 0;
     }
@@ -361,7 +361,7 @@ fn calculate_moving_average(env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
 }
 
 /// Calculate trend (average daily change).
-fn calculate_trend(env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
+fn calculate_trend(_env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
     if data.len() < 2 {
         return 0;
     }
@@ -395,7 +395,7 @@ fn calculate_trend(env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
 }
 
 /// Calculate volatility (standard deviation approximation).
-fn calculate_volatility(env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
+fn calculate_volatility(_env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
     if data.len() < 2 {
         return 0;
     }
