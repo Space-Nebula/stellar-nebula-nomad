@@ -60,6 +60,10 @@ mod anomaly_classifier;
 mod shared_lib;
 mod fractional_resources;
 mod yield_forecast;
+mod fraud_detection;
+mod smart_alerts;
+mod exploration_heatmap;
+mod revenue_attribution;
 
 mod gas_sponsor;
 
