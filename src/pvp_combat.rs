@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    contracterror, contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
+    contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec,
 };
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -877,12 +877,11 @@ pub fn leave_matchmaking(env: &Env, player: &Address) -> Result<(), PvPError> {
     player.require_auth();
 
     let key = PvPDataKey::MatchmakingQueue;
-    let mut queue: Vec<MatchmakingEntry> = env
+    let queue: Vec<MatchmakingEntry> = env
         .storage()
         .persistent()
         .get(&key)
         .unwrap_or_else(|| Vec::new(env));
-
     let mut found = false;
     let mut new_queue = Vec::new(env);
     for i in 0..queue.len() {
@@ -911,7 +910,7 @@ pub fn leave_matchmaking(env: &Env, player: &Address) -> Result<(), PvPError> {
 
 pub fn process_matchmaking(env: &Env) -> Result<Option<(Address, Address)>, PvPError> {
     let key = PvPDataKey::MatchmakingQueue;
-    let mut queue: Vec<MatchmakingEntry> = env
+    let queue: Vec<MatchmakingEntry> = env
         .storage()
         .persistent()
         .get(&key)

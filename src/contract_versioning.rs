@@ -1,7 +1,7 @@
 //! Contract version metadata and compatibility checks.
 //!
 use soroban_sdk::{
-    contracterror, contracttype, symbol_short, Address, Bytes, Env, Vec, Map,
+    contracterror, contracttype, symbol_short, Address, Bytes, Env, Vec,
 };
 
 /// Current contract version (starts at 1 at deployment).

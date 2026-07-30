@@ -1,7 +1,7 @@
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Bytes, BytesN, Env, String, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, BytesN, Env, String, Symbol};
 
 #[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum GovError {
     VotingClosed = 1,
@@ -51,7 +51,7 @@ enum GovernanceDataKey {
 pub fn create_proposal(env: Env, creator: Address, description: String, param_change: BytesN<128>) -> Result<u64, GovError> {
     creator.require_auth();
 
-    let mut proposal_id = env.storage().instance().get::<_, u64>(&symbol_short!("next_gid")).unwrap_or(0);
+    let proposal_id = env.storage().instance().get::<_, u64>(&symbol_short!("next_gid")).unwrap_or(0);
     
     let proposal = Proposal {
         id: proposal_id,

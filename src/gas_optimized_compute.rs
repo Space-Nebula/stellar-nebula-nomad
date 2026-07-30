@@ -1,9 +1,9 @@
 /// Gas-optimized computation utilities
 /// Provides efficient algorithms and patterns for common computations
-use soroban_sdk::{Env, Vec, BytesN};
+use soroban_sdk::{Env, Vec};
 
 /// Fast hash for small inputs (optimized for gas)
-pub fn fast_hash_u64(env: &Env, input: u64) -> u64 {
+pub fn fast_hash_u64(_env: &Env, input: u64) -> u64 {
     // Simple but fast hash for u64
     let mut hash = input;
     hash ^= hash >> 33;

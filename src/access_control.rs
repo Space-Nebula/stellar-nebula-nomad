@@ -73,7 +73,6 @@
 //! 3. Leave `propose_role_change` as a stub or integrate with DAO's public interface.
 
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
-use soroban_sdk::storage::Instance;
 use crate::error_standard::{ErrorDescriptor, ErrorKind, StandardContractError};
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -785,11 +784,11 @@ pub fn init_roles(env: &Env, admin: Address) -> Result<(), AccessControlError> {
 /// # Returns
 /// - Always `Err(NotImplemented)` until DAO integration is implemented.
 pub fn propose_role_change(
-    env: &Env,
+    _env: &Env,
     proposer: Address,
-    role: Symbol,
-    grantee: Address,
-    action_type: Symbol,
+    _role: Symbol,
+    _grantee: Address,
+    _action_type: Symbol,
 ) -> Result<u64, AccessControlError> {
     // Stub: revert immediately
     proposer.require_auth();
@@ -944,13 +943,11 @@ pub fn approve_proposal(
 ) -> Result<(), AccessControlError> {
     approver.require_auth();
 
-    let config: MultiSigConfig = env
+    let _config: MultiSigConfig = env
         .storage()
         .persistent()
         .get(&AccessControlKey::MultiSigConfig)
         .ok_or(AccessControlError::MultiSigNotConfigured)?;
-
-    // Verify approver is a signer
     let signers: Vec<Address> = env
         .storage()
         .persistent()

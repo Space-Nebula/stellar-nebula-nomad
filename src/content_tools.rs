@@ -1,7 +1,7 @@
 //! Administrative tools for managed game content.
 //!
 use soroban_sdk::{
-    contracterror, contracttype, symbol_short, Address, Bytes, Env, Map, String, Symbol, Vec,
+    contracterror, contracttype, symbol_short, Address, Bytes, Env, String, Symbol, Vec,
 };
 
 use crate::input_validation;
@@ -345,7 +345,7 @@ pub fn delete_content(
 
     // Remove from creator's list
     let creator_key = ContentDataKey::CreatorContent(creator.clone());
-    let mut creator_contents: Vec<u64> = env
+    let creator_contents: Vec<u64> = env
         .storage()
         .persistent()
         .get(&creator_key)

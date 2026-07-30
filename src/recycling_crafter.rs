@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    contracterror, contracttype, symbol_short, vec, Address, Env, Vec, Map, Symbol,
+    contracterror, contracttype, symbol_short, Address, Env, Vec, Symbol,
 };
 
 /// Maximum batch size for recycle/craft operations.
@@ -197,7 +197,7 @@ pub fn craft_new_item(
     let output_quantities = recipe.output_quantities;
     for i in 0..recipe.outputs.len() {
         let base_qty = output_quantities.get(i).unwrap();
-        let boosted_qty = (base_qty as f32 * efficiency_multiplier) as u32;
+        let _boosted_qty = (base_qty as f32 * efficiency_multiplier) as u32;
         final_outputs.push_back(recipe.outputs.get(i).unwrap().clone());
     }
 
