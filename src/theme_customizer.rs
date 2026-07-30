@@ -96,3 +96,67 @@ pub fn apply_theme(env: Env, owner: Address, ship_id: u64, theme_id: Symbol) -> 
 pub fn get_theme(env: Env, ship_id: u64) -> Option<Symbol> {
     env.storage().persistent().get(&(symbol_short!("theme"), ship_id))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl, testutils::Address as _};
+
+    #[contract]
+    struct Stub;
+    #[contractimpl]
+    impl Stub {}
+
+    fn make_env() -> (Env, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, Stub);
+        (env, id)
+    }
+
+    #[test]
+    fn test_generate_theme_preview_rejects_unknown_theme() {
+        let env = Env::default();
+        let result = generate_theme_preview(env.clone(), symbol_short!("bogus"));
+        assert_eq!(result, Err(ThemeError::InvalidTheme));
+    }
+
+    #[test]
+    fn test_generate_theme_preview_first_and_last_boundary() {
+        let env = Env::default();
+        let first = generate_theme_preview(env.clone(), symbol_short!("nebula1")).unwrap();
+        assert_eq!(first.name, symbol_short!("Cosmic"));
+
+        let last = generate_theme_preview(env.clone(), symbol_short!("nebula10")).unwrap();
+        assert_eq!(last.name, symbol_short!("Meteor"));
+    }
+
+    #[test]
+    fn test_get_theme_missing_ship_returns_none() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            assert!(get_theme(env.clone(), 12345).is_none());
+        });
+    }
+
+    #[test]
+    fn test_apply_theme_rejects_invalid_theme_and_persists_nothing() {
+        let (env, contract_id) = make_env();
+        let owner = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let result = apply_theme(env.clone(), owner, 1, symbol_short!("bogus"));
+            assert_eq!(result, Err(ThemeError::InvalidTheme));
+            assert!(get_theme(env.clone(), 1).is_none());
+        });
+    }
+
+    #[test]
+    fn test_apply_theme_then_get_theme_roundtrip() {
+        let (env, contract_id) = make_env();
+        let owner = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            apply_theme(env.clone(), owner, 7, symbol_short!("nebula3")).unwrap();
+            assert_eq!(get_theme(env.clone(), 7), Some(symbol_short!("nebula3")));
+        });
+    }
+}

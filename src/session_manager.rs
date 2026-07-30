@@ -150,3 +150,110 @@ pub fn get_session(env: &Env, session_id: u64) -> Result<Session, SessionError> 
         .get(&SessionKey::Session(session_id))
         .ok_or(SessionError::SessionNotFound)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{
+        contract, contractimpl,
+        testutils::{Address as _, Ledger, LedgerInfo},
+    };
+
+    #[contract]
+    struct Stub;
+    #[contractimpl]
+    impl Stub {}
+
+    fn make_env() -> (Env, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 100,
+            timestamp: 1_000_000,
+            network_id: [0u8; 32],
+            base_reserve: 10,
+            min_temp_entry_ttl: 100,
+            min_persistent_entry_ttl: 1000,
+            max_entry_ttl: 10_000,
+        });
+        let id = env.register_contract(None, Stub);
+        (env, id)
+    }
+
+    #[test]
+    fn test_get_session_missing_returns_not_found() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            assert_eq!(get_session(&env, 999), Err(SessionError::SessionNotFound));
+        });
+    }
+
+    #[test]
+    fn test_start_session_enforces_max_concurrent_cap() {
+        let (env, contract_id) = make_env();
+        let owner = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            for _ in 0..MAX_SESSIONS_PER_PLAYER {
+                start_session(&env, owner.clone(), 1).unwrap();
+            }
+            let result = start_session(&env, owner.clone(), 1);
+            assert_eq!(result, Err(SessionError::TooManySessions));
+        });
+    }
+
+    #[test]
+    fn test_expire_session_by_non_owner_before_ttl_fails() {
+        let (env, contract_id) = make_env();
+        let owner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let id = start_session(&env, owner, 1).unwrap();
+            let result = expire_session(&env, stranger, id);
+            assert_eq!(result, Err(SessionError::NotOwner));
+        });
+    }
+
+    #[test]
+    fn test_expire_session_by_non_owner_after_ttl_succeeds() {
+        let (env, contract_id) = make_env();
+        let owner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let id = start_session(&env, owner, 1).unwrap();
+            env.ledger().with_mut(|li| {
+                li.timestamp += SESSION_TTL + 1;
+            });
+            expire_session(&env, stranger, id).unwrap();
+            let session = get_session(&env, id).unwrap();
+            assert!(!session.active);
+        });
+    }
+
+    #[test]
+    fn test_expire_session_twice_fails_second_time() {
+        let (env, contract_id) = make_env();
+        let owner = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let id = start_session(&env, owner.clone(), 1).unwrap();
+            expire_session(&env, owner.clone(), id).unwrap();
+            let result = expire_session(&env, owner, id);
+            assert_eq!(result, Err(SessionError::SessionExpired));
+        });
+    }
+
+    #[test]
+    fn test_expire_session_frees_slot_for_new_session() {
+        let (env, contract_id) = make_env();
+        let owner = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            let id = start_session(&env, owner.clone(), 1).unwrap();
+            for _ in 0..(MAX_SESSIONS_PER_PLAYER - 1) {
+                start_session(&env, owner.clone(), 1).unwrap();
+            }
+            expire_session(&env, owner.clone(), id).unwrap();
+            // Slot freed, so one more session should now succeed.
+            start_session(&env, owner, 1).unwrap();
+        });
+    }
+}
