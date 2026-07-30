@@ -310,10 +310,10 @@ pub fn get_segment_members(env: &Env, segment: PlayerSegment, limit: u32) -> Vec
         .unwrap_or_else(|| Vec::new(env));
 
     let mut result: Vec<Address> = Vec::new(env);
-    let count = if (limit as usize) < all_members.len() {
+    let count = if (limit as usize) < all_members.len() as usize {
         limit as usize
     } else {
-        all_members.len()
+        all_members.len() as usize
     };
 
     for i in 0..count {

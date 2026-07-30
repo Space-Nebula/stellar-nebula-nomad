@@ -507,7 +507,7 @@ pub fn create_mobile_session(
 
     let session_key = MobileSessionKey {
         player: player.clone(),
-        session_id: env.ledger().sequence(),
+        session_id: env.ledger().sequence().into(),
         expires_at,
         max_daily_sponsorships: config.per_user_daily_cap,
         used_count: 0,

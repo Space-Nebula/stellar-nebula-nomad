@@ -297,7 +297,7 @@ pub fn deactivate_alert(env: &Env, admin: &Address, alert_name: Symbol) {
         .set(&DashboardKey::AlertThreshold(alert_name.clone()), &threshold);
 
     env.events().publish(
-        (symbol_short!("dash"), symbol_short!("deactivate")),
+        (symbol_short!("dash"), symbol_short!("deactiv8")),
         (alert_name,),
     );
 }
@@ -498,13 +498,13 @@ pub fn get_recent_alerts(env: &Env, limit: u32) -> Vec<AlertEvent> {
         .unwrap_or_else(|| Vec::new(env));
 
     let mut result: Vec<AlertEvent> = Vec::new(env);
-    let start_idx = if (limit as usize) < all_alerts.len() {
-        all_alerts.len() - (limit as usize)
+    let start_idx = if (limit as usize) < all_alerts.len() as usize {
+        all_alerts.len() as usize - (limit as usize)
     } else {
         0
     };
 
-    for i in start_idx..all_alerts.len() {
+    for i in start_idx..all_alerts.len() as usize {
         if let Some(alert) = all_alerts.get(i as u32) {
             result.push_back(alert.clone());
         }

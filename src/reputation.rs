@@ -196,7 +196,7 @@ pub fn record_behavior(
     }
 
     let record = BehaviorRecord {
-        id: env.ledger().sequence(),
+        id: env.ledger().sequence().into(),
         player: player.clone(),
         behavior_type,
         description: description.clone(),
@@ -252,7 +252,7 @@ pub fn submit_report(
 
     let report_id = env.ledger().sequence();
     let report = DisputeReport {
-        id: report_id,
+        id: report_id.into(),
         reporter: reporter.clone(),
         accused: accused.clone(),
         reason: reason.clone(),
@@ -283,7 +283,7 @@ pub fn submit_report(
         (reporter.clone(), accused.clone(), report_id),
     );
 
-    Ok(report_id)
+    Ok(report_id.into())
 }
 
 pub fn resolve_report(
@@ -300,7 +300,7 @@ pub fn resolve_report(
         .get(&ReputationKey::AdminList)
         .ok_or(ReputationError::Unauthorized)?;
 
-    if !admins.iter().any(|a| a == admin) {
+    if !admins.iter().any(|a| a == *admin) {
         return Err(ReputationError::Unauthorized);
     }
 
@@ -310,7 +310,7 @@ pub fn resolve_report(
         .get(&ReputationKey::DisputeList)
         .ok_or(ReputationError::ReportNotFound)?;
 
-    for report in disputes.iter_mut() {
+    for mut report in disputes.iter() {
         if report.id == report_id {
             report.status = if resolved {
                 ReportStatus::Resolved
@@ -324,7 +324,7 @@ pub fn resolve_report(
                     env,
                     &report.accused,
                     BehaviorType::Negative,
-                    String::from_small_str(env, "Report resolved with sanctions"),
+                    String::from_str(env, "Report resolved with sanctions"),
                     -5,
                     admin.clone(),
                 );
@@ -355,7 +355,7 @@ pub fn ban_player(env: &Env, admin: &Address, player: &Address) -> Result<(), Re
         .get(&ReputationKey::AdminList)
         .ok_or(ReputationError::Unauthorized)?;
 
-    if !admins.iter().any(|a| a == admin) {
+    if !admins.iter().any(|a| a == *admin) {
         return Err(ReputationError::Unauthorized);
     }
 

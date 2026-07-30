@@ -264,7 +264,7 @@ pub fn register_price_trigger(
 
     let trigger_id = env.ledger().sequence();
     let trigger = EventTrigger {
-        id: trigger_id,
+        id: trigger_id.into(),
         resource: resource.clone(),
         trigger_price,
         trigger_type,
@@ -282,7 +282,7 @@ pub fn register_price_trigger(
         (trigger_id, resource, trigger_price),
     );
 
-    Ok(trigger_id)
+    Ok(trigger_id.into())
 }
 
 /// Check and fire events based on registered triggers.
@@ -344,7 +344,7 @@ pub fn disable_trigger(env: &Env, admin: Address, trigger_id: u64) -> Result<(),
         .get(&OracleKey::EventTriggers)
         .ok_or(OracleError::EventTriggerNotFound)?;
 
-    for trigger in triggers.iter_mut() {
+    for mut trigger in triggers.iter() {
         if trigger.id == trigger_id {
             trigger.active = false;
             env.storage()

@@ -111,6 +111,10 @@ mod gas_optimized_compute;
 mod nomad_bonding;
 mod reentrancy_guard;
 mod composability_examples;
+mod input_validation;
+mod quest_system;
+mod ai_mission_engine;
+mod guild_quests;
 mod reputation;
 
 pub use reentrancy_guard::ReentrancyError;
@@ -531,7 +535,7 @@ impl NebulaNomadContract {
 
     /// Set leaderboard admin (admin only).
     pub fn set_leaderboard_admin(env: Env, admin: Address) {
-        leaderboards::set_admin(&env, &admin)
+        leaderboards::set_admin(&env, &admin);
     }
 
     // === Content Creation Tools API (Issue #158) ===
@@ -658,7 +662,7 @@ impl NebulaNomadContract {
 
     /// Set content tools admin (admin only).
     pub fn set_content_admin(env: Env, admin: Address) {
-        content_tools::set_admin(&env, &admin)
+        content_tools::set_admin(&env, &admin);
     }
 
     // ─── Content Revenue Sharing (Issue #192) ────────────────────────────────
@@ -886,7 +890,7 @@ impl NebulaNomadContract {
 
     /// Set PvP combat admin (admin only).
     pub fn set_pvp_admin(env: Env, admin: Address) {
-        pvp_combat::set_admin(&env, &admin)
+        pvp_combat::set_admin(&env, &admin);
     }
 
     // === Contract Versioning API ===
