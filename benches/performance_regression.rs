@@ -1,6 +1,6 @@
 /// Performance regression test suite
 /// Ensures optimizations don't regress over time
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Bytes, Env, String, Vec};
 use stellar_nebula_nomad::*;
 
 const MAX_CPU_NEBULA_GEN: u64 = 1_000_000;
@@ -8,6 +8,10 @@ const MAX_CPU_SCAN: u64 = 2_000_000;
 const MAX_CPU_HARVEST: u64 = 1_500_000;
 const MAX_CPU_MINT: u64 = 800_000;
 const MAX_MEM_BYTES: u64 = 100_000;
+const MAX_CPU_FOUND_ALLIANCE: u64 = 1_500_000;
+const MAX_CPU_ENERGY_OP: u64 = 500_000;
+const MAX_CPU_CRAFT: u64 = 1_500_000;
+const MAX_CPU_EMERGENCY_PAUSE: u64 = 300_000;
 
 #[test]
 fn regression_nebula_generation() {
@@ -115,4 +119,77 @@ fn regression_storage_bump_cost() {
     // Storage operations should be optimized
     assert!(cpu <= 500_000,
         "REGRESSION: Storage update CPU {} exceeds 500K", cpu);
+}
+
+#[test]
+fn regression_found_alliance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let founder = Address::generate(&env);
+
+    env.budget().reset_unlimited();
+    let _id = found_alliance(&env, founder, String::from_str(&env, "Regression Alliance")).unwrap();
+
+    let cpu = env.budget().cpu_instruction_cost();
+    assert!(cpu <= MAX_CPU_FOUND_ALLIANCE,
+        "REGRESSION: Found alliance CPU {} exceeds baseline {}", cpu, MAX_CPU_FOUND_ALLIANCE);
+}
+
+#[test]
+fn regression_energy_consume_recharge() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let owner = Address::generate(&env);
+    let ship = mint_ship(env.clone(), owner, symbol_short!("fighter"), Bytes::new(&env)).unwrap();
+
+    env.budget().reset_unlimited();
+    consume_energy(&env, ship.id, 500).unwrap();
+    let consume_cpu = env.budget().cpu_instruction_cost();
+    assert!(consume_cpu <= MAX_CPU_ENERGY_OP,
+        "REGRESSION: Energy consume CPU {} exceeds baseline {}", consume_cpu, MAX_CPU_ENERGY_OP);
+
+    env.budget().reset_unlimited();
+    recharge_energy(&env, ship.id, 200).unwrap();
+    let recharge_cpu = env.budget().cpu_instruction_cost();
+    assert!(recharge_cpu <= MAX_CPU_ENERGY_OP,
+        "REGRESSION: Energy recharge CPU {} exceeds baseline {}", recharge_cpu, MAX_CPU_ENERGY_OP);
+}
+
+#[test]
+fn regression_craft() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let player = Address::generate(&env);
+
+    recipes::set_recipe(&env, &recipes::Recipe {
+        id: 1,
+        inputs: Vec::new(&env),
+        output: (symbol_short!("essence"), 10),
+        rarity: 1,
+        required_level: 0,
+    });
+
+    env.budget().reset_unlimited();
+    craft(env.clone(), player, 1).unwrap();
+
+    let cpu = env.budget().cpu_instruction_cost();
+    assert!(cpu <= MAX_CPU_CRAFT,
+        "REGRESSION: Craft CPU {} exceeds baseline {}", cpu, MAX_CPU_CRAFT);
+}
+
+#[test]
+fn regression_emergency_pause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let mut admins = Vec::new(&env);
+    admins.push_back(admin.clone());
+    initialize_admins(&env, admins).unwrap();
+
+    env.budget().reset_unlimited();
+    pause_contract(&env, &admin).unwrap();
+
+    let cpu = env.budget().cpu_instruction_cost();
+    assert!(cpu <= MAX_CPU_EMERGENCY_PAUSE,
+        "REGRESSION: Emergency pause CPU {} exceeds baseline {}", cpu, MAX_CPU_EMERGENCY_PAUSE);
 }

@@ -17,6 +17,10 @@ harness = false
 name = "performance_regression"
 harness = false
 
+[[bench]]
+name = "critical_path_benchmarks"
+harness = false
+
 # ─── Integration tests, grouped by module under tests/<group>/ ────────────
 # Explicit paths so binary names (and existing `cargo test --test <name>`
 # invocations in CI/docs) are unaffected by the directory grouping.
