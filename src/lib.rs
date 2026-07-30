@@ -1868,7 +1868,7 @@ impl NebulaNomadContract {
         shared_lib::validate_address(&env, auth)
     }
 
-    pub fn calculate_yield(env: Env, base: i128, multiplier: u32) -> Result<i128, SharedError> {
+    pub fn calculate_yield(_env: Env, base: i128, multiplier: u32) -> Result<i128, SharedError> {
         shared_lib::calculate_yield(base, multiplier)
     }
 
@@ -2350,7 +2350,7 @@ impl NebulaNomadContract {
     }
 
     /// Calculate travel cost between two nebulae.
-    pub fn calculate_travel_cost(env: Env, origin_nebula: u64, destination: u64) -> u32 {
+    pub fn calculate_travel_cost(_env: Env, origin_nebula: u64, destination: u64) -> u32 {
         wormhole_traveler::calculate_travel_cost(origin_nebula, destination)
     }
 

@@ -764,7 +764,7 @@ fn validate_region(env: &Env, region: &Symbol) -> Result<(), LeaderboardError> {
 
 // ── Sorting Helpers ─────────────────────────────────────────────────────────
 
-fn sort_entries_descending(env: &Env, entries: &mut Vec<LeaderboardEntry>) {
+fn sort_entries_descending(_env: &Env, entries: &mut Vec<LeaderboardEntry>) {
     let n = entries.len();
     for i in 0..n {
         for j in (i + 1)..n {
@@ -780,7 +780,7 @@ fn sort_entries_descending(env: &Env, entries: &mut Vec<LeaderboardEntry>) {
     }
 }
 
-fn sort_guild_entries_descending(env: &Env, entries: &mut Vec<GuildEntry>) {
+fn sort_guild_entries_descending(_env: &Env, entries: &mut Vec<GuildEntry>) {
     let n = entries.len();
     for i in 0..n {
         for j in (i + 1)..n {
@@ -796,7 +796,7 @@ fn sort_guild_entries_descending(env: &Env, entries: &mut Vec<GuildEntry>) {
     }
 }
 
-fn sort_regional_entries_descending(env: &Env, entries: &mut Vec<RegionalEntry>) {
+fn sort_regional_entries_descending(_env: &Env, entries: &mut Vec<RegionalEntry>) {
     let n = entries.len();
     for i in 0..n {
         for j in (i + 1)..n {
@@ -812,7 +812,7 @@ fn sort_regional_entries_descending(env: &Env, entries: &mut Vec<RegionalEntry>)
     }
 }
 
-fn sort_achievement_entries_descending(env: &Env, entries: &mut Vec<AchievementEntry>) {
+fn sort_achievement_entries_descending(_env: &Env, entries: &mut Vec<AchievementEntry>) {
     let n = entries.len();
     for i in 0..n {
         for j in (i + 1)..n {
