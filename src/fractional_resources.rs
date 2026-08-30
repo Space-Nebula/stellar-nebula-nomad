@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, BytesN, Env, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 // ─── Configuration ─────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ pub struct FractionalConfig {
 }
 
 impl FractionalConfig {
-    pub fn new(env: &Env, admin: &Address) -> Self {
+    pub fn new(_env: &Env, admin: &Address) -> Self {
         Self {
             min_share_size: MIN_SHARE_SIZE,
             max_fractions_per_tx: MAX_FRACTIONS_PER_TX,
@@ -188,7 +188,7 @@ pub fn fractionalize_resource(
     // Create fractional shares
     let mut share_ids = Vec::new(env);
     
-    for i in 0..shares {
+    for _i in 0..shares {
         let share_id = next_share_id(env);
         let share = FractionalShare {
             share_id,
@@ -294,7 +294,7 @@ pub fn merge_fractions(
     
     // Update original resource
     let resource_type = expected_type.unwrap();
-    let original_id = expected_original_id.unwrap();
+    let _original_id = expected_original_id.unwrap();
     
     let mut original: OriginalResource = env
         .storage()

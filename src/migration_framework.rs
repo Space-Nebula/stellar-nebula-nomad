@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    contracterror, contracttype, symbol_short, Address, Bytes, Env, Vec, Symbol,
+    contracterror, contracttype, symbol_short, Address, Bytes, BytesN, Env, Vec, Symbol,
 };
 
 // ─── Migration Framework for Soroban Contract Upgrades ──────────────────────
@@ -350,7 +350,7 @@ pub fn record_migration_completion(
     to_version: u32,
     record_count: u32,
 ) {
-    let record = MigrationRecord {
+    let _record = MigrationRecord {
         id: migration_id,
         from_version,
         to_version,
@@ -373,4 +373,4 @@ pub fn record_migration_completion(
     );
 }
 
-use soroban_sdk::BytesN;
+
