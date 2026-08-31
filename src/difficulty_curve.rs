@@ -1,6 +1,6 @@
 //! Reusable progression and difficulty curves.
 //!
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol};
 
 use crate::health_monitor;
 use crate::nebula_explorer::NebulaLayout;
