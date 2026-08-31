@@ -395,7 +395,7 @@ fn calculate_trend(_env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
 }
 
 /// Calculate volatility (standard deviation approximation).
-fn calculate_volatility(_env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
+fn calculate_volatility(env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
     if data.len() < 2 {
         return 0;
     }
