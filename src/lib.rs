@@ -141,7 +141,11 @@ pub use nebula_gen::{
     NebulaError as NebulaGenError, Anomaly, AnomalyType, NebulaLayout as NebulaGenLayout,
     ResourceClass,
 };
-pub use resource_minter::{AssetId, MinterError, ResourceKey, ResourceRecord, ResourceType};
+pub use resource_minter::{
+    balance_of, circulating_supply, credit_balance, debit_balance, move_balance, reduce_supply,
+    resource_type_to_symbol, total_minted, AssetId, MinterError, MinterKey, ResourceKey,
+    ResourceMinterContract, ResourceRecord, ResourceType,
+};
 pub use ship_nft::{ShipError, ShipNft};
 pub use blueprint_factory::{Blueprint, BlueprintError, BlueprintRarity};
 pub use referral_system::{Referral, ReferralError};
