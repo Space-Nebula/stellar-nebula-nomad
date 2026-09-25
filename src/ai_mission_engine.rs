@@ -1,6 +1,6 @@
 //! Player-aware procedural mission generation.
 //!
-use soroban_sdk::{contracttype, symbol_short, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, String, Symbol};
 
 use crate::player_profile::get_profile_by_owner;
 use crate::seasons::{get_current_season, SeasonTheme};

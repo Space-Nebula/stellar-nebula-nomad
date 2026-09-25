@@ -5,7 +5,7 @@
 //! Stop-loss orders are modelled as sell-side limit orders and executed
 //! by an off-chain keeper that calls `cancel_limit_order` + market sell.
 
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Map, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 use crate::reentrancy_guard::{with_guard, ReentrancyError};
 

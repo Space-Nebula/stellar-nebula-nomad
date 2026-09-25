@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, Env, String, Symbol};
+use soroban_sdk::{contracterror, Env, String};
 
 /// Maximum length for short string fields (names, aliases).
 pub const MAX_NAME_LENGTH: u32 = 64;

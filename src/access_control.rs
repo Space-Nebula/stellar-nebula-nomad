@@ -73,7 +73,6 @@
 //! 3. Leave `propose_role_change` as a stub or integrate with DAO's public interface.
 
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
-use soroban_sdk::storage::Instance;
 use crate::error_standard::{ErrorDescriptor, ErrorKind, StandardContractError};
 
 // ═══════════════════════════════════════════════════════════════════════════════

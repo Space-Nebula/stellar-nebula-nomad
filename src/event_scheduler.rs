@@ -905,7 +905,7 @@ pub fn schedule_weekly_festival(
     admin: &Address,
     reward_pool: i128,
 ) -> Result<u64, EventError> {
-    schedule_recurring_event(env, admin, RecurringEventType::WeeklyFestival, reward_pool)
+    schedule_recurring_event(env, admin, &RecurringEventType::WeeklyFestival, reward_pool)
 }
 
 /// Get total number of events scheduled.

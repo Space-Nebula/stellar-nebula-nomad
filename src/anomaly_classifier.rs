@@ -1,6 +1,6 @@
 //! Classification of suspicious gameplay and telemetry anomalies.
 //!
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Env, Symbol, Vec};
 
 #[derive(Clone)]
 #[contracttype]
@@ -139,7 +139,7 @@ pub fn get_classification(env: &Env, anomaly_id: u64) -> Option<ClassificationRe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{contract, contractimpl, vec, Env};
+    use soroban_sdk::{contract, contractimpl, vec, Address, Env};
 
     #[contract]
     struct Stub;
