@@ -14,12 +14,17 @@
 //     signalling while also surfacing expiry (LayoutNotFound)
 //   • TTL / extend_ttl / admin sweep logic kept from main
 //   • Both test suites merged and deduplicated
+//   • Generation hot path optimised (Issue #438) — see "PRNG Engine"
 // ============================================================
 
-#![no_std]
 use soroban_sdk::{
     contract, contractimpl, contracttype, contracterror, log, symbol_short,
     Address, BytesN, Env, Vec,
+};
+
+use crate::gas_optimized_compute::{
+    derive_spread, expand_u64_to_bytes32, fold_seed_bytes, is_zero_bytes32, splitmix64,
+    GOLDEN_GAMMA,
 };
 
 // ── Constants ────────────────────────────────────────────────
@@ -130,69 +135,78 @@ pub enum DataKey {
 }
 
 // ── PRNG Engine ──────────────────────────────────────────────
+//
+// Performance notes (Issue #438) — hotspots found while profiling
+// `generate_validated_nebula_layout` with `env.cost_estimate().budget()`:
+//   1. Seed extraction issued 32 `BytesN::get` host calls; it now makes a
+//      single `to_array()` call and folds the bytes natively.
+//   2. Anomalies were appended one `push_back` at a time. Each push clones
+//      the host vector, so cost grew quadratically with layout size. They are
+//      now built in fixed-size chunks with `Vec::from_array` + `append`.
+//   3. `index * GOLDEN_GAMMA` was recomputed for every salt; it is now
+//      computed once per anomaly.
+//   4. The layout hash was assembled byte-by-byte; it is now built from
+//      four little-endian lanes.
+// The PRNG maths is unchanged, so layouts are bit-for-bit identical to the
+// previous implementation. The tests below check this against a reference
+// copy of the old algorithm.
 
-/// SplitMix64 finalizer — bijective, high-quality, deterministic.
-#[inline]
-fn splitmix64(mut z: u64) -> u64 {
-    z = z.wrapping_add(0x9e3779b97f4a7c15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-    z ^ (z >> 31)
-}
+// Salt constants for derive_spread()
+const SALT_X: u64 = 0x9e37_79b9_7f4a_7c15;
+const SALT_Y: u64 = 0x6c62_272e_07bb_0142;
+const SALT_R: u64 = 0xbf58_476d_1ce4_e5b9;
+const SALT_T: u64 = 0x94d0_49bb_1331_11eb;
 
-/// Derive a deterministic, independent u64 for (seed, index, salt).
-/// Different salt values for x/y/rarity/type prevent inter-property correlations.
-#[inline]
-fn derive(seed: u64, index: u32, salt: u64) -> u64 {
-    splitmix64(seed ^ splitmix64((index as u64).wrapping_mul(0x9e3779b97f4a7c15) ^ salt))
-}
-
-// Salt constants for derive()
-const SALT_X: u64 = 0x9e3779b97f4a7c15;
-const SALT_Y: u64 = 0x6c62272e07bb0142;
-const SALT_R: u64 = 0xbf58476d1ce4e5b9;
-const SALT_T: u64 = 0x94d049bb133111eb;
-
-/// Read 8 consecutive bytes from a `BytesN<32>` starting at `offset`
-/// and interpret them as a little-endian u64.
-fn read_u64_from_seed(seed: &BytesN<32>, offset: u32) -> u64 {
-    let mut val: u64 = 0;
-    for i in 0..8u32 {
-        let b = seed.get(offset + i).unwrap_or(0) as u64;
-        val |= b << (i * 8);
-    }
-    val
-}
-
-/// Fold all 32 bytes of the seed into a single u64 by XOR-ing the four
-/// 8-byte chunks so that every bit of the seed influences generation.
-fn extract_seed(raw: &BytesN<32>) -> u64 {
-    read_u64_from_seed(raw, 0)
-        ^ read_u64_from_seed(raw, 8)
-        ^ read_u64_from_seed(raw, 16)
-        ^ read_u64_from_seed(raw, 24)
-}
+/// Number of anomalies materialised per host `Vec` allocation.
+const ANOMALY_CHUNK: usize = 8;
 
 /// Expand a u64 into a 32-byte layout hash using four independent splitmix64 chains.
 fn build_layout_hash(env: &Env, h: u64) -> BytesN<32> {
-    let h0 = splitmix64(h);
-    let h1 = splitmix64(h ^ 0xdeadcafe12345678);
-    let h2 = splitmix64(h.wrapping_add(0x12345678deadbeef));
-    let h3 = splitmix64(h.wrapping_mul(0x0101010101010101).wrapping_add(1));
-    let mut arr = [0u8; 32];
-    let b0 = h0.to_le_bytes();
-    let b1 = h1.to_le_bytes();
-    let b2 = h2.to_le_bytes();
-    let b3 = h3.to_le_bytes();
-    let mut i = 0usize;
-    while i < 8 { arr[i]      = b0[i]; i += 1; }
-    let mut i = 0usize;
-    while i < 8 { arr[8  + i] = b1[i]; i += 1; }
-    let mut i = 0usize;
-    while i < 8 { arr[16 + i] = b2[i]; i += 1; }
-    let mut i = 0usize;
-    while i < 8 { arr[24 + i] = b3[i]; i += 1; }
-    BytesN::from_array(env, &arr)
+    BytesN::from_array(env, &expand_u64_to_bytes32(h))
+}
+
+/// Build the anomaly at `index` for the given entropy `master`.
+#[inline]
+fn make_anomaly(master: u64, index: u32) -> Anomaly {
+    let spread = u64::from(index).wrapping_mul(GOLDEN_GAMMA);
+    let x      = derive_spread(master, spread, SALT_X) % 1000;
+    let y      = derive_spread(master, spread, SALT_Y) % 1000;
+    let rarity = derive_spread(master, spread, SALT_R) % 101;
+    let t      = derive_spread(master, spread, SALT_T);
+    Anomaly {
+        x,
+        y,
+        rarity,
+        anomaly_type:   u64_to_anomaly_type(t),
+        resource_class: rarity_to_class(rarity),
+    }
+}
+
+/// Generate `size` anomalies. Full chunks of [`ANOMALY_CHUNK`] are built
+/// with one host allocation each; any remainder is pushed individually.
+fn generate_anomalies(env: &Env, master: u64, size: u32) -> Vec<Anomaly> {
+    let mut anomalies: Vec<Anomaly> = Vec::new(env);
+    let mut base = 0u32;
+    #[allow(clippy::cast_possible_truncation)]
+    let chunk_len = ANOMALY_CHUNK as u32;
+    while base + chunk_len <= size {
+        let chunk: [Anomaly; ANOMALY_CHUNK] = core::array::from_fn(|k| {
+            #[allow(clippy::cast_possible_truncation)]
+            let offset = k as u32;
+            make_anomaly(master, base + offset)
+        });
+        if base == 0 {
+            anomalies = Vec::from_array(env, chunk);
+        } else {
+            anomalies.extend_from_array(chunk);
+        }
+        base += chunk_len;
+    }
+    while base < size {
+        anomalies.push_back(make_anomaly(master, base));
+        base += 1;
+    }
+    anomalies
 }
 
 fn u64_to_anomaly_type(v: u64) -> AnomalyType {
@@ -213,6 +227,12 @@ fn rarity_to_class(rarity: u64) -> ResourceClass {
     } else {
         ResourceClass::Abundant
     }
+}
+
+/// Convert a logical TTL in seconds into ledgers (~5 s per ledger),
+/// saturating at `u32::MAX` instead of silently truncating.
+fn ttl_to_ledgers(ttl_seconds: u64) -> u32 {
+    u32::try_from(ttl_seconds / 5).unwrap_or(u32::MAX)
 }
 
 /// Returns `true` when a layout generated at `generated_at` has outlived
@@ -289,11 +309,13 @@ impl NebulaGen {
             log!(&env, "[ERROR] NebulaGen: invalid region_id={}", region_id);
             return Err(NebulaError::InvalidRegionId);
         }
-        // Seed must not be all-zero
-        let seed_u64 = extract_seed(&seed);
-        if seed_u64 == 0 {
+        // Seed must not be all-zero. One host call copies the seed into
+        // native memory; validation and folding then run without host calls.
+        let seed_bytes = seed.to_array();
+        if is_zero_bytes32(&seed_bytes) {
             return Err(NebulaError::InvalidSeed);
         }
+        let seed_u64 = fold_seed_bytes(&seed_bytes);
 
         // ── Build entropy master ──────────────────────────────
         let ledger_seq = env.ledger().sequence() as u64;
@@ -307,21 +329,7 @@ impl NebulaGen {
 
         // ── Generate anomalies ────────────────────────────────
         let size = config.default_size;
-        let mut anomalies = Vec::new(&env);
-        for i in 0..size {
-            let x      = derive(master, i, SALT_X) % 1000;
-            let y      = derive(master, i, SALT_Y) % 1000;
-            let rarity = derive(master, i, SALT_R) % 101;
-            let t      = derive(master, i, SALT_T);
-
-            anomalies.push_back(Anomaly {
-                x,
-                y,
-                rarity,
-                anomaly_type:   u64_to_anomaly_type(t),
-                resource_class: rarity_to_class(rarity),
-            });
-        }
+        let anomalies = generate_anomalies(&env, master, size);
 
         // ── Build layout hash ─────────────────────────────────
         let layout_hash = build_layout_hash(&env, master);
@@ -336,17 +344,14 @@ impl NebulaGen {
         };
 
         // ── Persist layout ────────────────────────────────────
-        env.storage()
-            .persistent()
-            .set(&DataKey::ActiveLayout(ship_id), &layout);
+        // Build the storage key once and reuse it for the write and the TTL bump.
+        let key = DataKey::ActiveLayout(ship_id);
+        let store = env.storage().persistent();
+        store.set(&key, &layout);
 
         // Tie storage rent to the configured logical TTL (~5 s per ledger).
-        let ttl_ledgers = (config.layout_ttl / 5) as u32;
-        env.storage().persistent().extend_ttl(
-            &DataKey::ActiveLayout(ship_id),
-            ttl_ledgers,
-            ttl_ledgers,
-        );
+        let ttl_ledgers = ttl_to_ledgers(config.layout_ttl);
+        store.extend_ttl(&key, ttl_ledgers, ttl_ledgers);
 
         // ── Emit event ────────────────────────────────────────
         env.events().publish(
@@ -421,7 +426,8 @@ impl NebulaGen {
     pub fn clean_expired_layout(env: Env, ship_id: u64) -> Result<bool, NebulaError> {
         let config = Self::require_config(&env)?;
         config.admin.require_auth();
-        Ok(Self::remove_if_expired(&env, &config, ship_id))
+        let now = env.ledger().timestamp();
+        Ok(Self::remove_if_expired(&env, &config, now, ship_id))
     }
 
     /// Sweep a batch of ship layouts, removing any that have expired. Admin only.
@@ -429,10 +435,10 @@ impl NebulaGen {
     pub fn clean_expired_layouts(env: Env, ship_ids: Vec<u64>) -> Result<u32, NebulaError> {
         let config = Self::require_config(&env)?;
         config.admin.require_auth();
+        let now = env.ledger().timestamp();
         let mut removed = 0u32;
-        for i in 0..ship_ids.len() {
-            let ship_id = ship_ids.get(i).unwrap();
-            if Self::remove_if_expired(&env, &config, ship_id) {
+        for ship_id in ship_ids.iter() {
+            if Self::remove_if_expired(&env, &config, now, ship_id) {
                 removed += 1;
             }
         }
@@ -450,21 +456,22 @@ impl NebulaGen {
 
     /// Fetch the active layout for `ship_id`, lazily removing and returning
     /// `None` if it has expired.
+    ///
+    /// The config is read only when a layout exists, and the storage key is
+    /// built once for both the read and the removal.
     fn get_live_layout(env: &Env, ship_id: u64) -> Option<NebulaLayout> {
-        let layout: NebulaLayout = env
-            .storage()
-            .persistent()
-            .get(&DataKey::ActiveLayout(ship_id))?;
+        let key = DataKey::ActiveLayout(ship_id);
+        let store = env.storage().persistent();
+        let layout: NebulaLayout = store.get(&key)?;
 
-        let ttl = match env.storage().instance().get::<DataKey, NebulaConfig>(&DataKey::Config) {
-            Some(c) => c.layout_ttl,
-            None    => DEFAULT_LAYOUT_TTL,
-        };
+        let ttl = env
+            .storage()
+            .instance()
+            .get::<DataKey, NebulaConfig>(&DataKey::Config)
+            .map_or(DEFAULT_LAYOUT_TTL, |c| c.layout_ttl);
 
         if is_expired(env.ledger().timestamp(), layout.generated_at, ttl) {
-            env.storage()
-                .persistent()
-                .remove(&DataKey::ActiveLayout(ship_id));
+            store.remove(&key);
             env.events().publish(
                 (symbol_short!("neb_gen"), symbol_short!("expired")),
                 ship_id,
@@ -475,16 +482,15 @@ impl NebulaGen {
     }
 
     /// Remove the active layout for `ship_id` if expired under `config`.
-    fn remove_if_expired(env: &Env, config: &NebulaConfig, ship_id: u64) -> bool {
-        let layout: Option<NebulaLayout> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::ActiveLayout(ship_id));
-        match layout {
-            Some(l) if is_expired(env.ledger().timestamp(), l.generated_at, config.layout_ttl) => {
-                env.storage()
-                    .persistent()
-                    .remove(&DataKey::ActiveLayout(ship_id));
+    ///
+    /// `now` is passed in so batch sweeps read the ledger timestamp once
+    /// rather than once per ship.
+    fn remove_if_expired(env: &Env, config: &NebulaConfig, now: u64, ship_id: u64) -> bool {
+        let key = DataKey::ActiveLayout(ship_id);
+        let store = env.storage().persistent();
+        match store.get::<DataKey, NebulaLayout>(&key) {
+            Some(l) if is_expired(now, l.generated_at, config.layout_ttl) => {
+                store.remove(&key);
                 env.events().publish(
                     (symbol_short!("neb_gen"), symbol_short!("cleaned")),
                     ship_id,
@@ -663,14 +669,14 @@ mod tests {
 
     #[test]
     fn test_has_anomaly_ship_id_zero_rejected() {
-        let (env, client, _) = setup();
+        let (_env, client, _) = setup();
         let result = client.try_has_anomaly(&0u64, &0u32);
         assert_eq!(result, Err(Ok(NebulaError::InvalidShipId)));
     }
 
     #[test]
     fn test_has_anomaly_layout_not_found() {
-        let (env, client, _) = setup();
+        let (_env, client, _) = setup();
         let result = client.try_has_anomaly(&99u64, &0u32);
         assert_eq!(result, Err(Ok(NebulaError::LayoutNotFound)));
     }
@@ -704,6 +710,161 @@ mod tests {
         let l2 = client.generate_validated_nebula_layout(&caller2, &42u64, &100u64, &seed);
 
         assert_eq!(l1.layout_hash, l2.layout_hash);
+    }
+
+    // ── Determinism vs. legacy algorithm (Issue #438) ─────────
+    //
+    // A copy of the pre-optimisation generator, kept here as the reference
+    // the optimised hot path must match bit-for-bit.
+
+    mod legacy {
+        use super::super::{rarity_to_class, u64_to_anomaly_type, Anomaly};
+        use soroban_sdk::{BytesN, Env, Vec};
+
+        pub fn splitmix64(mut z: u64) -> u64 {
+            z = z.wrapping_add(0x9e3779b97f4a7c15);
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+            z ^ (z >> 31)
+        }
+
+        fn derive(seed: u64, index: u32, salt: u64) -> u64 {
+            splitmix64(seed ^ splitmix64((index as u64).wrapping_mul(0x9e3779b97f4a7c15) ^ salt))
+        }
+
+        fn read_u64(seed: &BytesN<32>, offset: u32) -> u64 {
+            let mut val: u64 = 0;
+            for i in 0..8u32 {
+                val |= (seed.get(offset + i).unwrap_or(0) as u64) << (i * 8);
+            }
+            val
+        }
+
+        pub fn extract_seed(raw: &BytesN<32>) -> u64 {
+            read_u64(raw, 0) ^ read_u64(raw, 8) ^ read_u64(raw, 16) ^ read_u64(raw, 24)
+        }
+
+        pub fn anomalies(env: &Env, master: u64, size: u32) -> Vec<Anomaly> {
+            let mut out = Vec::new(env);
+            for i in 0..size {
+                let rarity = derive(master, i, 0xbf58476d1ce4e5b9) % 101;
+                out.push_back(Anomaly {
+                    x: derive(master, i, 0x9e3779b97f4a7c15) % 1000,
+                    y: derive(master, i, 0x6c62272e07bb0142) % 1000,
+                    rarity,
+                    anomaly_type: u64_to_anomaly_type(derive(master, i, 0x94d049bb133111eb)),
+                    resource_class: rarity_to_class(rarity),
+                });
+            }
+            out
+        }
+
+        pub fn layout_hash(env: &Env, h: u64) -> BytesN<32> {
+            let parts = [
+                splitmix64(h),
+                splitmix64(h ^ 0xdeadcafe12345678),
+                splitmix64(h.wrapping_add(0x12345678deadbeef)),
+                splitmix64(h.wrapping_mul(0x0101010101010101).wrapping_add(1)),
+            ];
+            let mut arr = [0u8; 32];
+            for (p, part) in parts.iter().enumerate() {
+                arr[p * 8..p * 8 + 8].copy_from_slice(&part.to_le_bytes());
+            }
+            BytesN::from_array(env, &arr)
+        }
+    }
+
+    fn setup_sized(size: u32) -> (Env, NebulaGenClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set(ledger_info(1, 1_000));
+        let id     = env.register(NebulaGen, ());
+        let client = NebulaGenClient::new(&env, &id);
+        let admin  = Address::generate(&env);
+        client.init(&admin, &size, &1u32, &64u32, &SHORT_TTL);
+        (env, client)
+    }
+
+    fn legacy_master(env: &Env, seed: &BytesN<32>, ship_id: u64, region_id: u64) -> u64 {
+        legacy::splitmix64(legacy::extract_seed(seed))
+            ^ legacy::splitmix64(env.ledger().sequence() as u64)
+            ^ legacy::splitmix64(env.ledger().timestamp())
+            ^ legacy::splitmix64(ship_id)
+            ^ legacy::splitmix64(region_id)
+    }
+
+    #[test]
+    fn optimised_generation_matches_legacy_output() {
+        // Sizes cover: remainder only, exact chunk, chunk + remainder,
+        // several chunks, and the configured maximum.
+        for size in [1u32, 5, 8, 13, 16, 21, 64] {
+            let (env, client) = setup_sized(size);
+            let seed   = valid_seed(&env);
+            let caller = Address::generate(&env);
+            let layout = client.generate_validated_nebula_layout(&caller, &42u64, &7u64, &seed);
+
+            let master = legacy_master(&env, &seed, 42, 7);
+            assert_eq!(layout.size, size);
+            assert_eq!(layout.anomalies, legacy::anomalies(&env, master, size));
+            assert_eq!(layout.layout_hash, legacy::layout_hash(&env, master));
+        }
+    }
+
+    #[test]
+    fn optimised_seed_fold_matches_legacy_for_many_seeds() {
+        let env = Env::default();
+        for n in 1u8..=32 {
+            let mut raw = [0u8; 32];
+            for (i, b) in raw.iter_mut().enumerate() {
+                *b = n.wrapping_mul(31).wrapping_add(i as u8).rotate_left(u32::from(n % 8));
+            }
+            let seed = BytesN::from_array(&env, &raw);
+            assert_eq!(fold_seed_bytes(&seed.to_array()), legacy::extract_seed(&seed));
+        }
+    }
+
+    #[test]
+    fn generation_is_deterministic_across_envs() {
+        let (env_a, client_a) = setup_sized(21);
+        let (env_b, client_b) = setup_sized(21);
+        let a = client_a.generate_validated_nebula_layout(
+            &Address::generate(&env_a), &9u64, &3u64, &valid_seed(&env_a),
+        );
+        let b = client_b.generate_validated_nebula_layout(
+            &Address::generate(&env_b), &9u64, &3u64, &valid_seed(&env_b),
+        );
+        assert_eq!(a.layout_hash.to_array(), b.layout_hash.to_array());
+        assert_eq!(a.anomalies.len(), b.anomalies.len());
+        for i in 0..a.anomalies.len() {
+            assert_eq!(a.anomalies.get(i), b.anomalies.get(i));
+        }
+    }
+
+    #[test]
+    fn non_zero_seed_whose_lanes_cancel_is_accepted() {
+        // Two identical 8-byte lanes XOR to zero. The seed is not all-zero,
+        // so it must be accepted as documented.
+        let (env, client, _) = setup();
+        let mut raw = [0u8; 32];
+        raw[0] = 0xAB;
+        raw[8] = 0xAB;
+        let seed = BytesN::from_array(&env, &raw);
+        let caller = Address::generate(&env);
+        assert!(client
+            .try_generate_validated_nebula_layout(&caller, &1u64, &1u64, &seed)
+            .is_ok());
+    }
+
+    #[test]
+    fn generation_cpu_budget_within_target() {
+        let (env, client) = setup_sized(64);
+        let seed   = valid_seed(&env);
+        let caller = Address::generate(&env);
+        env.cost_estimate().budget().reset_default();
+        client.generate_validated_nebula_layout(&caller, &1u64, &1u64, &seed);
+        // Generous ceiling: guards against regressions to per-byte host calls
+        // or per-element vector cloning.
+        assert!(env.cost_estimate().budget().cpu_instruction_cost() < 10_000_000);
     }
 
     // ── TTL / lifecycle (from main) ───────────────────────────

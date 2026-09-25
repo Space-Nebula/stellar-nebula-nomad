@@ -306,6 +306,72 @@ Ensure optimizations work for:
 
 **Average Reduction: 37%** ✅ (Target: 30%)
 
+## Storage Access Patterns (Issue #437)
+
+Every storage read is a host call that deserialises the stored value, and
+every write re-serialises it. The main waste found in the codebase was the
+**same key being read more than once in one invocation**.
+
+### Patterns
+
+| Pattern | Before | After | Where |
+|---------|--------|-------|-------|
+| Reuse values already read | Read counter → check cap → read it again to increment | Read once, check, write `value + 1` | `gas_sponsor::sponsor_first_scan` |
+| Return the effective value from reset helpers | `reset_if_needed(); get(counter)` | `let count = reset_if_needed();` | `gas_sponsor` daily / per-user counters |
+| Drop re-reads of keys nobody wrote | Re-read `PlayerStats` after ELO decay (decay only writes `EloRating`) | Removed | `pvp_combat::get_or_init_stats` |
+| Pass known values down | `update_elo_rating` re-read the old rating | `write_elo_rating(old, new)` | `pvp_combat::end_combat`, decay |
+| Resolve related data in one pass | Scan the tier table, then fetch the chosen tier again | `tier_for_count` returns `(tier, multiplier)` | `referral_system` v2 |
+| `get` instead of `has` + `get` | Two host calls | One `get` → `ok_or(..)?` | `gas_sponsor::revoke_mobile_session` |
+| Hoist loop invariants | `ledger().timestamp()` and key building inside loops | Computed once per batch | `storage_optim::batch_store_with_bump`, `nebula_gen` sweeps |
+| Batch counters | Burst counter read + written per item | Once per batch | `storage_optim::get_optimized_entries`, `get_ship_nebula_batch` |
+| Remove idle entries | Re-entrancy lock left as `false` in instance storage | Entry removed on release | `storage_optim::release_guard` |
+
+### `CachedEntry`: read-through / write-back cache
+
+For read-modify-write sequences on the same key, use
+`storage_optim::CachedEntry`:
+
+```rust
+use crate::storage_optim::{CachedEntry, StorageTier};
+
+let mut pool = CachedEntry::<DataKey, i128>::new(StorageTier::Instance, DataKey::Pool);
+let balance = pool.get_or(&env, 0);   // 1 host read
+pool.set(balance - fee);              // in memory
+let staged = pool.get_or(&env, 0);   // served from cache
+pool.set(staged + tip);
+pool.flush(&env);                     // 1 host write
+```
+
+## Nebula Generation Hot Path (Issue #438)
+
+Profiling `nebula_gen::generate_validated_nebula_layout` with
+`env.cost_estimate().budget()` found these hotspots:
+
+1. **Seed extraction:** 32 `BytesN::get` host calls. Replaced with one
+   `to_array()` and a native fold (`gas_optimized_compute::fold_seed_bytes`).
+2. **Anomaly vector growth:** one `push_back` per anomaly. Each push clones
+   the host vector, so cost grew quadratically. Anomalies are now built in
+   chunks of 8 with `Vec::from_array` / `extend_from_array`.
+3. **Per-salt index mixing:** `index * GOLDEN_GAMMA` was recomputed for every
+   property. It is now computed once per anomaly (`derive_spread`).
+4. **Layout hash:** built byte-by-byte. It is now built from four
+   little-endian lanes (`expand_u64_to_bytes32`).
+
+The PRNG maths is unchanged, so output is bit-for-bit identical. The
+`optimised_generation_matches_legacy_output` test compares against a
+reference copy of the old algorithm at sizes 1–64.
+
+### Measuring
+
+```bash
+cargo bench --bench nebula_storage_benchmarks
+```
+
+The benchmark runs the legacy generator (as its own contract) and the
+optimised one in the same `Env`. It prints CPU instructions and memory bytes
+before and after for layout sizes 8, 16, 32 and 64, plus the storage-pattern
+comparisons above.
+
 ## Future Optimizations
 
 1. **Parallel Processing**: Explore parallel cell processing

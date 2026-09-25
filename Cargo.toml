@@ -53,6 +53,11 @@ harness = false
 name = "critical_path_benchmarks"
 harness = false
 
+# Before/after comparison for storage access (#437) and nebula generation (#438)
+[[bench]]
+name = "nebula_storage_benchmarks"
+harness = false
+
 # ─── Integration tests, grouped by module under tests/<group>/ ────────────
 # Explicit paths so binary names (and existing `cargo test --test <name>`
 # invocations in CI/docs) are unaffected by the directory grouping.
@@ -148,6 +153,10 @@ path = "tests/gameplay/test_offline_progress.rs"
 [[test]]
 name = "test_seasonal_content"
 path = "tests/gameplay/test_seasonal_content.rs"
+
+[[test]]
+name = "test_seasonal_events"
+path = "tests/gameplay/test_seasonal_events.rs"
 
 [[test]]
 name = "test_ship_upgrade"

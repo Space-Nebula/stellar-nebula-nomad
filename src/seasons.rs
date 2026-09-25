@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, contracterror, symbol_short, Address, Env};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env};
 
 // ─── Duration Constants ───────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ pub const CHAPTER_COMPLETION_BONUS: i128 = 500;
 /// type, battle pass cosmetics, and challenge flavour text for one 90-day season.
 ///
 /// Themes cycle in order and repeat after `NovaBurst`:
-///   EmberNebula → VoidTide → StellarApex → CrimsonDrift → AzureVeil → NovaBurst → …
+///   `EmberNebula` → `VoidTide` → `StellarApex` → `CrimsonDrift` → `AzureVeil` → `NovaBurst` → …
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[contracttype]
 pub enum SeasonTheme {
@@ -60,14 +60,53 @@ impl SeasonTheme {
     /// Return the exclusive nebula type spawned during this season.
     pub fn seasonal_nebula_type(&self) -> SeasonNebulaType {
         match self {
-            SeasonTheme::EmberNebula  => SeasonNebulaType::EmberCloud,
-            SeasonTheme::VoidTide     => SeasonNebulaType::VoidRift,
-            SeasonTheme::StellarApex  => SeasonNebulaType::CrystalPeak,
+            SeasonTheme::EmberNebula => SeasonNebulaType::EmberCloud,
+            SeasonTheme::VoidTide => SeasonNebulaType::VoidRift,
+            SeasonTheme::StellarApex => SeasonNebulaType::CrystalPeak,
             SeasonTheme::CrimsonDrift => SeasonNebulaType::CrimsonStorm,
-            SeasonTheme::AzureVeil    => SeasonNebulaType::AzureGlacier,
-            SeasonTheme::NovaBurst    => SeasonNebulaType::NovaCrater,
+            SeasonTheme::AzureVeil => SeasonNebulaType::AzureGlacier,
+            SeasonTheme::NovaBurst => SeasonNebulaType::NovaCrater,
         }
     }
+
+    /// Reward multiplier (in bps) applied to seasonal event reward pools.
+    ///
+    /// 10 000 bps = 1×. Rarer, higher-risk themes pay out more generously.
+    pub fn event_reward_multiplier_bps(&self) -> u32 {
+        match self {
+            SeasonTheme::EmberNebula => 11_000,
+            SeasonTheme::VoidTide => 12_500,
+            SeasonTheme::StellarApex => 11_500,
+            SeasonTheme::CrimsonDrift => 13_000,
+            SeasonTheme::AzureVeil => 12_000,
+            SeasonTheme::NovaBurst => 15_000,
+        }
+    }
+}
+
+// ─── Seasonal Event Rewards ───────────────────────────────────────────────────
+
+/// Extra bonus (in bps) granted to exclusive seasonal events, which block all
+/// other events for their duration.
+pub const EXCLUSIVE_EVENT_BONUS_BPS: u32 = 2_500;
+
+/// Compute the special seasonal reward pool for an event.
+///
+/// `pool = base_pool × theme multiplier (+ exclusive bonus)`. Returns `None`
+/// on overflow or for a non-positive `base_pool`.
+pub fn seasonal_event_reward_pool(
+    theme: &SeasonTheme,
+    base_pool: i128,
+    exclusive: bool,
+) -> Option<i128> {
+    if base_pool <= 0 {
+        return None;
+    }
+    let mut bps = theme.event_reward_multiplier_bps();
+    if exclusive {
+        bps = bps.checked_add(EXCLUSIVE_EVENT_BONUS_BPS)?;
+    }
+    base_pool.checked_mul(i128::from(bps))?.checked_div(10_000)
 }
 
 // ─── Seasonal Nebula Types ────────────────────────────────────────────────────
@@ -79,17 +118,17 @@ impl SeasonTheme {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[contracttype]
 pub enum SeasonNebulaType {
-    /// EmberNebula season — volcanic ash clouds with heat-fusion resources.
+    /// `EmberNebula` season — volcanic ash clouds with heat-fusion resources.
     EmberCloud,
-    /// VoidTide season — dark-matter rifts with high-rarity anomaly density.
+    /// `VoidTide` season — dark-matter rifts with high-rarity anomaly density.
     VoidRift,
-    /// StellarApex season — prismatic crystal formations with crystal resources.
+    /// `StellarApex` season — prismatic crystal formations with crystal resources.
     CrystalPeak,
-    /// CrimsonDrift season — ionic storm zones with charged plasma vents.
+    /// `CrimsonDrift` season — ionic storm zones with charged plasma vents.
     CrimsonStorm,
-    /// AzureVeil season — frozen nebula clouds with cryo-energy deposits.
+    /// `AzureVeil` season — frozen nebula clouds with cryo-energy deposits.
     AzureGlacier,
-    /// NovaBurst season — supernova remnant craters with ultra-rare matter pockets.
+    /// `NovaBurst` season — supernova remnant craters with ultra-rare matter pockets.
     NovaCrater,
 }
 
@@ -166,13 +205,13 @@ pub enum SeasonKey {
     CurrentSeason,
     /// Season count.
     SeasonCount,
-    /// Player's seasonal participation: (profile_id, season_id) -> ParticipantStats
+    /// Player's seasonal participation: `(profile_id, season_id) -> ParticipantStats`
     ParticipantStats(u64, u64),
-    /// Archived season snapshot: season_id -> SeasonArchive
+    /// Archived season snapshot: `season_id -> SeasonArchive`
     ArchivedSeason(u64),
-    /// Per-player season reward ready to claim: (profile_id, season_id) -> i128
+    /// Per-player season reward ready to claim: `(profile_id, season_id) -> i128`
     SeasonReward(u64, u64),
-    /// Seasonal nebula discovery flag: (profile_id, season_id) -> bool
+    /// Seasonal nebula discovery flag: `(profile_id, season_id) -> bool`
     NebulaDiscovery(u64, u64),
     /// Number of seasons a profile has participated in.
     ProfileSeasonCount(u64),
@@ -184,15 +223,22 @@ pub enum SeasonKey {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum SeasonError {
-    NoActiveSeason       = 1,
+    NoActiveSeason = 1,
     SeasonAlreadyStarted = 2,
-    Unauthorized         = 3,
-    SeasonNotExpired     = 4,
-    NoRewardToClaim      = 5,
+    Unauthorized = 3,
+    SeasonNotExpired = 4,
+    NoRewardToClaim = 5,
     /// Chapter advance attempted but season has not progressed far enough.
-    ChapterNotReady      = 6,
+    ChapterNotReady = 6,
     /// All 3 chapters are already complete.
-    AllChaptersDone      = 7,
+    AllChaptersDone = 7,
+}
+
+/// Zero-based chapter index for `elapsed` seconds into a season, clamped to
+/// the final chapter once the season has run its course.
+fn chapter_index(elapsed: u64) -> u32 {
+    let last = CHAPTERS_PER_SEASON - 1;
+    u32::try_from(elapsed / CHAPTER_DURATION_SECS).map_or(last, |i| i.min(last))
 }
 
 // ─── Initialize ───────────────────────────────────────────────────────────────
@@ -202,7 +248,7 @@ pub enum SeasonError {
 /// Sets a 90-day season with theme derived from season ID 1 (`EmberNebula`).
 pub fn initialize_season(
     env: &Env,
-    admin: Address,
+    admin: &Address,
     title: soroban_sdk::String,
 ) -> Result<u64, SeasonError> {
     admin.require_auth();
@@ -235,7 +281,9 @@ pub fn initialize_season(
         current_chapter: 1u32,
     };
 
-    env.storage().instance().set(&SeasonKey::CurrentSeason, &season);
+    env.storage()
+        .instance()
+        .set(&SeasonKey::CurrentSeason, &season);
     env.storage().instance().set(&SeasonKey::SeasonCount, &id);
 
     env.events().publish(
@@ -264,7 +312,7 @@ pub fn get_current_chapter(env: &Env) -> Result<u32, SeasonError> {
     let season = get_current_season(env)?;
     let now = env.ledger().timestamp();
     let elapsed = now.saturating_sub(season.start_time);
-    let chapter = ((elapsed / CHAPTER_DURATION_SECS) as u32 + 1).min(CHAPTERS_PER_SEASON);
+    let chapter = chapter_index(elapsed) + 1;
     Ok(chapter)
 }
 
@@ -276,9 +324,7 @@ pub fn get_seasonal_nebula_type(env: &Env) -> Result<SeasonNebulaType, SeasonErr
 
 /// Return `true` if the seasonal nebula spawn bonus is currently live.
 pub fn is_seasonal_nebula_active(env: &Env) -> bool {
-    get_current_season(env)
-        .map(|s| s.config.nebula_bonus_active)
-        .unwrap_or(false)
+    get_current_season(env).is_ok_and(|s| s.config.nebula_bonus_active)
 }
 
 /// Return seconds remaining until the current season ends (0 if expired).
@@ -296,8 +342,8 @@ pub fn get_season_time_remaining(env: &Env) -> Result<u64, SeasonError> {
 /// This function updates the persisted field so on-chain queries always reflect
 /// the latest chapter without recalculating from timestamps.
 ///
-/// Emits a `"chapter"` / `"advance"` event with (season_id, new_chapter).
-pub fn advance_chapter(env: &Env, admin: Address) -> Result<u32, SeasonError> {
+/// Emits a `"chapter"` / `"advance"` event with `(season_id, new_chapter)`.
+pub fn advance_chapter(env: &Env, admin: &Address) -> Result<u32, SeasonError> {
     admin.require_auth();
 
     let mut season = get_current_season(env)?;
@@ -308,8 +354,7 @@ pub fn advance_chapter(env: &Env, admin: Address) -> Result<u32, SeasonError> {
 
     let now = env.ledger().timestamp();
     let elapsed = now.saturating_sub(season.start_time);
-    let computed_chapter =
-        ((elapsed / CHAPTER_DURATION_SECS) as u32 + 1).min(CHAPTERS_PER_SEASON);
+    let computed_chapter = chapter_index(elapsed) + 1;
 
     if computed_chapter <= season.current_chapter {
         return Err(SeasonError::ChapterNotReady);
@@ -343,14 +388,17 @@ pub fn record_participation(
     let key = SeasonKey::ParticipantStats(profile_id, season.id);
 
     let mut stats: ParticipantStats =
-        env.storage().persistent().get(&key).unwrap_or(ParticipantStats {
-            profile_id,
-            season_id: season.id,
-            total_scans: 0,
-            essence_collected: 0,
-            chapters_active: 0,
-            found_seasonal_nebula: false,
-        });
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(ParticipantStats {
+                profile_id,
+                season_id: season.id,
+                total_scans: 0,
+                essence_collected: 0,
+                chapters_active: 0,
+                found_seasonal_nebula: false,
+            });
 
     stats.total_scans += scans;
     stats.essence_collected += essence;
@@ -359,8 +407,8 @@ pub fn record_participation(
     // Bit 0 = chapter 1, bit 1 = chapter 2, bit 2 = chapter 3.
     let now = env.ledger().timestamp();
     let elapsed = now.saturating_sub(season.start_time);
-    let chapter_index = ((elapsed / CHAPTER_DURATION_SECS) as u32).min(CHAPTERS_PER_SEASON - 1);
-    let chapter_bit: u32 = 1 << chapter_index;
+    let index = chapter_index(elapsed);
+    let chapter_bit: u32 = 1 << index;
     stats.chapters_active |= chapter_bit;
 
     env.storage().persistent().set(&key, &stats);
@@ -372,22 +420,22 @@ pub fn record_participation(
 ///
 /// Grants a small bonus and sets the discovery flag used by `SeasonalExplorer`
 /// achievement logic and end-season reward calculation.
-pub fn record_seasonal_nebula_discovery(
-    env: &Env,
-    profile_id: u64,
-) -> Result<(), SeasonError> {
+pub fn record_seasonal_nebula_discovery(env: &Env, profile_id: u64) -> Result<(), SeasonError> {
     let season = get_current_season(env)?;
     let key = SeasonKey::ParticipantStats(profile_id, season.id);
 
     let mut stats: ParticipantStats =
-        env.storage().persistent().get(&key).unwrap_or(ParticipantStats {
-            profile_id,
-            season_id: season.id,
-            total_scans: 0,
-            essence_collected: 0,
-            chapters_active: 0,
-            found_seasonal_nebula: false,
-        });
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(ParticipantStats {
+                profile_id,
+                season_id: season.id,
+                total_scans: 0,
+                essence_collected: 0,
+                chapters_active: 0,
+                found_seasonal_nebula: false,
+            });
 
     stats.found_seasonal_nebula = true;
     env.storage().persistent().set(&key, &stats);
@@ -429,9 +477,9 @@ pub fn get_participant_stats(
 /// Returns the new season's ID.
 pub fn rollover_season(
     env: &Env,
-    admin: Address,
+    admin: &Address,
     new_title: soroban_sdk::String,
-    participant_ids: soroban_sdk::Vec<u64>,
+    participant_ids: &soroban_sdk::Vec<u64>,
 ) -> Result<u64, SeasonError> {
     admin.require_auth();
 
@@ -463,7 +511,7 @@ pub fn rollover_season(
                 0
             };
 
-            let reward = (stats.total_scans as i128) * REWARD_PER_SCAN
+            let reward = i128::from(stats.total_scans) * REWARD_PER_SCAN
                 + stats.essence_collected * ESSENCE_REWARD_BPS / 10_000
                 + chapter_bonus;
 

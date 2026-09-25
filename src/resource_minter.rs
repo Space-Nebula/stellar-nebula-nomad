@@ -8,10 +8,8 @@
 //     at the top of mint_resource() before any state mutation.
 //   • RateLimitHit events are emitted inside check_rate_limit.
 
-#![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, log, symbol_short, Address, Env, String,
-    Symbol,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Symbol,
 };
 
 use crate::nebula_gen::{NebulaError as NebulaGenError, NebulaGen};

@@ -1,5 +1,9 @@
 # Error handling standard
 
+> Looking up what a specific code means? See the
+> [Error Code Reference](ERROR_CODES.md) for every error enum, code,
+> common cause, and client handling example.
+
 Contract modules keep their Soroban `#[contracterror]` enums because those
 numeric values are part of the public ABI. New and migrated errors also
 implement `StandardContractError`, which supplies one consistent descriptor:
@@ -27,6 +31,7 @@ release.
    downstream failures as `Internal`.
 5. Mark an error retryable only when time or transient capacity can resolve it.
 6. Test its descriptor and the contract behavior that emits it.
+7. Add the new code to the module's table in [ERROR_CODES.md](ERROR_CODES.md).
 
 The access-control, analytics, and batch-processing modules are the reference
 implementations. Other modules can migrate incrementally without ABI changes.

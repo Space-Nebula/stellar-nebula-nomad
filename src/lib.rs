@@ -1,5 +1,10 @@
 #![no_std]
 
+// Unit tests (proptest in particular) need std's `format!`/`vec!` macros.
+#[cfg(test)]
+#[macro_use]
+extern crate std;
+
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec, symbol_short};
 
 use crate::nebula_explorer::{NebulaLayout, Rarity};
@@ -83,12 +88,12 @@ mod market_oracle;
 mod audio_seed_generator;
 mod privacy_stats;
 mod navigation_planner;
-mod event_scheduler;
+pub mod event_scheduler;
 
 mod rewards;
 mod nft_marketplace;
 mod trading;
-mod seasons;
+pub mod seasons;
 mod battle_pass;
 
 mod ship_customization;
@@ -265,8 +270,9 @@ pub use storage_optim::{
     store_with_bump, get_optimized_entry, batch_store_with_bump, guard_reentrancy,
     release_guard, store_ship_nebula, get_ship_nebula, initialize_bump_config,
     update_bump_config, get_bump_config, set_upgrade_target, get_upgrade_target,
-    reset_burst_counter, StorageError, OptimizedEntry, ShipNebulaData, OptimResult,
-    BumpConfig, DEFAULT_BUMP_TTL, MAX_BUMP_TTL, MAX_BURST_READS,
+    reset_burst_counter, get_optimized_entries, get_ship_nebula_batch, StorageError,
+    OptimizedEntry, ShipNebulaData, OptimResult, BumpConfig, CachedEntry, StorageTier,
+    DEFAULT_BUMP_TTL, MAX_BUMP_TTL, MAX_BURST_READS,
 };
 pub use state_snapshot::{
     take_snapshot, restore_from_snapshot, get_snapshot, get_ship_snapshots,
@@ -330,6 +336,13 @@ pub use event_scheduler::{
     get_active_events, schedule_weekly_festival, cancel_event, update_participants,
     get_event_count, reset_burst_counter as reset_event_burst,
     ScheduledEvent, EventResult, EventError, MAX_ACTIVE_EVENTS, WEEKLY_FESTIVAL_INTERVAL,
+    SeasonalEvent, SeasonalEventConfig, SeasonalEventEntry, SeasonalEventStatus,
+    SeasonalChallengeSpec, MIN_SEASONAL_EVENT_DURATION, MAX_SEASONAL_EVENT_DURATION,
+    MAX_SEASONAL_EVENT_COOLDOWN, MAX_PENDING_SEASONAL_EVENTS, MAX_CHALLENGES_PER_EVENT,
+    SEASONAL_REWARD_CLAIM_WINDOW,
+};
+pub use seasons::{
+    seasonal_event_reward_pool, Season, SeasonError, SeasonTheme, EXCLUSIVE_EVENT_BONUS_BPS,
 };
 
 pub use ship_customization::{
@@ -2648,7 +2661,7 @@ impl NebulaNomadContract {
         start_time: u64,
         reward_pool: i128,
     ) -> Result<u64, EventError> {
-        event_scheduler::schedule_event(&env, admin, event_type, start_time, reward_pool)
+        event_scheduler::schedule_event(&env, &admin, event_type, start_time, reward_pool)
     }
 
     /// Trigger a scheduled event when its time arrives.
@@ -2675,7 +2688,7 @@ impl NebulaNomadContract {
         admin: Address,
         reward_pool: i128,
     ) -> Result<u64, EventError> {
-        event_scheduler::schedule_weekly_festival(&env, admin, reward_pool)
+        event_scheduler::schedule_weekly_festival(&env, &admin, reward_pool)
     }
 
     /// Cancel a scheduled event (admin only).
@@ -2684,7 +2697,7 @@ impl NebulaNomadContract {
         admin: Address,
         event_id: u64,
     ) -> Result<(), EventError> {
-        event_scheduler::cancel_event(&env, admin, event_id)
+        event_scheduler::cancel_event(&env, &admin, event_id)
     }
 
     /// Update event participant count.
@@ -2704,6 +2717,108 @@ impl NebulaNomadContract {
     /// Reset event burst counter.
     pub fn reset_event_burst_counter(env: Env) {
         event_scheduler::reset_burst_counter(&env)
+    }
+
+    // ─── Seasons ──────────────────────────────────────────────────────────
+
+    /// Admin: start the first season.
+    pub fn init_season(env: Env, admin: Address, title: String) -> Result<u64, SeasonError> {
+        seasons::initialize_season(&env, &admin, title)
+    }
+
+    /// Get the current season.
+    pub fn get_current_season(env: Env) -> Result<Season, SeasonError> {
+        seasons::get_current_season(&env)
+    }
+
+    // ─── Time-Limited Seasonal Events ─────────────────────────────────────
+
+    /// Admin: schedule a time-limited seasonal event in the current season.
+    pub fn schedule_seasonal_event(
+        env: Env,
+        admin: Address,
+        config: SeasonalEventConfig,
+    ) -> Result<u64, EventError> {
+        event_scheduler::schedule_seasonal_event(&env, &admin, config)
+    }
+
+    /// Activate a seasonal event once its window opens.
+    pub fn activate_seasonal_event(env: Env, event_id: u64) -> Result<SeasonalEvent, EventError> {
+        event_scheduler::activate_seasonal_event(&env, event_id)
+    }
+
+    /// End a seasonal event once its window closes and start its cooldown.
+    pub fn end_seasonal_event(env: Env, event_id: u64) -> Result<SeasonalEvent, EventError> {
+        event_scheduler::end_seasonal_event(&env, event_id)
+    }
+
+    /// Admin: cancel a scheduled or active seasonal event.
+    pub fn cancel_seasonal_event(env: Env, admin: Address, event_id: u64) -> Result<(), EventError> {
+        event_scheduler::cancel_seasonal_event(&env, &admin, event_id)
+    }
+
+    /// Admin: attach an event-specific challenge to a seasonal event.
+    pub fn add_seasonal_event_challenge(
+        env: Env,
+        admin: Address,
+        event_id: u64,
+        spec: SeasonalChallengeSpec,
+    ) -> Result<u64, EventError> {
+        event_scheduler::add_seasonal_event_challenge(&env, &admin, event_id, spec)
+    }
+
+    /// Record points a player earned during a live seasonal event.
+    pub fn record_seasonal_event_points(
+        env: Env,
+        event_id: u64,
+        profile_id: u64,
+        points: u64,
+    ) -> Result<u64, EventError> {
+        event_scheduler::record_seasonal_event_points(&env, event_id, profile_id, points)
+    }
+
+    /// Claim a player's share of an ended seasonal event's reward pool.
+    pub fn claim_seasonal_event_reward(
+        env: Env,
+        player: Address,
+        event_id: u64,
+        profile_id: u64,
+    ) -> Result<i128, EventError> {
+        event_scheduler::claim_seasonal_event_reward(&env, &player, event_id, profile_id)
+    }
+
+    /// Get a seasonal event by ID.
+    pub fn get_seasonal_event(env: Env, event_id: u64) -> Result<SeasonalEvent, EventError> {
+        event_scheduler::get_seasonal_event(&env, event_id)
+    }
+
+    /// IDs of seasonal events that are scheduled or active.
+    pub fn get_pending_seasonal_events(env: Env) -> Vec<u64> {
+        event_scheduler::get_pending_seasonal_events(&env)
+    }
+
+    /// A player's participation in a seasonal event.
+    pub fn get_seasonal_event_entry(
+        env: Env,
+        event_id: u64,
+        profile_id: u64,
+    ) -> Option<SeasonalEventEntry> {
+        event_scheduler::get_seasonal_event_entry(&env, event_id, profile_id)
+    }
+
+    /// Timestamp before which no new event of `category` may start.
+    pub fn get_event_category_cooldown(env: Env, category: Symbol) -> u64 {
+        event_scheduler::get_category_cooldown(&env, category)
+    }
+
+    /// Record progress on a time-limited (or event-specific) challenge.
+    pub fn record_challenge_progress(
+        env: Env,
+        profile_id: u64,
+        challenge_id: u64,
+        metric_delta: u64,
+    ) -> Result<u64, EventError> {
+        event_scheduler::record_challenge_progress(&env, profile_id, challenge_id, metric_delta)
     }
 
     // ─── Ship Customization & Skins ───────────────────────────────────────

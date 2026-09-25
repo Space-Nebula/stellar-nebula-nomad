@@ -405,17 +405,30 @@ pub fn calculate_tier(env: &Env, referrer: &Address) -> u32 {
         .persistent()
         .get(&ReferralV2Key::ReferralCount(referrer.clone()))
         .unwrap_or(0);
+    tier_for_count(env, count).0
+}
 
-    // Find the highest tier the referrer qualifies for.
-    let mut best_tier = 0u32;
+/// Resolve `(tier_level, multiplier_bps)` for a known referral count.
+///
+/// Scans the tier table once and returns the multiplier with the tier, so
+/// callers that already hold the count (or need the multiplier) avoid
+/// re-reading `ReferralCount` and fetching the chosen tier config again
+/// (Issue #437).
+fn tier_for_count(env: &Env, count: u32) -> (u32, u32) {
+    let mut best = (0u32, 10_000u32);
+    let mut found_base = false;
     for level in 0..5 {
         if let Some(tier) = get_tier_config(env, level) {
+            if tier.tier_level == 0 && !found_base {
+                best.1 = tier.multiplier_bps;
+                found_base = true;
+            }
             if count >= tier.min_referrals {
-                best_tier = tier.tier_level;
+                best = (tier.tier_level, tier.multiplier_bps);
             }
         }
     }
-    best_tier
+    best
 }
 
 /// Register a referral with fraud detection and multi-tier rewards.
@@ -434,45 +447,38 @@ pub fn register_referral_v2(
     // Use the original registration logic.
     let id = register_referral(env, referrer.clone(), new_nomad)?;
 
-    // Increment referrer count.
-    let count: u32 = env
-        .storage()
-        .persistent()
-        .get(&ReferralV2Key::ReferralCount(referrer.clone()))
-        .unwrap_or(0);
-    env.storage()
-        .persistent()
-        .set(&ReferralV2Key::ReferralCount(referrer.clone()), &(count + 1));
+    let persistent = env.storage().persistent();
+    let now = env.ledger().timestamp();
+
+    // Increment referrer count. The new count is kept locally so the tier
+    // lookup below does not read it back from storage.
+    let count_key = ReferralV2Key::ReferralCount(referrer.clone());
+    let new_count: u32 = persistent.get(&count_key).unwrap_or(0u32) + 1;
+    persistent.set(&count_key, &new_count);
 
     // Update analytics.
-    let mut analytics: ReferrerAnalytics = env
-        .storage()
-        .persistent()
-        .get(&ReferralV2Key::ReferrerAnalytics(referrer.clone()))
+    let analytics_key = ReferralV2Key::ReferrerAnalytics(referrer.clone());
+    let mut analytics: ReferrerAnalytics = persistent
+        .get(&analytics_key)
         .unwrap_or(ReferrerAnalytics {
             total_referrals: 0,
             successful_referrals: 0,
             total_essence_earned: 0,
             current_tier: 0,
-            joined_at: env.ledger().timestamp(),
+            joined_at: now,
             last_referral_at: 0,
         });
     analytics.total_referrals += 1;
-    analytics.current_tier = calculate_tier(env, &referrer);
-    analytics.last_referral_at = env.ledger().timestamp();
-    env.storage()
-        .persistent()
-        .set(&ReferralV2Key::ReferrerAnalytics(referrer.clone()), &analytics);
+    analytics.current_tier = tier_for_count(env, new_count).0;
+    analytics.last_referral_at = now;
+    persistent.set(&analytics_key, &analytics);
 
     // Update global count.
-    let total: u64 = env
-        .storage()
-        .instance()
+    let instance = env.storage().instance();
+    let total: u64 = instance
         .get(&ReferralV2Key::TotalReferrals)
         .unwrap_or(0);
-    env.storage()
-        .instance()
-        .set(&ReferralV2Key::TotalReferrals, &(total + 1));
+    instance.set(&ReferralV2Key::TotalReferrals, &(total + 1));
 
     Ok(id)
 }
@@ -484,55 +490,38 @@ pub fn claim_referral_reward_v2(
     new_nomad: Address,
 ) -> Result<i128, ReferralError> {
     // Check if blocked by fraud detection.
-    let fraud: FraudRecord = env
-        .storage()
-        .persistent()
-        .get(&ReferralV2Key::FraudFlag(referrer.clone()))
-        .unwrap_or(FraudRecord {
-            address: referrer.clone(),
-            flag_count: 0,
-            is_blocked: false,
-            reason: symbol_short!("clean"),
-        });
-
-    if fraud.is_blocked {
+    if is_blocked(env, &referrer) {
         return Err(ReferralError::InsufficientRewardPool);
     }
 
     // Claim base reward using existing logic.
     let base_reward = claim_referral_reward(env, referrer.clone(), new_nomad)?;
 
-    // Apply tier multiplier.
-    let tier = calculate_tier(env, &referrer);
-    let multiplier: u32 = get_tier_config(env, tier)
-        .map(|t| t.multiplier_bps)
-        .unwrap_or(10_000);
+    // Apply tier multiplier. The tier and its multiplier come from a single
+    // scan of the tier table (previously the chosen tier was fetched again).
+    let persistent = env.storage().persistent();
+    let count: u32 = persistent
+        .get(&ReferralV2Key::ReferralCount(referrer.clone()))
+        .unwrap_or(0);
+    let (tier, multiplier) = tier_for_count(env, count);
 
-    let bonus = base_reward * (multiplier as i128 - 10_000) / 10_000;
+    let bonus = base_reward * (i128::from(multiplier) - 10_000) / 10_000;
 
     // Update analytics.
-    if let Some(mut analytics) = env
-        .storage()
-        .persistent()
-        .get::<_, ReferrerAnalytics>(&ReferralV2Key::ReferrerAnalytics(referrer.clone()))
-    {
+    let analytics_key = ReferralV2Key::ReferrerAnalytics(referrer.clone());
+    if let Some(mut analytics) = persistent.get::<_, ReferrerAnalytics>(&analytics_key) {
         analytics.successful_referrals += 1;
         analytics.total_essence_earned += base_reward + bonus;
         analytics.current_tier = tier;
-        env.storage()
-            .persistent()
-            .set(&ReferralV2Key::ReferrerAnalytics(referrer.clone()), &analytics);
+        persistent.set(&analytics_key, &analytics);
     }
 
     // Update global rewards.
-    let total: i128 = env
-        .storage()
-        .instance()
+    let instance = env.storage().instance();
+    let total: i128 = instance
         .get(&ReferralV2Key::TotalRewardsDistributed)
         .unwrap_or(0);
-    env.storage()
-        .instance()
-        .set(&ReferralV2Key::TotalRewardsDistributed, &(total + base_reward + bonus));
+    instance.set(&ReferralV2Key::TotalRewardsDistributed, &(total + base_reward + bonus));
 
     Ok(base_reward + bonus)
 }
@@ -569,18 +558,7 @@ fn check_fraud(
     fingerprint: Option<u64>,
 ) -> Result<(), ReferralError> {
     // Check if referrer is blocked.
-    let fraud: FraudRecord = env
-        .storage()
-        .persistent()
-        .get(&ReferralV2Key::FraudFlag(referrer.clone()))
-        .unwrap_or(FraudRecord {
-            address: referrer.clone(),
-            flag_count: 0,
-            is_blocked: false,
-            reason: symbol_short!("clean"),
-        });
-
-    if fraud.is_blocked {
+    if is_blocked(env, referrer) {
         return Err(ReferralError::InsufficientRewardPool);
     }
 
@@ -602,6 +580,15 @@ fn check_fraud(
     }
 
     Ok(())
+}
+
+/// `true` when `address` has a fraud record marked as blocked. Avoids
+/// building a throw-away default `FraudRecord` when none exists.
+fn is_blocked(env: &Env, address: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get::<_, FraudRecord>(&ReferralV2Key::FraudFlag(address.clone()))
+        .is_some_and(|f| f.is_blocked)
 }
 
 /// Check referral velocity (too many referrals in a short time).

@@ -170,18 +170,17 @@ pub fn sponsor_first_scan(env: &Env, player: &Address) -> Result<i128, SponsorEr
         return Err(SponsorError::ProfileNotVerified);
     }
 
-    // Reset daily counter if needed
-    reset_daily_counter_if_needed(env);
+    // Storage-access notes (Issue #437): previously the daily counter was
+    // re-read right after the reset helper might have written it, and the
+    // per-user lifetime / daily entries were each read twice (once to check
+    // the cap, once to increment). Every value is now read at most once and
+    // reused for both the check and the update.
+    let instance = env.storage().instance();
 
-    // Check daily cap
-    let current_count: u32 = env
-        .storage()
-        .instance()
-        .get(&DataKey::DailyCounter)
-        .unwrap_or(0);
-    let config: SponsorConfig = env
-        .storage()
-        .instance()
+    // Reset daily counter if needed; the helper returns the effective count.
+    let current_count = reset_daily_counter_if_needed(env);
+
+    let config: SponsorConfig = instance
         .get(&DataKey::Config)
         .ok_or(SponsorError::NotInitialized)?;
 
@@ -189,35 +188,27 @@ pub fn sponsor_first_scan(env: &Env, player: &Address) -> Result<i128, SponsorEr
         return Err(SponsorError::DailyCapReached);
     }
 
-    // Check per-user lifetime cap
-    if config.per_user_cap > 0 {
-        let user_lifetime: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::UserLifetimeSponsored(player.clone()))
-            .unwrap_or(0);
-        if user_lifetime + config.sponsor_amount > config.per_user_cap {
-            return Err(SponsorError::PerUserCapReached);
-        }
+    // Check per-user lifetime cap (value reused below for the update)
+    let lifetime_key = DataKey::UserLifetimeSponsored(player.clone());
+    let user_lifetime: i128 = instance.get(&lifetime_key).unwrap_or(0);
+    if config.per_user_cap > 0 && user_lifetime + config.sponsor_amount > config.per_user_cap {
+        return Err(SponsorError::PerUserCapReached);
     }
 
-    // Check per-user daily cap
-    if config.per_user_daily_cap > 0 {
-        reset_user_daily_counter_if_needed(env, player);
-        let user_daily: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::UserDailyCount(player.clone()))
-            .unwrap_or(0);
+    // Check per-user daily cap (value reused below for the update)
+    let daily_key = DataKey::UserDailyCount(player.clone());
+    let user_daily: u32 = if config.per_user_daily_cap > 0 {
+        let user_daily = reset_user_daily_counter_if_needed(env, player);
         if user_daily >= config.per_user_daily_cap {
             return Err(SponsorError::PerUserDailyCapReached);
         }
-    }
+        user_daily
+    } else {
+        instance.get(&daily_key).unwrap_or(0)
+    };
 
     // Check fund balance
-    let fund_balance: i128 = env
-        .storage()
-        .instance()
+    let fund_balance: i128 = instance
         .get(&DataKey::FundBalance)
         .ok_or(SponsorError::NotInitialized)?;
 
@@ -225,38 +216,12 @@ pub fn sponsor_first_scan(env: &Env, player: &Address) -> Result<i128, SponsorEr
         return Err(SponsorError::InsufficientFunds);
     }
 
-    // Deduct from fund and mark player as sponsored
-    let new_balance = fund_balance - config.sponsor_amount;
-    env.storage().instance().set(&DataKey::FundBalance, &new_balance);
-    env.storage()
-        .instance()
-        .set(&DataKey::SponsoredStatus(player.clone()), &true);
-
-    // Increment daily counter
-    env.storage()
-        .instance()
-        .set(&DataKey::DailyCounter, &(current_count + 1));
-
-    // Track per-user lifetime amount
-    let user_lifetime: i128 = env
-        .storage()
-        .instance()
-        .get(&DataKey::UserLifetimeSponsored(player.clone()))
-        .unwrap_or(0);
-    env.storage().instance().set(
-        &DataKey::UserLifetimeSponsored(player.clone()),
-        &(user_lifetime + config.sponsor_amount),
-    );
-
-    // Track per-user daily count
-    let user_daily: u32 = env
-        .storage()
-        .instance()
-        .get(&DataKey::UserDailyCount(player.clone()))
-        .unwrap_or(0);
-    env.storage()
-        .instance()
-        .set(&DataKey::UserDailyCount(player.clone()), &(user_daily + 1));
+    // All checks passed. Write each value once.
+    instance.set(&DataKey::FundBalance, &(fund_balance - config.sponsor_amount));
+    instance.set(&DataKey::SponsoredStatus(player.clone()), &true);
+    instance.set(&DataKey::DailyCounter, &(current_count + 1));
+    instance.set(&lifetime_key, &(user_lifetime + config.sponsor_amount));
+    instance.set(&daily_key, &(user_daily + 1));
 
     // Emit SponsorshipGranted event
     env.events().publish(
@@ -326,17 +291,14 @@ pub fn get_fund_balance(env: &Env) -> i128 {
 
 /// Get the current daily sponsorship count.
 pub fn get_daily_count(env: &Env) -> u32 {
-    reset_daily_counter_if_needed(env);
-    env.storage()
-        .instance()
-        .get(&DataKey::DailyCounter)
-        .unwrap_or(0)
+    reset_daily_counter_if_needed(env)
 }
 
 /// Get the remaining daily sponsorship slots.
 pub fn get_remaining_daily_slots(env: &Env) -> u32 {
-    reset_daily_counter_if_needed(env);
-    let count = get_daily_count(env);
+    // One reset check + one counter read (previously the reset ran twice
+    // and the counter was read again afterwards).
+    let count = reset_daily_counter_if_needed(env);
     let config: SponsorConfig = env
         .storage()
         .instance()
@@ -365,11 +327,7 @@ pub fn get_user_lifetime_sponsored(env: &Env, player: &Address) -> i128 {
 
 /// Get the daily sponsorship count for a user.
 pub fn get_user_daily_count(env: &Env, player: &Address) -> u32 {
-    reset_user_daily_counter_if_needed(env, player);
-    env.storage()
-        .instance()
-        .get(&DataKey::UserDailyCount(player.clone()))
-        .unwrap_or(0)
+    reset_user_daily_counter_if_needed(env, player)
 }
 
 // ─── Internal Helpers ─────────────────────────────────────────────────────
@@ -396,39 +354,43 @@ fn is_profile_verified(env: &Env, player: &Address) -> bool {
 }
 
 /// Reset the daily counter if 24 hours have passed.
-fn reset_daily_counter_if_needed(env: &Env) {
-    let last_reset: u64 = env
-        .storage()
-        .instance()
+///
+/// Returns the effective daily count after any reset, so callers do not
+/// need to read `DailyCounter` again.
+fn reset_daily_counter_if_needed(env: &Env) -> u32 {
+    let instance = env.storage().instance();
+    let last_reset: u64 = instance
         .get(&DataKey::LastResetTimestamp)
         .unwrap_or(0);
     let current_time = env.ledger().timestamp();
 
     // 24 hours = 86400 seconds
     if current_time >= last_reset + 86400 {
-        env.storage().instance().set(&DataKey::DailyCounter, &0u32);
-        env.storage()
-            .instance()
-            .set(&DataKey::LastResetTimestamp, &current_time);
+        instance.set(&DataKey::DailyCounter, &0u32);
+        instance.set(&DataKey::LastResetTimestamp, &current_time);
+        0
+    } else {
+        instance.get(&DataKey::DailyCounter).unwrap_or(0)
     }
 }
 
 /// Reset per-user daily counter if 24 hours have passed.
-fn reset_user_daily_counter_if_needed(env: &Env, player: &Address) {
-    let last_reset: u64 = env
-        .storage()
-        .instance()
+///
+/// Returns the player's effective daily count after any reset.
+fn reset_user_daily_counter_if_needed(env: &Env, player: &Address) -> u32 {
+    let instance = env.storage().instance();
+    let last_reset: u64 = instance
         .get(&DataKey::UserLastResetTimestamp(player.clone()))
         .unwrap_or(0);
     let current_time = env.ledger().timestamp();
+    let daily_key = DataKey::UserDailyCount(player.clone());
 
     if current_time >= last_reset + 86400 {
-        env.storage()
-            .instance()
-            .set(&DataKey::UserDailyCount(player.clone()), &0u32);
-        env.storage()
-            .instance()
-            .set(&DataKey::UserLastResetTimestamp(player.clone()), &current_time);
+        instance.set(&daily_key, &0u32);
+        instance.set(&DataKey::UserLastResetTimestamp(player.clone()), &current_time);
+        0
+    } else {
+        instance.get(&daily_key).unwrap_or(0)
     }
 }
 
@@ -560,16 +522,17 @@ pub fn use_mobile_session(env: &Env, player: &Address) -> Result<(), SponsorErro
 pub fn revoke_mobile_session(env: &Env, player: &Address) -> Result<(), SponsorError> {
     player.require_auth();
 
+    // Single read: `get` already distinguishes present from absent, so a
+    // separate `has` check is unnecessary.
     let key = DataKey::SessionKey(player.clone());
-    if !env.storage().instance().has(&key) {
-        return Err(SponsorError::SessionKeyInvalid);
-    }
+    let instance = env.storage().instance();
+    let mut session: MobileSessionKey = instance
+        .get(&key)
+        .ok_or(SponsorError::SessionKeyInvalid)?;
 
-    // We can't delete instance storage, so we set expiration to past
-    if let Some(mut session) = env.storage().instance().get::<DataKey, MobileSessionKey>(&key) {
-        session.expires_at = 0;
-        env.storage().instance().set(&key, &session);
-    }
+    // Expire the session in place
+    session.expires_at = 0;
+    instance.set(&key, &session);
 
     env.events().publish(
         (symbol_short!("sponsor"), symbol_short!("revoke")),

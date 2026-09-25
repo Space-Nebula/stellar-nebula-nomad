@@ -222,6 +222,18 @@ fn require_admin(env: &Env, caller: &Address) -> Result<(), PvPError> {
 // ── Combat Stats ────────────────────────────────────────────────────────────
 
 pub fn get_or_init_stats(env: &Env, player: &Address) -> CombatStats {
+    load_stats_with_elo(env, player).0
+}
+
+/// Load a player's stats, apply ELO decay and mark them active.
+/// Returns the stats together with the post-decay ELO rating.
+///
+/// Storage notes (Issue #437): decay only writes `EloRating` and never
+/// `PlayerStats`, so the old "re-read stats after decay" was always
+/// redundant and has been removed. `LastActive` is written once here
+/// instead of once in the decay path and again afterwards. Returning the
+/// ELO lets `end_combat` skip another rating read.
+fn load_stats_with_elo(env: &Env, player: &Address) -> (CombatStats, u32) {
     let key = PvPDataKey::PlayerStats(player.clone());
     let stats = env.storage().persistent().get(&key).unwrap_or(CombatStats {
         wins: 0,
@@ -234,11 +246,10 @@ pub fn get_or_init_stats(env: &Env, player: &Address) -> CombatStats {
     });
 
     // Apply ELO decay on any access
-    apply_elo_decay(env, player);
+    let (_, elo) = decay_elo(env, player);
     update_last_active(env, player);
 
-    // Re-read after decay may have modified ELO
-    env.storage().persistent().get(&key).unwrap_or(stats)
+    (stats, elo)
 }
 
 pub fn update_stats(env: &Env, player: &Address, stats: &CombatStats) {
@@ -262,8 +273,14 @@ pub fn get_elo_rating(env: &Env, player: &Address) -> u32 {
 }
 
 pub fn update_elo_rating(env: &Env, player: &Address, new_rating: u32) {
+    let old_elo = get_elo_rating(env, player);
+    write_elo_rating(env, player, old_elo, new_rating);
+}
+
+/// Write a new rating when the caller already knows the old one, which
+/// saves the read `update_elo_rating` would otherwise do.
+fn write_elo_rating(env: &Env, player: &Address, old_elo: u32, new_rating: u32) {
     let key = PvPDataKey::EloRating(player.clone());
-    let old_elo = env.storage().persistent().get(&key).unwrap_or(INITIAL_ELO);
     env.storage().persistent().set(&key, &new_rating);
     env.events().publish(
         (symbol_short!("pvp"), symbol_short!("elo_upd")),
@@ -341,32 +358,42 @@ pub fn get_elo_decay_config(env: &Env) -> EloDecayConfig {
 /// Apply ELO decay for a player based on their last active timestamp.
 /// Returns the new ELO rating after decay (or the same if no decay applied).
 pub fn apply_elo_decay(env: &Env, player: &Address) -> u32 {
-    let now = env.ledger().timestamp();
+    let (before, after) = decay_elo(env, player);
+    if after != before {
+        // Reset the decay timer
+        update_last_active(env, player);
+    }
+    after
+}
+
+/// Core decay logic. Returns `(elo_before, elo_after)` and reads the
+/// rating once; it does not touch `LastActive`, which is left to callers.
+fn decay_elo(env: &Env, player: &Address) -> (u32, u32) {
+    let current_elo = get_elo_rating(env, player);
     let last_active = get_last_active(env, player);
 
     if last_active == 0 {
         // Never been active — no decay
-        return get_elo_rating(env, player);
+        return (current_elo, current_elo);
     }
 
+    let now = env.ledger().timestamp();
     let inactive_duration = now.saturating_sub(last_active);
     let config = get_elo_decay_config(env);
 
     if inactive_duration < config.inactivity_secs {
-        return get_elo_rating(env, player);
+        return (current_elo, current_elo);
     }
 
     // Calculate how many full decay periods have elapsed
     let periods = inactive_duration / config.inactivity_secs;
-    let total_decay = (config.decay_points as u64).saturating_mul(periods as u64) as u32;
+    let total_decay = u32::try_from(u64::from(config.decay_points).saturating_mul(periods))
+        .unwrap_or(u32::MAX);
 
-    let current_elo = get_elo_rating(env, player);
     let new_elo = current_elo.saturating_sub(total_decay).max(config.floor);
 
     if new_elo != current_elo {
-        update_elo_rating(env, player, new_elo);
-        // Reset the decay timer
-        update_last_active(env, player);
+        write_elo_rating(env, player, current_elo, new_elo);
 
         env.events().publish(
             (symbol_short!("pvp"), symbol_short!("elo_decay")),
@@ -374,7 +401,7 @@ pub fn apply_elo_decay(env: &Env, player: &Address) -> u32 {
         );
     }
 
-    new_elo
+    (current_elo, new_elo)
 }
 
 /// Apply decay to all players in a batch (admin / cron call).
@@ -387,13 +414,12 @@ pub fn apply_batch_elo_decay(
     require_admin(env, caller)?;
 
     let mut affected = 0u32;
-    for i in 0..players.len() {
-        if let Some(player) = players.get(i) {
-            let before = get_elo_rating(env, &player);
-            let after = apply_elo_decay(env, &player);
-            if after != before {
-                affected += 1;
-            }
+    for player in players.iter() {
+        // `decay_elo` returns the pre-decay rating, so no separate read.
+        let (before, after) = decay_elo(env, &player);
+        if after != before {
+            update_last_active(env, &player);
+            affected += 1;
         }
     }
 
@@ -723,9 +749,9 @@ fn end_combat(env: &Env, combat: &mut CombatState) -> Result<(), PvPError> {
     let now = env.ledger().timestamp();
     let duration = now - combat.started_at;
 
-    // Update stats
-    let mut stats1 = get_or_init_stats(env, &combat.player1);
-    let mut stats2 = get_or_init_stats(env, &combat.player2);
+    // Update stats (the post-decay ELO comes back with the stats)
+    let (mut stats1, elo1) = load_stats_with_elo(env, &combat.player1);
+    let (mut stats2, elo2) = load_stats_with_elo(env, &combat.player2);
 
     let winner = combat.winner.clone();
 
@@ -738,18 +764,15 @@ fn end_combat(env: &Env, combat: &mut CombatState) -> Result<(), PvPError> {
             stats1.losses += 1;
         }
 
-        // Update ELO
-        let elo1 = get_elo_rating(env, &combat.player1);
-        let elo2 = get_elo_rating(env, &combat.player2);
-
+        // Update ELO (ratings already loaded above)
         let (change1, change2) = calculate_elo_change(elo1, elo2);
 
         if *w == combat.player1 {
-            update_elo_rating(env, &combat.player1, elo1.saturating_add(change1));
-            update_elo_rating(env, &combat.player2, elo2.saturating_sub(change2.min(elo2)));
+            write_elo_rating(env, &combat.player1, elo1, elo1.saturating_add(change1));
+            write_elo_rating(env, &combat.player2, elo2, elo2.saturating_sub(change2.min(elo2)));
         } else {
-            update_elo_rating(env, &combat.player2, elo2.saturating_add(change1));
-            update_elo_rating(env, &combat.player1, elo1.saturating_sub(change2.min(elo1)));
+            write_elo_rating(env, &combat.player2, elo2, elo2.saturating_add(change1));
+            write_elo_rating(env, &combat.player1, elo1, elo1.saturating_sub(change2.min(elo1)));
         }
     } else {
         // Draw
@@ -783,13 +806,12 @@ fn end_combat(env: &Env, combat: &mut CombatState) -> Result<(), PvPError> {
 }
 
 fn record_combat_history(env: &Env, player: &Address, history: &CombatHistory) {
+    let store = env.storage().persistent();
     let counter_key = PvPDataKey::CombatHistoryCounter(player.clone());
-    let counter: u64 = env.storage().persistent().get(&counter_key).unwrap_or(0);
+    let counter: u64 = store.get(&counter_key).unwrap_or(0);
 
-    let history_key = PvPDataKey::CombatHistory(player.clone(), counter);
-    env.storage().persistent().set(&history_key, history);
-
-    env.storage().persistent().set(&counter_key, &(counter + 1));
+    store.set(&PvPDataKey::CombatHistory(player.clone(), counter), history);
+    store.set(&counter_key, &(counter + 1));
 }
 
 pub fn get_combat(env: &Env, combat_id: u64) -> Result<CombatState, PvPError> {
