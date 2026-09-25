@@ -437,23 +437,24 @@ pub fn claim_reputation_reward(env: &Env, player: &Address) -> Result<i128, Repu
     Ok(reward)
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn test_reputation_initialization() {
-        let env = soroban_sdk::testing::Env::default();
-        let admin = soroban_sdk::testing::Address::generate(&env);
+        let env = Env::default();
+        let admin = Address::generate(&env);
 
         assert!(initialize_reputation(&env, &admin).is_ok());
     }
 
     #[test]
     fn test_player_reputation_creation() {
-        let env = soroban_sdk::testing::Env::default();
-        let admin = soroban_sdk::testing::Address::generate(&env);
-        let player = soroban_sdk::testing::Address::generate(&env);
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let player = Address::generate(&env);
 
         let _ = initialize_reputation(&env, &admin);
         assert!(create_player_reputation(&env, &player).is_ok());
@@ -464,15 +465,15 @@ mod tests {
 
     #[test]
     fn test_behavior_recording() {
-        let env = soroban_sdk::testing::Env::default();
-        let admin = soroban_sdk::testing::Address::generate(&env);
-        let player = soroban_sdk::testing::Address::generate(&env);
-        let reporter = soroban_sdk::testing::Address::generate(&env);
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let player = Address::generate(&env);
+        let reporter = Address::generate(&env);
 
         let _ = initialize_reputation(&env, &admin);
         let _ = create_player_reputation(&env, &player);
 
-        let description = String::from_small_str(&env, "Test behavior");
+        let description = String::from_str(&env, "Test behavior");
         let result = record_behavior(
             &env,
             &player,
@@ -487,9 +488,9 @@ mod tests {
 
     #[test]
     fn test_ban_player() {
-        let env = soroban_sdk::testing::Env::default();
-        let admin = soroban_sdk::testing::Address::generate(&env);
-        let player = soroban_sdk::testing::Address::generate(&env);
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let player = Address::generate(&env);
 
         let _ = initialize_reputation(&env, &admin);
         let _ = create_player_reputation(&env, &player);

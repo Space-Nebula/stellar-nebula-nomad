@@ -374,3 +374,137 @@ pub fn record_migration_completion(
 }
 
 use soroban_sdk::BytesN;
+
+// ─── Tests ───────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl, testutils::Address as _};
+
+    #[contract]
+    struct StubContract;
+    #[contractimpl]
+    impl StubContract {}
+
+    fn setup_env() -> (Env, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        (env, admin)
+    }
+
+    #[test]
+    fn test_initialize_and_get_version() {
+        let (env, admin) = setup_env();
+        let contract = env.register(StubContract, ());
+
+        env.as_contract(&contract, || {
+            assert_eq!(get_current_version(&env), 1);
+            initialize_migrations(&env, &admin, 2).unwrap();
+            assert_eq!(get_current_version(&env), 2);
+
+            // Re-initializing does not overwrite initial version
+            initialize_migrations(&env, &admin, 3).unwrap();
+            assert_eq!(get_current_version(&env), 2);
+        });
+    }
+
+    #[test]
+    fn test_plan_migration_success_and_incompatible_error() {
+        let (env, admin) = setup_env();
+        let contract = env.register(StubContract, ());
+
+        env.as_contract(&contract, || {
+            initialize_migrations(&env, &admin, 1).unwrap();
+            let record = plan_migration(&env, &admin, 1, 2, symbol_short!("plan_v2")).unwrap();
+            assert_eq!(record.from_version, 1);
+            assert_eq!(record.to_version, 2);
+
+            // from_version > current_version yields error
+            let err = plan_migration(&env, &admin, 5, 6, symbol_short!("invalid"));
+            assert_eq!(err, Err(MigrationError::IncompatibleSchema));
+        });
+    }
+
+    #[test]
+    fn test_dry_run_migration() {
+        let (env, admin) = setup_env();
+        let contract = env.register(StubContract, ());
+
+        env.as_contract(&contract, || {
+            initialize_migrations(&env, &admin, 1).unwrap();
+            let record = plan_migration(&env, &admin, 1, 2, symbol_short!("plan_v2")).unwrap();
+
+            let mut sample_data = Vec::new(&env);
+            sample_data.push_back(Bytes::from_slice(&env, b"payload1"));
+            sample_data.push_back(Bytes::from_slice(&env, b"payload2"));
+
+            let report = dry_run_migration(&env, &admin, record.id, sample_data).unwrap();
+            assert!(report.would_succeed);
+            assert_eq!(report.records_affected, 2);
+
+            // Empty record triggers validation error in dry run
+            let mut invalid_sample = Vec::new(&env);
+            invalid_sample.push_back(Bytes::new(&env));
+            let report_fail = dry_run_migration(&env, &admin, record.id, invalid_sample).unwrap();
+            assert!(!report_fail.would_succeed);
+
+            // Batch size exceeding MAX_MIGRATION_BATCH yields error
+            let mut oversized = Vec::new(&env);
+            for _ in 0..MAX_MIGRATION_BATCH + 1 {
+                oversized.push_back(Bytes::from_slice(&env, b"x"));
+            }
+            let err = dry_run_migration(&env, &admin, record.id, oversized);
+            assert_eq!(err, Err(MigrationError::BatchTooLarge));
+        });
+    }
+
+    #[test]
+    fn test_execute_batch_and_rollback() {
+        let (env, admin) = setup_env();
+        let contract = env.register(StubContract, ());
+
+        env.as_contract(&contract, || {
+            initialize_migrations(&env, &admin, 1).unwrap();
+            let record = plan_migration(&env, &admin, 1, 2, symbol_short!("v2")).unwrap();
+
+            let mut batch_data = Vec::new(&env);
+            batch_data.push_back(Bytes::from_slice(&env, b"data1"));
+
+            let batch_state = execute_migration_batch(&env, &admin, record.id, 0, 1, batch_data).unwrap();
+            assert_eq!(batch_state.records_processed, 1);
+            assert_eq!(batch_state.migration_id, record.id);
+
+            // Rollback succeeds when checkpoint exists
+            rollback_migration(&env, &admin, record.id).unwrap();
+
+            // Second rollback fails because checkpoint was consumed/removed
+            let err = rollback_migration(&env, &admin, record.id);
+            assert_eq!(err, Err(MigrationError::NoCheckpoint));
+        });
+    }
+
+    #[test]
+    fn test_backward_compatibility() {
+        let (env, admin) = setup_env();
+        let contract = env.register(StubContract, ());
+
+        env.as_contract(&contract, || {
+            assert!(is_backward_compatible(&env, 1, 2));
+            mark_incompatible(&env, &admin, 1, 2).unwrap();
+            assert!(!is_backward_compatible(&env, 1, 2));
+        });
+    }
+
+    #[test]
+    fn test_record_migration_completion() {
+        let (env, _admin) = setup_env();
+        let contract = env.register(StubContract, ());
+
+        env.as_contract(&contract, || {
+            record_migration_completion(&env, 101, 1, 2, 50);
+        });
+    }
+}
+

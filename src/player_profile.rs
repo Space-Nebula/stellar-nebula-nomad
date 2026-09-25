@@ -35,7 +35,7 @@ pub struct PlayerProfile {
     pub created_at: u64,
     pub last_updated: u64,
     /// Consecutive daily-login days (Issue #280). Authoritative streak value —
-    /// [`crate::daily_rewards`] owns the calendar, the profile owns the streak.
+    /// `daily_rewards` owns the calendar, the profile owns the streak.
     pub login_streak: u32,
     /// Best login streak ever achieved.
     pub longest_login_streak: u32,

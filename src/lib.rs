@@ -41,7 +41,7 @@ pub mod test_helpers;
 mod treasure_vault;
 
 mod yield_farming;
-mod governance;
+pub mod governance;
 mod theme_customizer;
 mod indexer_callbacks;
 
