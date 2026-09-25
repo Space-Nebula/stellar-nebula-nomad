@@ -180,13 +180,16 @@ pub fn record_tx_failure(env: &Env, error_type: Symbol) {
         .set(&MetricsKey::LastUpdateTime, &env.ledger().timestamp());
 
     // Track error frequency.
-    let mut error_freq: u64 = env
+    let mut error_freq_map: Map<Symbol, u64> = env
         .storage()
         .persistent()
         .get(&MetricsKey::ErrorTypeFrequency)
-        .and_then(|m: Map<Symbol, u64>| m.get(error_type.clone()))
-        .unwrap_or(0);
-    error_freq += 1;
+        .unwrap_or_else(|| Map::new(env));
+    let error_freq = error_freq_map.get(error_type.clone()).unwrap_or(0) + 1;
+    error_freq_map.set(error_type.clone(), error_freq);
+    env.storage()
+        .persistent()
+        .set(&MetricsKey::ErrorTypeFrequency, &error_freq_map);
 
     env.events().publish(
         (symbol_short!("metrics"), symbol_short!("tx_fail")),
