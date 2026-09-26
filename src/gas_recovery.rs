@@ -40,6 +40,24 @@ pub enum RefundError {
     InvalidPercentage = 5,
 }
 
+impl crate::error_standard::StandardContractError for RefundError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::NotEligibleForRefund | Self::NotAuthorized => (ErrorKind::Authorization, false),
+            Self::AlreadyRefunded => (ErrorKind::Conflict, false),
+            Self::BatchTooLarge => (ErrorKind::ResourceLimit, false),
+            Self::InvalidPercentage => (ErrorKind::Validation, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "gas_recovery",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 use crate::{ensure_auth, storage_get_default, storage_set};
 
 /// ─── Data Types ─────────────────────────────────────────────────────────────

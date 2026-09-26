@@ -48,6 +48,25 @@ pub enum BountyError {
     AlreadyClaimed = 8,
 }
 
+impl crate::error_standard::StandardContractError for BountyError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::BountyNotFound => (ErrorKind::NotFound, false),
+            Self::BountyExpired | Self::AlreadyClaimed => (ErrorKind::Conflict, false),
+            Self::NotPoster | Self::NotAuthorized => (ErrorKind::Authorization, false),
+            Self::TooManyActiveBounties => (ErrorKind::ResourceLimit, false),
+            Self::InvalidReward | Self::InvalidProof => (ErrorKind::Validation, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "bounty_board",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 /// ─── Data Types ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]

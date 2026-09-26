@@ -9,6 +9,23 @@ pub enum ThemeError {
     ShipNotFound = 3,
 }
 
+impl crate::error_standard::StandardContractError for ThemeError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::InvalidTheme => (ErrorKind::Validation, false),
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::ShipNotFound => (ErrorKind::NotFound, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "theme_customizer",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ThemePreview {

@@ -64,6 +64,24 @@ pub enum ProfileError {
     ArithmeticOverflow = 5,
 }
 
+impl crate::error_standard::StandardContractError for ProfileError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::ProfileNotFound => (ErrorKind::NotFound, false),
+            Self::ProfileAlreadyExists => (ErrorKind::Conflict, false),
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::BatchTooLarge | Self::ArithmeticOverflow => (ErrorKind::ResourceLimit, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "player_profile",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 // ─── Functions ────────────────────────────────────────────────────────────────
 
 /// Create a new player profile for `owner`.

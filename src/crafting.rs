@@ -25,6 +25,28 @@ pub enum CraftingError {
     InsufficientSkillPoints = 9,
 }
 
+impl crate::error_standard::StandardContractError for CraftingError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::RecipeLocked | Self::SpecializationAlreadyChosen | Self::NodeAlreadyUnlocked => {
+                (ErrorKind::Conflict, false)
+            }
+            Self::InsufficientLevel
+            | Self::InsufficientResources
+            | Self::InsufficientSkillPoints => (ErrorKind::ResourceLimit, false),
+            Self::RecipeNotFound | Self::NodeNotFound => (ErrorKind::NotFound, false),
+            Self::WrongSpecialization => (ErrorKind::Validation, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "crafting",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 #[soroban_sdk::contracttype]
 pub enum CraftingDataKey {
     PlayerLevel(Address),

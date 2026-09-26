@@ -27,6 +27,22 @@ pub enum SustainabilityError {
     Unauthorized = 3,
 }
 
+impl crate::error_standard::StandardContractError for SustainabilityError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::NoRewardEligible | Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::InvalidGasValue => (ErrorKind::Validation, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "sustainability_metrics",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 pub fn record_transaction_footprint(
     env: &Env,
     player: &Address,

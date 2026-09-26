@@ -53,6 +53,23 @@ pub enum MetricsError {
     InvalidMetric = 3,
 }
 
+impl crate::error_standard::StandardContractError for MetricsError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::NotInitialized => (ErrorKind::NotFound, false),
+            Self::InvalidMetric => (ErrorKind::Validation, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "metrics_exporter",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 // ─── Data Structures ─────────────────────────────────────────────────────
 
 /// Transaction metrics snapshot.

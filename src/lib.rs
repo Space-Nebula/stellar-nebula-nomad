@@ -42,7 +42,7 @@ mod data_exporter;
 mod emergency_controls;
 mod metadata_resolver;
 mod randomness_oracle;
-mod rate_limiter;
+pub mod rate_limiter;
 pub mod nebula_gen;
 pub mod ship_upgrade;
 #[cfg(any(test, feature = "fuzz"))]
@@ -986,6 +986,18 @@ impl NebulaNomadContract {
     /// Check whether a role is permitted to perform an action.
     pub fn has_permission(env: Env, role: Symbol, action: Symbol) -> bool {
         access_control::has_permission(&env, &role, &action)
+    }
+
+    // === Rate Limiting API ===
+
+    /// Set the rate limit for an operation type (RBAC admin only).
+    pub fn set_rate_limit_config(
+        env: Env,
+        admin: Address,
+        op: rate_limiter::Operation,
+        config: rate_limiter::RateLimitConfig,
+    ) -> Result<(), rate_limiter::RateLimitError> {
+        rate_limiter::set_rate_limit_config(&env, &admin, op, config)
     }
 
     // === Gas Recovery API ===

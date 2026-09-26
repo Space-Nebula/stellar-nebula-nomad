@@ -259,7 +259,7 @@ pub enum ProposalOperation {
 pub const BATCH_GRANT_LIMIT: usize = 5;
 
 // Default role names as Symbols. Using symbol_short!() for brevity.
-fn admin_role() -> Symbol {
+pub(crate) fn admin_role() -> Symbol {
     symbol_short!("admin")
 }
 

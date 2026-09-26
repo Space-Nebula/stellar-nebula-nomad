@@ -226,6 +226,24 @@ pub enum MetadataError {
     GasBudgetExceeded = 5,
 }
 
+impl crate::error_standard::StandardContractError for MetadataError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::InvalidCID => (ErrorKind::Validation, false),
+            Self::TokenNotFound => (ErrorKind::NotFound, false),
+            Self::AlreadySet => (ErrorKind::Conflict, false),
+            Self::BatchLimitExceeded | Self::GasBudgetExceeded => (ErrorKind::ResourceLimit, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "metadata_resolver",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 // ─── Data Types ───────────────────────────────────────────────────────────
 
 /// Resolved metadata for a single token.

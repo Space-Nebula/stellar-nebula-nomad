@@ -42,6 +42,24 @@ pub enum VersioningError {
     NotAuthorized = 5,
 }
 
+impl crate::error_standard::StandardContractError for VersioningError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::IncompatibleVersion | Self::AlreadyMigrated => (ErrorKind::Conflict, false),
+            Self::MigrationInProgress => (ErrorKind::Conflict, true),
+            Self::BatchTooLarge => (ErrorKind::ResourceLimit, false),
+            Self::NotAuthorized => (ErrorKind::Authorization, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "contract_versioning",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 /// ─── Data Types ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]

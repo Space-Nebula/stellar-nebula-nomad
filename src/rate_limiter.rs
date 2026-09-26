@@ -12,6 +12,7 @@
 // and resource minting by enforcing call-frequency windows.
 
 #![allow(unused)]
+use crate::access_control;
 use soroban_sdk::{contract, contractimpl, contracttype, contracterror,
                    Address, Env, Map, symbol_short};
 
@@ -89,6 +90,25 @@ pub enum RateLimitError {
     RateLimitExceeded = 100,
     /// Only the contract admin may update rate limit configuration.
     Unauthorized      = 101,
+    /// `max_calls` and `window_seconds` must both be non-zero.
+    InvalidConfig     = 102,
+}
+
+impl crate::error_standard::StandardContractError for RateLimitError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::InvalidConfig => (ErrorKind::Validation, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "rate_limiter",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
 }
 
 // ── Per-address window state ──────────────────────────────────
@@ -160,6 +180,9 @@ pub fn check_rate_limit(
 }
 
 /// Admin function: update rate limit config for an operation.
+///
+/// `admin` must authorize the call and hold the RBAC `admin` role
+/// (`access_control::init_roles` must have been called).
 pub fn set_rate_limit_config(
     env:    &Env,
     admin:  &Address,
@@ -167,6 +190,12 @@ pub fn set_rate_limit_config(
     config: RateLimitConfig,
 ) -> Result<(), RateLimitError> {
     admin.require_auth();
+    if !access_control::has_role(env, &access_control::admin_role(), admin) {
+        return Err(RateLimitError::Unauthorized);
+    }
+    if config.max_calls == 0 || config.window_seconds == 0 {
+        return Err(RateLimitError::InvalidConfig);
+    }
     env.storage()
         .instance()
         .set(&RateLimitKey::Config(op), &config);
@@ -250,6 +279,7 @@ mod tests {
         let env   = make_env();
         let admin = Address::generate(&env);
         let user  = Address::generate(&env);
+        access_control::init_roles(&env, admin.clone()).unwrap();
 
         // Set a very tight limit: 2 calls / 120 s
         set_rate_limit_config(
@@ -262,6 +292,44 @@ mod tests {
         assert_eq!(
             check_rate_limit(&env, &user, Operation::ResourceMinting),
             Err(RateLimitError::RateLimitExceeded)
+        );
+    }
+
+    #[test]
+    fn test_set_config_rejects_non_admin() {
+        let env      = make_env();
+        let admin    = Address::generate(&env);
+        let intruder = Address::generate(&env);
+        access_control::init_roles(&env, admin).unwrap();
+
+        assert_eq!(
+            set_rate_limit_config(
+                &env, &intruder, Operation::ResourceMinting,
+                RateLimitConfig { max_calls: 1000, window_seconds: 1 },
+            ),
+            Err(RateLimitError::Unauthorized)
+        );
+    }
+
+    #[test]
+    fn test_set_config_rejects_zero_values() {
+        let env   = make_env();
+        let admin = Address::generate(&env);
+        access_control::init_roles(&env, admin.clone()).unwrap();
+
+        assert_eq!(
+            set_rate_limit_config(
+                &env, &admin, Operation::ResourceMinting,
+                RateLimitConfig { max_calls: 0, window_seconds: 60 },
+            ),
+            Err(RateLimitError::InvalidConfig)
+        );
+        assert_eq!(
+            set_rate_limit_config(
+                &env, &admin, Operation::ResourceMinting,
+                RateLimitConfig { max_calls: 5, window_seconds: 0 },
+            ),
+            Err(RateLimitError::InvalidConfig)
         );
     }
 

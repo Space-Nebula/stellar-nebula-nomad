@@ -27,6 +27,25 @@ pub enum CurveError {
     InvalidValue = 5,
 }
 
+impl crate::error_standard::StandardContractError for CurveError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::InvalidLevel | Self::InvalidParameter | Self::InvalidValue => {
+                (ErrorKind::Validation, false)
+            }
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::CurveLocked => (ErrorKind::Conflict, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "difficulty_curve",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct CurveConfig {
