@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, contracterror, symbol_short, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contracttype, contracterror, symbol_short, Address, Env, String, Vec};
 
 pub const MIN_REPUTATION: u32 = 1;
 pub const MAX_REPUTATION: u32 = 100;

@@ -1,6 +1,6 @@
 //! Deterministic environmental state simulation.
 //!
-use soroban_sdk::{contracterror, contracttype, symbol_short, Env, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Env, Symbol};
 
 const ENVIRONMENTAL_PRESETS: [&str; 8] = [
     "calm",

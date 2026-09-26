@@ -1,6 +1,6 @@
 //! Time-to-live policy and invalidation for cached contract data.
 //!
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Bytes, Env, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Bytes, Env, Symbol};
 
 // ─── Cache TTL Management System ────────────────────────────────────────────
 //

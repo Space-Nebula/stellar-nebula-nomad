@@ -2,11 +2,8 @@ use soroban_sdk::{
     contracterror, contracttype, symbol_short, Address, Env, Map, String, Symbol, Vec,
 };
 
-// Symbol::to_string() is implemented for non-wasm targets only (requires std::string::String).
 #[cfg(not(target_family = "wasm"))]
 extern crate std;
-#[cfg(not(target_family = "wasm"))]
-use std::string::ToString as _;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 

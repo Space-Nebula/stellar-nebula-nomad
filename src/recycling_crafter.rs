@@ -1,7 +1,6 @@
 use soroban_sdk::{
-    contracterror, contracttype, symbol_short, vec, Address, Env, Vec, Map, Symbol,
+    contracterror, contracttype, symbol_short, Address, Env, Vec, Symbol
 };
-
 /// Maximum batch size for recycle/craft operations.
 pub const RECYCLE_CRAFT_BATCH_SIZE: u32 = 8;
 
