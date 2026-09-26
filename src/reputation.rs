@@ -437,7 +437,7 @@ pub fn claim_reputation_reward(env: &Env, player: &Address) -> Result<i128, Repu
     Ok(reward)
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;

@@ -54,7 +54,7 @@ pub enum MinterKey {
     Balance(Address, ResourceType),
     TotalSupply(ResourceType),
     /// Cumulative amount ever minted, never decremented. Together with the
-    /// burn counters in [`crate::token_burning`] this gives the deflation rate
+    /// burn counters in `token_burning` this gives the deflation rate
     /// (Issue #281): `burned / ever_minted`.
     TotalMinted(ResourceType),
 }

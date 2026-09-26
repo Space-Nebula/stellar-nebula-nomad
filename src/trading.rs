@@ -594,7 +594,7 @@ pub fn remove_liquidity(
 
 /// Swap an exact input amount for an output. Supports multi-hop routing via `route`.
 ///
-/// `route` is a vec of pool_ids that form a chain: resource_in -> pool[0] -> ... -> pool[n] -> resource_out.
+/// `route` is a vec of pool_ids that form a chain: resource_in -> pool\[0\] -> ... -> pool\[n\] -> resource_out.
 /// For a single-pool swap, route contains exactly one pool_id.
 /// # Security
 /// * Holds a reentrancy guard across the full multi-hop reserve update

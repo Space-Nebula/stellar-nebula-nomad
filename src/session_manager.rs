@@ -21,7 +21,7 @@ pub enum SessionKey {
 // ─── Data Types ───────────────────────────────────────────────────────────────
 
 /// A timed nebula exploration session tied to a ship.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[contracttype]
 pub struct Session {
     pub id: u64,
@@ -177,7 +177,7 @@ mod tests {
             min_persistent_entry_ttl: 1000,
             max_entry_ttl: 10_000,
         });
-        let id = env.register_contract(None, Stub);
+        let id = env.register(Stub, ());
         (env, id)
     }
 
