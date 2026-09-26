@@ -22,6 +22,11 @@ mobile/.expo/
 .env.local
 .env.*.local
 
+# Local Horizon snapshots
+/backups/
+**/__pycache__/
+*.pyc
+
 # Build artifacts
 *.so
 *.dylib
