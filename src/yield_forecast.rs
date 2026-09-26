@@ -50,6 +50,25 @@ pub enum ForecastError {
     BurstLimitExceeded = 7,
 }
 
+impl crate::error_standard::StandardContractError for ForecastError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::InsufficientData | Self::MaxDaysExceeded => (ErrorKind::ResourceLimit, false),
+            Self::InvalidDays => (ErrorKind::Validation, false),
+            Self::PlayerNotFound | Self::ModelNotInitialized => (ErrorKind::NotFound, false),
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::BurstLimitExceeded => (ErrorKind::ResourceLimit, true),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "yield_forecast",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 // ─── Data Structures ───────────────────────────────────────────────────────
 
 /// A single historical yield data point.

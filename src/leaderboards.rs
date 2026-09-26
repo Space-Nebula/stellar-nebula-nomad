@@ -29,6 +29,28 @@ pub enum LeaderboardError {
     AlreadyInitialized = 8,
 }
 
+impl crate::error_standard::StandardContractError for LeaderboardError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::InvalidCategory | Self::InvalidTimePeriod | Self::InvalidRegion => {
+                (ErrorKind::Validation, false)
+            }
+            Self::PlayerNotFound => (ErrorKind::NotFound, false),
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::LeaderboardFull => (ErrorKind::ResourceLimit, false),
+            Self::ResetNotDue => (ErrorKind::Conflict, true),
+            Self::AlreadyInitialized => (ErrorKind::Conflict, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "leaderboards",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 // ── Storage Keys ──────────────────────────────────────────────────────────────
 
 #[contracttype]

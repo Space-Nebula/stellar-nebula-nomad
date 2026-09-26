@@ -5,6 +5,7 @@ use soroban_sdk::{symbol_short, Address, Env, Map};
 use stellar_nebula_nomad::{
     NebulaNomadContract, NebulaNomadContractClient, ShipUpgradeError, UpgradeBlueprint,
 };
+use stellar_nebula_nomad::rate_limiter::{Operation, RateLimitConfig, RateLimitError};
 use stellar_nebula_nomad::ship_upgrade::{MAX_BATCH_UPGRADES, MAX_MODULES, MAX_MASS};
 
 fn setup() -> (Env, NebulaNomadContractClient<'static>, Address) {
@@ -36,6 +37,7 @@ fn make_blueprints(env: &Env) -> Map<soroban_sdk::Symbol, UpgradeBlueprint> {
             mass:          10,
             scanner_bonus: 5,
             hull_bonus:    0,
+            regen_bonus:   0,
         },
     );
     blueprints.set(
@@ -46,6 +48,7 @@ fn make_blueprints(env: &Env) -> Map<soroban_sdk::Symbol, UpgradeBlueprint> {
             mass:          20,
             scanner_bonus: 0,
             hull_bonus:    15,
+            regen_bonus:   0,
         },
     );
     blueprints
@@ -160,6 +163,14 @@ fn test_invariant_module_cap_enforced() {
     let (env, client, admin) = setup();
     client.init_upgrade_config(&admin, &make_blueprints(&env));
 
+    // Raise the ship-upgrade rate limit so the module cap is what stops the last install.
+    client.init_rbac(&admin);
+    client.set_rate_limit_config(
+        &admin,
+        &Operation::ShipUpgrade,
+        &RateLimitConfig { max_calls: MAX_MODULES + 1, window_seconds: 300 },
+    );
+
     let player = Address::generate(&env);
     // Fund enough for MAX_MODULES + 1 installs (each costs 100 dust, mass 10).
     credit_resource(&env, &client.address, &player, symbol_short!("dust"), 100 * (MAX_MODULES + 1));
@@ -188,6 +199,7 @@ fn test_invariant_mass_cap_enforced() {
             mass:          60,
             scanner_bonus: 0,
             hull_bonus:    5,
+            regen_bonus:   0,
         },
     );
     client.init_upgrade_config(&admin, &blueprints);
@@ -256,6 +268,86 @@ fn test_stats_accumulate_across_upgrades() {
     assert_eq!(state.total_mass,    30); // scanner(10) + hull(20)
     assert_eq!(state.scanner_bonus, 5);
     assert_eq!(state.hull_bonus,   15);
+}
+
+#[test]
+fn test_apply_upgrade_rate_limited_after_default_window_quota() {
+    let (env, client, admin) = setup();
+    client.init_upgrade_config(&admin, &make_blueprints(&env));
+
+    let player = Address::generate(&env);
+    credit_resource(&env, &client.address, &player, symbol_short!("dust"), 400);
+
+    // Default ShipUpgrade limit is 3 calls / 300 s.
+    for _ in 0..3 {
+        client.apply_upgrade(&player, &10u64, &symbol_short!("scanner"));
+    }
+    let err = client
+        .try_apply_upgrade(&player, &10u64, &symbol_short!("scanner"))
+        .unwrap_err();
+    assert_eq!(err, Ok(ShipUpgradeError::RateLimitExceeded));
+}
+
+#[test]
+fn test_apply_upgrade_rejects_zero_ship_id() {
+    let (env, client, admin) = setup();
+    client.init_upgrade_config(&admin, &make_blueprints(&env));
+    let player = Address::generate(&env);
+
+    let err = client
+        .try_apply_upgrade(&player, &0u64, &symbol_short!("scanner"))
+        .unwrap_err();
+    assert_eq!(err, Ok(ShipUpgradeError::InvalidShipId));
+}
+
+#[test]
+fn test_batch_upgrade_rejects_empty_batch() {
+    let (env, client, admin) = setup();
+    client.init_upgrade_config(&admin, &make_blueprints(&env));
+    let player = Address::generate(&env);
+
+    let components: soroban_sdk::Vec<soroban_sdk::Symbol> = soroban_sdk::vec![&env];
+    let err = client
+        .try_batch_upgrade(&player, &11u64, &components)
+        .unwrap_err();
+    assert_eq!(err, Ok(ShipUpgradeError::EmptyBatch));
+}
+
+#[test]
+fn test_init_upgrade_config_rejects_empty_blueprints() {
+    let (env, client, admin) = setup();
+    let empty: Map<soroban_sdk::Symbol, UpgradeBlueprint> = Map::new(&env);
+
+    let err = client
+        .try_init_upgrade_config(&admin, &empty)
+        .unwrap_err();
+    assert_eq!(err, Ok(ShipUpgradeError::InvalidBlueprint));
+}
+
+#[test]
+fn test_apply_regen_upgrade_requires_initialized_admin() {
+    let (_env, client, _admin) = setup();
+
+    let err = client
+        .try_apply_regen_upgrade(&1u64, &5u32)
+        .unwrap_err();
+    assert_eq!(err, Ok(ShipUpgradeError::NotInitialized));
+}
+
+#[test]
+fn test_set_rate_limit_config_rejects_non_rbac_admin() {
+    let (env, client, admin) = setup();
+    client.init_rbac(&admin);
+    let intruder = Address::generate(&env);
+
+    let err = client
+        .try_set_rate_limit_config(
+            &intruder,
+            &Operation::ShipUpgrade,
+            &RateLimitConfig { max_calls: 1000, window_seconds: 1 },
+        )
+        .unwrap_err();
+    assert_eq!(err, Ok(RateLimitError::Unauthorized));
 }
 
 #[test]

@@ -83,6 +83,26 @@ pub enum MinterError {
     InsufficientBalance = 205,
 }
 
+impl crate::error_standard::StandardContractError for MinterError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::InvalidAmount => (ErrorKind::Validation, false),
+            Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
+            Self::NoLayoutForShip | Self::NoResourceAtAnomaly => (ErrorKind::NotFound, false),
+            Self::ArithmeticOverflow | Self::InsufficientBalance => {
+                (ErrorKind::ResourceLimit, false)
+            }
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "resource_minter",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 impl From<RateLimitError> for MinterError {
     fn from(_: RateLimitError) -> Self {
         MinterError::RateLimitExceeded
@@ -256,6 +276,10 @@ pub fn reduce_supply(
     resource_type: &ResourceType,
     amount: u64,
 ) -> Result<u64, MinterError> {
+    if amount == 0 {
+        return Err(MinterError::InvalidAmount);
+    }
+
     let key = MinterKey::TotalSupply(resource_type.clone());
     let supply: u64 = env.storage().persistent().get(&key).unwrap_or(0);
     let new_supply = supply
@@ -439,6 +463,24 @@ pub enum HarvestError {
     DexFailure = 6,
     /// Seller does not hold enough of `resource` to cover the listing.
     InsufficientBalance = 7,
+}
+
+impl crate::error_standard::StandardContractError for HarvestError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::ShipNotFound | Self::AssetNotHarvested => (ErrorKind::NotFound, false),
+            Self::EmptyHarvest | Self::InvalidPrice => (ErrorKind::Validation, false),
+            Self::PriceOverflow | Self::DexFailure => (ErrorKind::Internal, false),
+            Self::InsufficientBalance => (ErrorKind::ResourceLimit, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "resource_minter",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
 }
 
 /// Allocate the next DEX offer ID.

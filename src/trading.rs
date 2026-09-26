@@ -85,6 +85,26 @@ pub enum TradingError {
     InvalidQuantity = 6,
 }
 
+impl crate::error_standard::StandardContractError for TradingError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::InvalidOrder | Self::InvalidPrice | Self::InvalidQuantity => {
+                (ErrorKind::Validation, false)
+            }
+            Self::OrderNotFound => (ErrorKind::NotFound, false),
+            Self::NotOrderOwner => (ErrorKind::Authorization, false),
+            Self::OrderCapReached => (ErrorKind::ResourceLimit, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "trading",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn next_order_id(env: &Env) -> u64 {
@@ -298,6 +318,28 @@ pub enum AmmError {
     ZeroLiquidity = 107,
     /// A guarded section was re-entered (Issue #238).
     Reentrancy = 108,
+}
+
+impl crate::error_standard::StandardContractError for AmmError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::PoolNotFound => (ErrorKind::NotFound, false),
+            Self::PoolAlreadyExists | Self::Reentrancy => (ErrorKind::Conflict, false),
+            Self::InsufficientLiquidity | Self::SlippageExceeded | Self::InsufficientLpTokens => {
+                (ErrorKind::ResourceLimit, false)
+            }
+            Self::InvalidAmount | Self::InvalidRoute | Self::ZeroLiquidity => {
+                (ErrorKind::Validation, false)
+            }
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "trading",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
 }
 
 impl From<ReentrancyError> for AmmError {

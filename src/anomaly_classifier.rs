@@ -27,6 +27,23 @@ pub enum AnomalyError {
     Unauthorized = 3,
 }
 
+impl crate::error_standard::StandardContractError for AnomalyError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::InsufficientFeatures => (ErrorKind::ResourceLimit, false),
+            Self::NotFound => (ErrorKind::NotFound, false),
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "anomaly_classifier",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 pub fn classify_anomaly(
     env: &Env,
     anomaly_id: u64,
