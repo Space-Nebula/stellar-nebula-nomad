@@ -353,6 +353,11 @@ mod tests {
         env
     }
 
+    fn in_contract<T>(env: &Env, f: impl FnOnce() -> T) -> T {
+        let contract = env.register(ResourceMinterContract, ());
+        env.as_contract(&contract, f)
+    }
+
     // ── Arithmetic safety (Issue #239) ──────────────────────────
     //
     // `mint_resource` credits balances via `current.checked_add(amount)`
@@ -389,8 +394,16 @@ mod tests {
     fn test_mint_zero_amount_rejected() {
         let env = make_env();
         let caller = Address::generate(&env);
-        let result =
-            ResourceMinterContract::mint_resource(&env, caller, 1, 0, ResourceType::StellarDust, 0);
+        let result = in_contract(&env, || {
+            ResourceMinterContract::mint_resource(
+                &env,
+                caller,
+                1,
+                0,
+                ResourceType::StellarDust,
+                0,
+            )
+        });
         assert_eq!(result, Err(MinterError::InvalidAmount));
     }
 
@@ -398,28 +411,32 @@ mod tests {
     fn test_rate_limit_enforced_on_minting() {
         let env = make_env();
         let caller = Address::generate(&env);
+        let contract = env.register(ResourceMinterContract, ());
 
-        // Use up the default ResourceMinting limit (10 / 60 s)
-        // We expect the first 10 to fail with NoLayoutForShip (no layout),
-        // but RateLimitExceeded must fire on the 11th.
+        // Use up the default ResourceMinting limit (10 / 60 s).
         for _ in 0..10 {
-            let _ = ResourceMinterContract::mint_resource(
+            env.as_contract(&contract, || {
+                let _ = ResourceMinterContract::mint_resource(
+                    &env,
+                    caller.clone(),
+                    1,
+                    0,
+                    ResourceType::StellarDust,
+                    1,
+                );
+            });
+        }
+        let result = env.as_contract(&contract, || {
+            let result = ResourceMinterContract::mint_resource(
                 &env,
-                caller.clone(),
+                caller,
                 1,
                 0,
                 ResourceType::StellarDust,
                 1,
             );
-        }
-        let result = ResourceMinterContract::mint_resource(
-            &env,
-            caller.clone(),
-            1,
-            0,
-            ResourceType::StellarDust,
-            1,
-        );
+            result
+        });
         assert_eq!(result, Err(MinterError::RateLimitExceeded));
     }
 
