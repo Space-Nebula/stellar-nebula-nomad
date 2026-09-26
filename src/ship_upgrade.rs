@@ -1,3 +1,4 @@
+use crate::rate_limiter::{check_rate_limit, Operation, RateLimitError};
 use crate::resource_minter::ResourceKey;
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Map, Symbol, Vec};
 
@@ -23,6 +24,42 @@ pub enum ShipUpgradeError {
     /// Invariant violated: module cap or mass limit exceeded.
     InvariantViolation = 204,
     BatchTooLarge      = 205,
+    /// Ship ID must be greater than zero.
+    InvalidShipId      = 206,
+    /// A batch must contain at least one component.
+    EmptyBatch         = 207,
+    /// The blueprint map must contain at least one component.
+    InvalidBlueprint   = 208,
+    /// Caller exceeded the ship-upgrade rate limit (DoS prevention).
+    RateLimitExceeded  = 209,
+}
+
+impl crate::error_standard::StandardContractError for ShipUpgradeError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::NotInitialized | Self::UnknownComponent => (ErrorKind::NotFound, false),
+            Self::AlreadyInitialized => (ErrorKind::Conflict, false),
+            Self::InsufficientResources | Self::BatchTooLarge => (ErrorKind::ResourceLimit, false),
+            Self::InvariantViolation => (ErrorKind::Internal, false),
+            Self::InvalidShipId | Self::EmptyBatch | Self::InvalidBlueprint => {
+                (ErrorKind::Validation, false)
+            }
+            Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "ship_upgrade",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
+impl From<RateLimitError> for ShipUpgradeError {
+    fn from(_: RateLimitError) -> Self {
+        ShipUpgradeError::RateLimitExceeded
+    }
 }
 
 // ── Data Types ────────────────────────────────────────────────────────────────
@@ -88,6 +125,9 @@ pub fn init_upgrade_config(
         return Err(ShipUpgradeError::AlreadyInitialized);
     }
     admin.require_auth();
+    if blueprints.is_empty() {
+        return Err(ShipUpgradeError::InvalidBlueprint);
+    }
     env.storage().instance().set(&UpgradeDataKey::Admin, admin);
     env.storage().instance().set(&UpgradeDataKey::Config, &blueprints);
     Ok(())
@@ -96,7 +136,7 @@ pub fn init_upgrade_config(
 /// Apply a single component upgrade to `ship_id`.
 ///
 /// Steps:
-/// 1. Require `player` authorisation.
+/// 1. Require `player` authorisation and enforce the per-address rate limit.
 /// 2. Look up `component` in the blueprint config.
 /// 3. Burn `blueprint.resource_cost` from the player's harvested resource balance.
 /// 4. Compute new `ShipState` using saturating arithmetic (overflow-safe).
@@ -110,6 +150,7 @@ pub fn apply_upgrade(
     component: Symbol,
 ) -> Result<ShipState, ShipUpgradeError> {
     player.require_auth();
+    check_rate_limit(env, player, Operation::ShipUpgrade)?;
     apply_upgrade_inner(env, player, ship_id, component)
 }
 
@@ -121,6 +162,10 @@ fn apply_upgrade_inner(
     ship_id: u64,
     component: Symbol,
 ) -> Result<ShipState, ShipUpgradeError> {
+    if ship_id == 0 {
+        return Err(ShipUpgradeError::InvalidShipId);
+    }
+
     let blueprints: Map<Symbol, UpgradeBlueprint> = env
         .storage()
         .instance()
@@ -184,6 +229,7 @@ fn apply_upgrade_inner(
 
 /// Apply up to `MAX_BATCH_UPGRADES` (2) component upgrades in one transaction.
 /// Requires player auth once at the top level; inner calls skip re-auth.
+/// The whole batch counts as one call against the rate limit.
 /// Fails atomically: if any upgrade fails the entire batch is reverted.
 pub fn batch_upgrade(
     env: &Env,
@@ -194,8 +240,12 @@ pub fn batch_upgrade(
     if components.len() > MAX_BATCH_UPGRADES {
         return Err(ShipUpgradeError::BatchTooLarge);
     }
+    if components.is_empty() {
+        return Err(ShipUpgradeError::EmptyBatch);
+    }
 
     player.require_auth();
+    check_rate_limit(env, player, Operation::ShipUpgrade)?;
 
     let mut results: Vec<ShipState> = soroban_sdk::vec![env];
     for component in components.iter() {
@@ -238,11 +288,19 @@ pub fn get_upgrade_config(env: &Env) -> Option<Map<Symbol, UpgradeBlueprint>> {
 /// Apply a regeneration upgrade effect to the ship's energy manager.
 /// This is called after a successful upgrade that has regen_bonus > 0.
 /// It increases the passive regeneration rate in energy_manager.
+/// Admin-only: the upgrade admin set in `init_upgrade_config` must authorise.
 pub fn apply_regen_upgrade(
     env: &Env,
     ship_id: u64,
     bonus: u32,
 ) -> Result<(), ShipUpgradeError> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&UpgradeDataKey::Admin)
+        .ok_or(ShipUpgradeError::NotInitialized)?;
+    admin.require_auth();
+
     if bonus == 0 {
         return Ok(());
     }

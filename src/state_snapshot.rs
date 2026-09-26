@@ -75,6 +75,28 @@ pub enum SnapshotError {
     BackupLimitReached = 9,
 }
 
+impl crate::error_standard::StandardContractError for SnapshotError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::ShipNotFound | Self::SnapshotNotFound => (ErrorKind::NotFound, false),
+            Self::NotOwner => (ErrorKind::Authorization, false),
+            Self::SnapshotInvalid => (ErrorKind::Validation, false),
+            Self::SessionLimitExceeded | Self::BackupLimitReached => {
+                (ErrorKind::ResourceLimit, false)
+            }
+            Self::TooSoon | Self::BackupTooSoon => (ErrorKind::Conflict, true),
+            Self::SnapshotImmutable => (ErrorKind::Conflict, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "state_snapshot",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 // ─── Data Types ───────────────────────────────────────────────────────────
 
 /// Compressed state snapshot capturing ship and resource data.

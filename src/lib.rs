@@ -7,7 +7,11 @@ extern crate std;
 
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec, symbol_short};
 
-use crate::nebula_explorer::{NebulaLayout, Rarity};
+// `nebula_explorer` is a private module, so re-export the whole scan surface to
+// give downstream callers (and integration tests) a nameable path.
+pub use crate::nebula_explorer::{
+    CellType, NebulaCell, NebulaLayout, Rarity, GRID_SIZE, TOTAL_CELLS,
+};
 
 mod access_control;
 pub mod error_standard;
@@ -38,7 +42,7 @@ mod data_exporter;
 mod emergency_controls;
 mod metadata_resolver;
 mod randomness_oracle;
-mod rate_limiter;
+pub mod rate_limiter;
 pub mod nebula_gen;
 pub mod ship_upgrade;
 #[cfg(any(test, feature = "fuzz"))]
@@ -46,7 +50,7 @@ pub mod test_helpers;
 mod treasure_vault;
 
 mod yield_farming;
-mod governance;
+pub mod governance;
 mod theme_customizer;
 mod indexer_callbacks;
 
@@ -141,7 +145,11 @@ pub use nebula_gen::{
     NebulaError as NebulaGenError, Anomaly, AnomalyType, NebulaLayout as NebulaGenLayout,
     ResourceClass,
 };
-pub use resource_minter::{AssetId, MinterError, ResourceKey, ResourceRecord, ResourceType};
+pub use resource_minter::{
+    balance_of, circulating_supply, credit_balance, debit_balance, move_balance, reduce_supply,
+    resource_type_to_symbol, total_minted, AssetId, MinterError, MinterKey, ResourceKey,
+    ResourceMinterContract, ResourceRecord, ResourceType,
+};
 pub use ship_nft::{ShipError, ShipNft};
 pub use blueprint_factory::{Blueprint, BlueprintError, BlueprintRarity};
 pub use referral_system::{Referral, ReferralError};
@@ -980,6 +988,18 @@ impl NebulaNomadContract {
         access_control::has_permission(&env, &role, &action)
     }
 
+    // === Rate Limiting API ===
+
+    /// Set the rate limit for an operation type (RBAC admin only).
+    pub fn set_rate_limit_config(
+        env: Env,
+        admin: Address,
+        op: rate_limiter::Operation,
+        config: rate_limiter::RateLimitConfig,
+    ) -> Result<(), rate_limiter::RateLimitError> {
+        rate_limiter::set_rate_limit_config(&env, &admin, op, config)
+    }
+
     // === Gas Recovery API ===
 
     pub fn initialize_refund(env: Env, admin: Address) {
@@ -1131,25 +1151,30 @@ impl NebulaNomadContract {
         ship_nft::get_metadata(&env, ship_id)
     }
 
-    /// DEPRECATED: harvest_resources removed after upstream merge
-    /// Gas-optimized harvest - functionality moved to resource_minter::mint_resource
-    // pub fn harvest_resources(
-    //     env: Env,
-    //     ship_id: u64,
-    //     layout: NebulaLayout,
-    // ) -> Result<HarvestResult, HarvestError> {
-    //     resource_minter::harvest_resources(&env, ship_id, &layout)
-    // }
+    /// Gas-optimized harvest of a ship's scanned nebula layout into per-cell
+    /// resource balances credited to the ship's current owner.
+    pub fn harvest_resources(
+        env: Env,
+        ship_id: u64,
+        layout: NebulaLayout,
+    ) -> Result<resource_minter::HarvestResult, resource_minter::HarvestError> {
+        resource_minter::harvest_resources(&env, ship_id, &layout)
+    }
 
-    /// DEPRECATED: auto_list_on_dex removed after upstream merge
-    /// Create an AMM-listing hook for a harvested resource - use trading module instead
-    // pub fn auto_list_on_dex(
-    //     env: Env,
-    //     resource: AssetId,
-    //     min_price: i128,
-    // ) -> Result<DexOffer, HarvestError> {
-    //     resource_minter::auto_list_on_dex(&env, &resource, min_price)
-    // }
+    /// Read a player's harvested balance for one resource symbol.
+    pub fn get_resource_balance(env: Env, owner: Address, resource: Symbol) -> u32 {
+        resource_minter::resource_balance(&env, &owner, &resource)
+    }
+
+    /// Escrow a player's entire harvested balance of `resource` into a DEX offer.
+    pub fn auto_list_on_dex(
+        env: Env,
+        player: Address,
+        resource: Symbol,
+        min_price: i128,
+    ) -> Result<resource_minter::DexOffer, resource_minter::HarvestError> {
+        resource_minter::auto_list_on_dex(&env, &player, &resource, min_price)
+    }
 
     // ─── DEX Integration (Issue #9) ──────────────────────────────────────
 
@@ -1158,11 +1183,11 @@ impl NebulaNomadContract {
         env: Env,
         player: Address,
         ship_id: u64,
-        _layout: (),
+        layout: NebulaLayout,
         resource: Symbol,
         min_price: i128,
     ) -> Result<(dex_integration::HarvestResult, dex_integration::DexOffer), dex_integration::HarvestError> {
-        dex_integration::harvest_and_list(&env, &player, ship_id, &_layout, &resource, min_price)
+        dex_integration::harvest_and_list(&env, &player, ship_id, &layout, &resource, min_price)
     }
 
     /// Cancel an active DEX listing.
