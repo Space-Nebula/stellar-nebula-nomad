@@ -117,6 +117,16 @@ path = "tests/governance/test_dao.rs"
 name = "test_emergency_controls"
 path = "tests/governance/test_emergency_controls.rs"
 
+# Comprehensive audit logging integration (Issue #425)
+[[test]]
+name = "test_audit_integration"
+path = "tests/governance/test_audit_integration.rs"
+
+# Emergency controls integration with contract operations (Issue #426)
+[[test]]
+name = "test_emergency_controls_integration"
+path = "tests/governance/test_emergency_controls_integration.rs"
+
 [[test]]
 name = "test_governance"
 path = "tests/governance/test_governance.rs"
@@ -235,6 +245,16 @@ path = "tests/misc/test_new_features_combined.rs"
 [[test]]
 name = "test_new_modules"
 path = "tests/misc/test_new_modules.rs"
+
+# End-to-end integration test suite (Issue #427)
+[[test]]
+name = "test_e2e_flows"
+path = "tests/integration/test_e2e_flows.rs"
+
+# Property tests for nebula_gen determinism (Issue #428)
+[[test]]
+name = "test_nebula_gen_properties"
+path = "tests/property_tests/nebula_gen_tests.rs"
 
 [features]
 # Enable advanced fuzz / property-based testing helpers.
