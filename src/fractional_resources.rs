@@ -55,6 +55,29 @@ pub enum FractionalError {
     MaxFractionsExceeded = 10,
 }
 
+impl crate::error_standard::StandardContractError for FractionalError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::ResourceNotFound | Self::ShareNotFound => (ErrorKind::NotFound, false),
+            Self::InsufficientShares | Self::MaxFractionsExceeded => {
+                (ErrorKind::ResourceLimit, false)
+            }
+            Self::InvalidShareCount | Self::ShareTooSmall | Self::IncompatibleShares => {
+                (ErrorKind::Validation, false)
+            }
+            Self::NotOwner | Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::AlreadyFractionalized => (ErrorKind::Conflict, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "fractional_resources",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 // ─── Data Structures ────────────────────────────────────────────────────────
 
 /// A fractional share of a resource.

@@ -1,5 +1,6 @@
 use soroban_sdk::{
-    contracterror, contracttype, symbol_short, Address, BytesN, Env, Symbol, Vec,
+    contracterror, contracttype, symbol_short, Address, BytesN, Env, IntoVal, Symbol,
+    TryFromVal, Val, Vec,
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────
@@ -52,6 +53,25 @@ pub enum StorageError {
     InvalidKey = 6,
 }
 
+impl crate::error_standard::StandardContractError for StorageError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::ReentrancyDetected => (ErrorKind::Conflict, false),
+            Self::EntryNotFound => (ErrorKind::NotFound, false),
+            Self::BurstLimitExceeded => (ErrorKind::ResourceLimit, true),
+            Self::InvalidTtl | Self::InvalidKey => (ErrorKind::Validation, false),
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "storage_optim",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 // ─── Data Types ───────────────────────────────────────────────────────────
 
 /// Packed storage entry with TTL metadata for gas-efficient reads.
@@ -92,6 +112,121 @@ pub struct OptimResult {
     pub instruction_savings_pct: u32,
 }
 
+// ─── Read-Through / Write-Back Cache (Issue #437) ─────────────────────────
+//
+// Contract functions often read the same key several times: once to
+// validate, again to update, sometimes a third time to emit an event.
+// Every read is a host call that deserialises the stored value.
+// `CachedEntry` loads a key at most once per invocation, serves later
+// reads from memory, and collects writes so only the final value is
+// written in a single `flush`.
+
+/// Which Soroban storage tier a cached entry lives in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StorageTier {
+    Instance,
+    Persistent,
+    Temporary,
+}
+
+fn tier_get<K, V>(env: &Env, tier: StorageTier, key: &K) -> Option<V>
+where
+    K: IntoVal<Env, Val>,
+    V: TryFromVal<Env, Val>,
+{
+    match tier {
+        StorageTier::Instance => env.storage().instance().get(key),
+        StorageTier::Persistent => env.storage().persistent().get(key),
+        StorageTier::Temporary => env.storage().temporary().get(key),
+    }
+}
+
+fn tier_set<K, V>(env: &Env, tier: StorageTier, key: &K, value: &V)
+where
+    K: IntoVal<Env, Val>,
+    V: IntoVal<Env, Val>,
+{
+    match tier {
+        StorageTier::Instance => env.storage().instance().set(key, value),
+        StorageTier::Persistent => env.storage().persistent().set(key, value),
+        StorageTier::Temporary => env.storage().temporary().set(key, value),
+    }
+}
+
+/// A single storage entry with lazy loading and deferred (batched) writes.
+///
+/// ```ignore
+/// let mut balance = CachedEntry::<DataKey, i128>::new(StorageTier::Instance, DataKey::Fund);
+/// let current = balance.get_or(env, 0);   // 1 host read
+/// balance.set(current - fee);             // no host call
+/// let again = balance.get_or(env, 0);     // served from cache
+/// balance.set(again - 1);
+/// balance.flush(env);                     // 1 host write
+/// ```
+pub struct CachedEntry<K, V> {
+    tier: StorageTier,
+    key: K,
+    value: Option<V>,
+    loaded: bool,
+    dirty: bool,
+}
+
+impl<K, V> CachedEntry<K, V>
+where
+    K: IntoVal<Env, Val>,
+    V: IntoVal<Env, Val> + TryFromVal<Env, Val> + Clone,
+{
+    /// Create a cache for `key` in `tier`. No storage access happens yet.
+    pub fn new(tier: StorageTier, key: K) -> Self {
+        Self {
+            tier,
+            key,
+            value: None,
+            loaded: false,
+            dirty: false,
+        }
+    }
+
+    /// Return the value, reading storage only on first access.
+    pub fn get(&mut self, env: &Env) -> Option<V> {
+        if !self.loaded {
+            self.value = tier_get(env, self.tier, &self.key);
+            self.loaded = true;
+        }
+        self.value.clone()
+    }
+
+    /// Return the value, or `default` when the entry is absent.
+    pub fn get_or(&mut self, env: &Env, default: V) -> V {
+        self.get(env).unwrap_or(default)
+    }
+
+    /// Stage a new value. Storage is written only on [`CachedEntry::flush`].
+    pub fn set(&mut self, value: V) {
+        self.value = Some(value);
+        self.loaded = true;
+        self.dirty = true;
+    }
+
+    /// `true` when a staged value has not been written yet.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Write the staged value (if any) with a single host call.
+    /// Returns `true` when a write happened.
+    pub fn flush(&mut self, env: &Env) -> bool {
+        if !self.dirty {
+            return false;
+        }
+        if let Some(v) = &self.value {
+            tier_set(env, self.tier, &self.key, v);
+        }
+        self.dirty = false;
+        true
+    }
+}
+
 // ─── Re-Entrancy Guard ───────────────────────────────────────────────────
 
 /// Acquire the global re-entrancy lock. Panics if already locked.
@@ -113,10 +248,14 @@ pub fn guard_reentrancy(env: &Env) -> Result<(), StorageError> {
 }
 
 /// Release the global re-entrancy lock.
+///
+/// The entry is removed rather than overwritten with `false`: instance
+/// storage is loaded on every invocation, so an idle lock should not stay
+/// in it. `guard_reentrancy` treats an absent entry as unlocked.
 pub fn release_guard(env: &Env) {
     env.storage()
         .instance()
-        .set(&StorageKey::ReentrancyGuard, &false);
+        .remove(&StorageKey::ReentrancyGuard);
 }
 
 // ─── Bump Storage ─────────────────────────────────────────────────────────
@@ -142,14 +281,13 @@ pub fn store_with_bump(
         ttl_ledgers: ttl,
     };
 
-    env.storage()
-        .persistent()
-        .set(&StorageKey::OptimEntry(key.clone()), &entry);
+    // Build the storage key once for both the write and the TTL bump.
+    let storage_key = StorageKey::OptimEntry(key.clone());
+    let store = env.storage().persistent();
+    store.set(&storage_key, &entry);
 
     // Extend the TTL via bump to reduce rent overhead.
-    env.storage()
-        .persistent()
-        .extend_ttl(&StorageKey::OptimEntry(key.clone()), ttl, config.max_ttl);
+    store.extend_ttl(&storage_key, ttl, config.max_ttl);
 
     let result = OptimResult {
         key: key.clone(),
@@ -204,12 +342,11 @@ pub fn store_ship_nebula(
     };
 
     let key = StorageKey::ShipNebula(ship_id, nebula_id);
-    env.storage().persistent().set(&key, &data);
+    let store = env.storage().persistent();
+    store.set(&key, &data);
 
     let config = get_bump_config(env);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, config.default_ttl, config.max_ttl);
+    store.extend_ttl(&key, config.default_ttl, config.max_ttl);
 
     env.events().publish(
         (symbol_short!("storage"), symbol_short!("packed")),
@@ -240,19 +377,24 @@ pub fn get_ship_nebula(
 /// Track the number of reads in a single transaction and enforce the
 /// burst-read safety limit.
 fn track_burst_read(env: &Env) -> Result<(), StorageError> {
-    let count: u32 = env
-        .storage()
-        .instance()
+    track_burst_reads(env, 1)
+}
+
+/// Account for `n` reads with one counter read and one counter write,
+/// instead of a read and a write per item. Used by the batch getters.
+fn track_burst_reads(env: &Env, n: u32) -> Result<(), StorageError> {
+    let instance = env.storage().instance();
+    let count: u32 = instance
         .get(&StorageKey::BurstReadCounter)
         .unwrap_or(0);
 
-    if count >= MAX_BURST_READS {
+    // Reject if any of the `n` reads would cross the limit.
+    let new_count = count.saturating_add(n);
+    if count >= MAX_BURST_READS || new_count > MAX_BURST_READS {
         return Err(StorageError::BurstLimitExceeded);
     }
 
-    env.storage()
-        .instance()
-        .set(&StorageKey::BurstReadCounter, &(count + 1));
+    instance.set(&StorageKey::BurstReadCounter, &new_count);
 
     Ok(())
 }
@@ -364,33 +506,36 @@ pub fn batch_store_with_bump(
     keys: Vec<Symbol>,
     values: Vec<BytesN<64>>,
 ) -> Result<Vec<OptimResult>, StorageError> {
+    // Validate before taking the lock so a malformed batch cannot leave the
+    // guard held (previously a length mismatch panicked mid-loop).
+    if keys.len() != values.len() {
+        return Err(StorageError::InvalidKey);
+    }
+
     guard_reentrancy(env)?;
 
+    // Loop-invariant values are read once for the whole batch.
     let config = get_bump_config(env);
     let ttl = config.default_ttl;
+    let now = env.ledger().timestamp();
+    let store = env.storage().persistent();
 
     let mut results = Vec::new(env);
 
-    for i in 0..keys.len() {
-        let key = keys.get(i).unwrap();
-        let value = values.get(i).unwrap();
-
+    for (key, value) in keys.iter().zip(values.iter()) {
         let entry = OptimizedEntry {
             key: key.clone(),
             data: value,
-            created_at: env.ledger().timestamp(),
+            created_at: now,
             ttl_ledgers: ttl,
         };
 
-        env.storage()
-            .persistent()
-            .set(&StorageKey::OptimEntry(key.clone()), &entry);
-        env.storage()
-            .persistent()
-            .extend_ttl(&StorageKey::OptimEntry(key.clone()), ttl, config.max_ttl);
+        let storage_key = StorageKey::OptimEntry(key.clone());
+        store.set(&storage_key, &entry);
+        store.extend_ttl(&storage_key, ttl, config.max_ttl);
 
         results.push_back(OptimResult {
-            key: key.clone(),
+            key,
             ttl_applied: ttl,
             instruction_savings_pct: 30,
         });
@@ -404,4 +549,248 @@ pub fn batch_store_with_bump(
     release_guard(env);
 
     Ok(results)
+}
+
+/// Batch-read optimized entries with a single burst-counter update.
+///
+/// Returns `EntryNotFound` if any key is missing.
+pub fn get_optimized_entries(
+    env: &Env,
+    keys: Vec<Symbol>,
+) -> Result<Vec<OptimizedEntry>, StorageError> {
+    track_burst_reads(env, keys.len())?;
+
+    let store = env.storage().persistent();
+    let mut out = Vec::new(env);
+    for key in keys.iter() {
+        let entry: OptimizedEntry = store
+            .get(&StorageKey::OptimEntry(key))
+            .ok_or(StorageError::EntryNotFound)?;
+        out.push_back(entry);
+    }
+    Ok(out)
+}
+
+/// Batch-read ship-nebula records for one ship across several nebulae
+/// with a single burst-counter update.
+pub fn get_ship_nebula_batch(
+    env: &Env,
+    ship_id: u64,
+    nebula_ids: Vec<u64>,
+) -> Result<Vec<ShipNebulaData>, StorageError> {
+    track_burst_reads(env, nebula_ids.len())?;
+
+    let store = env.storage().persistent();
+    let mut out = Vec::new(env);
+    for nebula_id in nebula_ids.iter() {
+        let data: ShipNebulaData = store
+            .get(&StorageKey::ShipNebula(ship_id, nebula_id))
+            .ok_or(StorageError::EntryNotFound)?;
+        out.push_back(data);
+    }
+    Ok(out)
+}
+
+// ─── Value packing & bloom filter (Issue #482) ────────────────────────────
+//
+// Packing several small values into one `u128` turns N storage entries into
+// one. The layouts below are part of the storage format: changing them breaks
+// previously written data, so they are pinned by regression tests.
+
+/// Pack three `u32` values into one `u128` (`a` in the low 32 bits).
+pub fn pack_u32x3(a: u32, b: u32, c: u32) -> u128 {
+    u128::from(a) | (u128::from(b) << 32) | (u128::from(c) << 64)
+}
+
+/// Inverse of [`pack_u32x3`].
+#[allow(clippy::cast_possible_truncation)] // truncation is the unpacking
+pub fn unpack_u32x3(packed: u128) -> (u32, u32, u32) {
+    (packed as u32, (packed >> 32) as u32, (packed >> 64) as u32)
+}
+
+/// Pack two `u64` values into one `u128` (`lo` in the low 64 bits).
+pub fn pack_u64x2(lo: u64, hi: u64) -> u128 {
+    u128::from(lo) | (u128::from(hi) << 64)
+}
+
+/// Inverse of [`pack_u64x2`].
+#[allow(clippy::cast_possible_truncation)] // truncation is the unpacking
+pub fn unpack_u64x2(packed: u128) -> (u64, u64) {
+    (packed as u64, (packed >> 64) as u64)
+}
+
+/// Three independent 7-bit bit positions derived from a 32-byte key.
+fn bloom_positions(key: &BytesN<32>) -> [u32; 3] {
+    let b = key.to_array();
+    [
+        u32::from(b[0] & 0x7F),
+        u32::from(b[11] & 0x7F),
+        u32::from(b[23] & 0x7F),
+    ]
+}
+
+/// Add `key` to a 128-bit bloom filter and return the new filter.
+pub fn bloom_insert(filter: u128, key: &BytesN<32>) -> u128 {
+    bloom_positions(key)
+        .iter()
+        .fold(filter, |f, p| f | (1u128 << p))
+}
+
+/// `false` means `key` is definitely absent, so the expensive storage lookup
+/// can be skipped. `true` means "maybe present".
+pub fn bloom_may_contain(filter: u128, key: &BytesN<32>) -> bool {
+    bloom_positions(key)
+        .iter()
+        .all(|p| filter & (1u128 << p) != 0)
+}
+
+#[cfg(test)]
+mod packing_tests {
+    use super::*;
+
+    #[test]
+    fn u32x3_round_trip_and_layout_is_stable() {
+        assert_eq!(unpack_u32x3(pack_u32x3(1, u32::MAX, 7)), (1, u32::MAX, 7));
+        // Regression guard: storage layout must not change.
+        assert_eq!(pack_u32x3(1, 2, 3), 0x0000_0003_0000_0002_0000_0001);
+    }
+
+    #[test]
+    fn u64x2_round_trip_and_layout_is_stable() {
+        assert_eq!(unpack_u64x2(pack_u64x2(u64::MAX, 9)), (u64::MAX, 9));
+        assert_eq!(pack_u64x2(1, 2), (2u128 << 64) | 1);
+    }
+
+    #[test]
+    fn bloom_filter_has_no_false_negatives() {
+        let env = Env::default();
+        let a = BytesN::from_array(&env, &[1u8; 32]);
+        let mut raw = [0u8; 32];
+        raw[0] = 5;
+        raw[11] = 6;
+        raw[23] = 7;
+        let b = BytesN::from_array(&env, &raw);
+        let f = bloom_insert(0, &a);
+        assert!(bloom_may_contain(f, &a));
+        assert!(!bloom_may_contain(f, &b));
+        let f = bloom_insert(f, &b);
+        assert!(bloom_may_contain(f, &a) && bloom_may_contain(f, &b));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nebula_gen::NebulaGen;
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
+
+    fn host(env: &Env) -> Address {
+        env.register(NebulaGen, ())
+    }
+
+    #[test]
+    fn cached_entry_reads_once_and_writes_on_flush() {
+        let env = Env::default();
+        let id = host(&env);
+        env.as_contract(&id, || {
+            let key = symbol_short!("cnt");
+            env.storage().instance().set(&key, &5u32);
+
+            let mut entry = CachedEntry::<Symbol, u32>::new(StorageTier::Instance, key.clone());
+            assert_eq!(entry.get_or(&env, 0), 5);
+            entry.set(6);
+            let staged = entry.get_or(&env, 0);
+            entry.set(staged + 1);
+            assert!(entry.is_dirty());
+
+            // Nothing written until flush.
+            assert_eq!(env.storage().instance().get::<_, u32>(&key), Some(5));
+            assert!(entry.flush(&env));
+            assert_eq!(env.storage().instance().get::<_, u32>(&key), Some(7));
+
+            // A second flush with no staged change writes nothing.
+            assert!(!entry.flush(&env));
+        });
+    }
+
+    #[test]
+    fn cached_entry_absent_key_uses_default() {
+        let env = Env::default();
+        let id = host(&env);
+        env.as_contract(&id, || {
+            let mut entry =
+                CachedEntry::<Symbol, u64>::new(StorageTier::Persistent, symbol_short!("none"));
+            assert_eq!(entry.get(&env), None);
+            assert_eq!(entry.get_or(&env, 42), 42);
+            assert!(!entry.flush(&env));
+        });
+    }
+
+    #[test]
+    fn release_guard_clears_lock_entry() {
+        let env = Env::default();
+        let id = host(&env);
+        env.as_contract(&id, || {
+            guard_reentrancy(&env).unwrap();
+            assert_eq!(guard_reentrancy(&env), Err(StorageError::ReentrancyDetected));
+            release_guard(&env);
+            assert!(!env.storage().instance().has(&StorageKey::ReentrancyGuard));
+            assert!(guard_reentrancy(&env).is_ok());
+        });
+    }
+
+    #[test]
+    fn batch_store_rejects_mismatched_lengths_without_holding_lock() {
+        let env = Env::default();
+        let id = host(&env);
+        env.as_contract(&id, || {
+            let keys = Vec::from_array(&env, [symbol_short!("a"), symbol_short!("b")]);
+            let values = Vec::from_array(&env, [BytesN::from_array(&env, &[0u8; 64])]);
+            assert!(matches!(
+                batch_store_with_bump(&env, keys, values),
+                Err(StorageError::InvalidKey)
+            ));
+            assert!(guard_reentrancy(&env).is_ok());
+        });
+    }
+
+    #[test]
+    fn batch_reads_count_once_against_burst_limit() {
+        let env = Env::default();
+        let id = host(&env);
+        let admin = Address::generate(&env);
+        env.mock_all_auths();
+        env.as_contract(&id, || {
+            initialize_bump_config(&env, &admin);
+            let keys = Vec::from_array(&env, [symbol_short!("x"), symbol_short!("y")]);
+            for k in keys.iter() {
+                store_with_bump(&env, k, BytesN::from_array(&env, &[9u8; 64])).unwrap();
+            }
+            reset_burst_counter(&env);
+            let entries = get_optimized_entries(&env, keys).unwrap();
+            assert_eq!(entries.len(), 2);
+            let count: u32 = env
+                .storage()
+                .instance()
+                .get(&StorageKey::BurstReadCounter)
+                .unwrap();
+            assert_eq!(count, 2);
+        });
+    }
+
+    #[test]
+    fn batch_reads_reject_when_exceeding_burst_limit() {
+        let env = Env::default();
+        let id = host(&env);
+        env.as_contract(&id, || {
+            env.storage()
+                .instance()
+                .set(&StorageKey::BurstReadCounter, &(MAX_BURST_READS - 1));
+            let keys = Vec::from_array(&env, [symbol_short!("p"), symbol_short!("q")]);
+            assert_eq!(
+                get_optimized_entries(&env, keys),
+                Err(StorageError::BurstLimitExceeded)
+            );
+        });
+    }
 }

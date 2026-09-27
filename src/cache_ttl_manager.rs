@@ -1,6 +1,6 @@
 //! Time-to-live policy and invalidation for cached contract data.
 //!
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Bytes, Env, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Bytes, Env, Symbol};
 
 // ─── Cache TTL Management System ────────────────────────────────────────────
 //
@@ -62,6 +62,25 @@ pub enum CacheTtlError {
     Unauthorized = 4,
     /// Cache validation failed.
     ValidationFailed = 5,
+}
+
+impl crate::error_standard::StandardContractError for CacheTtlError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::CacheExpired => (ErrorKind::Conflict, false),
+            Self::EntryNotFound => (ErrorKind::NotFound, false),
+            Self::InvalidTtl => (ErrorKind::Validation, false),
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::ValidationFailed => (ErrorKind::Internal, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "cache_ttl_manager",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
 }
 
 // ─── Data Structures ─────────────────────────────────────────────────────
@@ -226,7 +245,7 @@ pub fn invalidate_cache_entry(
         .set(&CacheKey::IsStale(namespace.clone(), key.clone()), &true);
 
     env.events().publish(
-        (symbol_short!("cache"), symbol_short!("invalid")),
+        (symbol_short!("cache"), symbol_short!("inv")),
         (namespace, key, reason, env.ledger().timestamp()),
     );
 }
@@ -242,7 +261,7 @@ pub fn invalidate_namespace(
         .set(&CacheKey::LastInvalidation(namespace.clone()), &env.ledger().timestamp());
 
     env.events().publish(
-        (symbol_short!("cache"), symbol_short!("ns_invald")),
+        (symbol_short!("cache"), symbol_short!("ns_clr")),
         (namespace, reason, env.ledger().timestamp()),
     );
 }
@@ -291,7 +310,7 @@ pub fn configure_ttl(
         .set(&CacheKey::TtlConfig(namespace.clone()), &config);
 
     env.events().publish(
-        (symbol_short!("cache"), symbol_short!("config")),
+        (symbol_short!("cache"), symbol_short!("cfg")),
         (namespace, ttl_seconds, auto_refresh, env.ledger().timestamp()),
     );
 

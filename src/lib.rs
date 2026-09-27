@@ -1,10 +1,22 @@
 #![no_std]
 
+// Unit tests (proptest in particular) need std's `format!`/`vec!` macros.
+#[cfg(test)]
+#[macro_use]
+extern crate std;
+
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec, symbol_short};
 
-use crate::nebula_explorer::{NebulaLayout, Rarity};
+// `nebula_explorer` is a private module, so re-export the whole scan surface to
+// give downstream callers (and integration tests) a nameable path.
+pub use crate::nebula_explorer::{
+    validate_scan_inputs, CellType, NebulaCell, NebulaLayout, Rarity, GRID_SIZE, TOTAL_CELLS,
+};
+pub use crate::input_validation::{
+    checked_region_offset, validate_region_id, validate_seed, ValidationError, MAX_REGION_ID,
+};
 
-mod access_control;
+pub mod access_control;
 pub mod error_standard;
 mod analytics;
 mod player_segmentation;
@@ -25,23 +37,25 @@ mod pvp_combat;
 pub mod events;
 mod batch_processor;
 mod dex_integration;
+pub mod dynamic_pricing;
 mod difficulty_scaler;
 mod difficulty_curve;
 mod health_monitor;
 mod achievement_engine;
 mod data_exporter;
-mod emergency_controls;
+pub mod emergency_controls;
 mod metadata_resolver;
 mod randomness_oracle;
-mod rate_limiter;
+pub mod rate_limiter;
 pub mod nebula_gen;
 pub mod ship_upgrade;
+pub mod ship_repair;
 #[cfg(any(test, feature = "fuzz"))]
 pub mod test_helpers;
 mod treasure_vault;
 
 mod yield_farming;
-mod governance;
+pub mod governance;
 mod theme_customizer;
 mod indexer_callbacks;
 
@@ -78,17 +92,17 @@ mod portal_registry;
 mod constellation_mapper;
 mod entanglement_comms;
 mod wormhole_traveler;
-mod alliance_manager;
+pub mod alliance_manager;
 mod market_oracle;
 mod audio_seed_generator;
 mod privacy_stats;
 mod navigation_planner;
-mod event_scheduler;
+pub mod event_scheduler;
 
 mod rewards;
 mod nft_marketplace;
-mod trading;
-mod seasons;
+pub mod trading;
+pub mod seasons;
 mod battle_pass;
 
 mod ship_customization;
@@ -118,7 +132,7 @@ mod composability_examples;
 mod input_validation;
 mod quest_system;
 mod ai_mission_engine;
-mod guild_quests;
+pub mod guild_quests;
 mod reputation;
 
 pub use reentrancy_guard::ReentrancyError;
@@ -136,8 +150,12 @@ pub use nebula_gen::{
     NebulaError as NebulaGenError, Anomaly, AnomalyType, NebulaLayout as NebulaGenLayout,
     ResourceClass,
 };
-pub use resource_minter::{AssetId, MinterError, ResourceKey, ResourceRecord, ResourceType};
-pub use ship_nft::{ShipError, ShipNft};
+pub use resource_minter::{
+    balance_of, circulating_supply, credit_balance, debit_balance, move_balance, reduce_supply,
+    resource_type_to_symbol, total_minted, AssetId, MinterError, MinterKey, ResourceKey,
+    ResourceMinterContract, ResourceRecord, ResourceType,
+};
+pub use ship_nft::{DataKey as ShipDataKey, ShipError, ShipNft};
 pub use blueprint_factory::{Blueprint, BlueprintError, BlueprintRarity};
 pub use referral_system::{Referral, ReferralError};
 pub use player_profile::{PlayerProfile, ProfileError, ProgressUpdate};
@@ -177,7 +195,16 @@ pub use batch_processor::{
     clear_batch, execute_batch, get_player_batch, queue_batch_operation, BatchError, BatchOp,
     BatchOpType, BatchResult, MAX_BATCH_SIZE,
 };
-pub use dex_integration::{cancel_listing, harvest_and_list};
+pub use dex_integration::{cancel_listing, harvest_and_list, list_at_market, DynamicListError};
+pub use dynamic_pricing::{
+    deviation_bps, dynamic_price, ema_step, get_price_state, get_pricing_config,
+    get_pricing_history, get_sma, get_volatility_bps, init_pricing_config, listing_price,
+    observe_price, observe_supply_demand, price_from_state, set_pricing_config, DynamicPrice,
+    PricePoint, PriceState, PricingConfig, PricingError, DEFAULT_BASE_VOLATILITY_BAND_BPS,
+    DEFAULT_MAX_DEVIATION_BPS, DEFAULT_MIN_COOLDOWN_SECS, DEFAULT_SMOOTHING_BPS,
+    DEFAULT_SUPPLY_DEMAND_ADJ_BPS, MAX_HISTORY_ENTRIES, MAX_SMOOTHING_BPS,
+    MAX_VOLATILITY_BAND_BPS,
+};
 pub use difficulty_scaler::{
     apply_scaling_to_layout, calculate_difficulty, DifficultyError, DifficultyResult,
     RarityWeights, MAX_LEVEL,
@@ -193,7 +220,11 @@ pub use metadata_resolver::{
 pub use randomness_oracle::{
     get_entropy_pool, request_random_seed, verify_and_fallback, OracleError,
 };
-pub use ship_upgrade::{ShipState, ShipUpgradeError, UpgradeBlueprint, apply_regen_upgrade};
+pub use ship_upgrade::{
+    ShipState, ShipUpgradeError, UpgradeBlueprint, UpgradeEconomy, apply_regen_upgrade,
+    get_total_upgrade_spend, get_upgrade_economy, quote_upgrade_cost, scaled_upgrade_cost,
+    set_upgrade_economy, DEFAULT_GROWTH_BPS, DEFAULT_MAX_COST,
+};
 pub use treasure_vault::{
     claim_treasure, deposit_treasure, get_vault, TreasureVault, VaultError,
     DEFAULT_MIN_LOCK_DURATION,
@@ -265,8 +296,10 @@ pub use storage_optim::{
     store_with_bump, get_optimized_entry, batch_store_with_bump, guard_reentrancy,
     release_guard, store_ship_nebula, get_ship_nebula, initialize_bump_config,
     update_bump_config, get_bump_config, set_upgrade_target, get_upgrade_target,
-    reset_burst_counter, StorageError, OptimizedEntry, ShipNebulaData, OptimResult,
-    BumpConfig, DEFAULT_BUMP_TTL, MAX_BUMP_TTL, MAX_BURST_READS,
+    reset_burst_counter, get_optimized_entries, get_ship_nebula_batch, StorageError,
+    OptimizedEntry, ShipNebulaData, OptimResult, BumpConfig, CachedEntry, StorageTier,
+    DEFAULT_BUMP_TTL, MAX_BUMP_TTL, MAX_BURST_READS, pack_u32x3, unpack_u32x3, pack_u64x2,
+    unpack_u64x2, bloom_insert, bloom_may_contain,
 };
 pub use state_snapshot::{
     take_snapshot, restore_from_snapshot, get_snapshot, get_ship_snapshots,
@@ -330,6 +363,13 @@ pub use event_scheduler::{
     get_active_events, schedule_weekly_festival, cancel_event, update_participants,
     get_event_count, reset_burst_counter as reset_event_burst,
     ScheduledEvent, EventResult, EventError, MAX_ACTIVE_EVENTS, WEEKLY_FESTIVAL_INTERVAL,
+    SeasonalEvent, SeasonalEventConfig, SeasonalEventEntry, SeasonalEventStatus,
+    SeasonalChallengeSpec, MIN_SEASONAL_EVENT_DURATION, MAX_SEASONAL_EVENT_DURATION,
+    MAX_SEASONAL_EVENT_COOLDOWN, MAX_PENDING_SEASONAL_EVENTS, MAX_CHALLENGES_PER_EVENT,
+    SEASONAL_REWARD_CLAIM_WINDOW,
+};
+pub use seasons::{
+    seasonal_event_reward_pool, Season, SeasonError, SeasonTheme, EXCLUSIVE_EVENT_BONUS_BPS,
 };
 
 pub use ship_customization::{
@@ -355,6 +395,13 @@ pub use economics::health_dashboard::{
     SupplyDemandMetrics, InflationMetrics, AlertThreshold, AlertEvent, EconomyHealth,
     EconomyHealthDashboard,
 };
+pub use economics::anti_whale::{
+    calculate_diminishing_returns, calculate_progressive_fee, get_daily_cap, get_day_index,
+    get_user_daily_volume, is_exempt, process_anti_whale_action, set_daily_cap, set_exempt,
+    AntiWhaleError, AntiWhaleKey, DAILY_WINDOW_SECONDS, DEFAULT_DAILY_CAP, PROGRESSIVE_FEE_BPS,
+    TIER1_MULTIPLIER_BPS, TIER1_THRESHOLD, TIER2_MULTIPLIER_BPS, TIER2_THRESHOLD,
+    TIER3_MULTIPLIER_BPS,
+};
 
 pub use trading::{
     place_limit_order, cancel_limit_order, get_limit_order, get_trader_orders,
@@ -366,8 +413,13 @@ pub use trading::{
     MAX_SLIPPAGE_BPS, AMM_MAX_ROUTE_HOPS, SWAP_FEE_BPS,
 };
 
-pub use crafting::{craft, add_xp, get_level, get_xp};
+pub use crafting::{craft, craft_with_overcharge, add_xp, get_level, get_total_craft_sink, get_xp};
 pub use recipes::{RecipeError, set_recipe, unlock_rare_recipe};
+pub use ship_repair::{
+    RepairConfig, RepairQuote, RepairReceipt, ShipRepairError, get_repair_config,
+    get_total_repair_burn, quote_repair, repair_cost, set_repair_config,
+    DEFAULT_COST_PER_POINT, DEFAULT_EMERGENCY_SURCHARGE_BPS, DEFAULT_MAX_REPAIR_PER_CALL,
+};
 pub use nomad_bonding::{
     BondError, BondStatus, NomadBond, YieldDelegation,
     create_bond, accept_bond, delegate_yield, claim_yield, dissolve_bond,
@@ -967,6 +1019,18 @@ impl NebulaNomadContract {
         access_control::has_permission(&env, &role, &action)
     }
 
+    // === Rate Limiting API ===
+
+    /// Set the rate limit for an operation type (RBAC admin only).
+    pub fn set_rate_limit_config(
+        env: Env,
+        admin: Address,
+        op: rate_limiter::Operation,
+        config: rate_limiter::RateLimitConfig,
+    ) -> Result<(), rate_limiter::RateLimitError> {
+        rate_limiter::set_rate_limit_config(&env, &admin, op, config)
+    }
+
     // === Gas Recovery API ===
 
     pub fn initialize_refund(env: Env, admin: Address) {
@@ -1118,25 +1182,30 @@ impl NebulaNomadContract {
         ship_nft::get_metadata(&env, ship_id)
     }
 
-    /// DEPRECATED: harvest_resources removed after upstream merge
-    /// Gas-optimized harvest - functionality moved to resource_minter::mint_resource
-    // pub fn harvest_resources(
-    //     env: Env,
-    //     ship_id: u64,
-    //     layout: NebulaLayout,
-    // ) -> Result<HarvestResult, HarvestError> {
-    //     resource_minter::harvest_resources(&env, ship_id, &layout)
-    // }
+    /// Gas-optimized harvest of a ship's scanned nebula layout into per-cell
+    /// resource balances credited to the ship's current owner.
+    pub fn harvest_resources(
+        env: Env,
+        ship_id: u64,
+        layout: NebulaLayout,
+    ) -> Result<resource_minter::HarvestResult, resource_minter::HarvestError> {
+        resource_minter::harvest_resources(&env, ship_id, &layout)
+    }
 
-    /// DEPRECATED: auto_list_on_dex removed after upstream merge
-    /// Create an AMM-listing hook for a harvested resource - use trading module instead
-    // pub fn auto_list_on_dex(
-    //     env: Env,
-    //     resource: AssetId,
-    //     min_price: i128,
-    // ) -> Result<DexOffer, HarvestError> {
-    //     resource_minter::auto_list_on_dex(&env, &resource, min_price)
-    // }
+    /// Read a player's harvested balance for one resource symbol.
+    pub fn get_resource_balance(env: Env, owner: Address, resource: Symbol) -> u32 {
+        resource_minter::resource_balance(&env, &owner, &resource)
+    }
+
+    /// Escrow a player's entire harvested balance of `resource` into a DEX offer.
+    pub fn auto_list_on_dex(
+        env: Env,
+        player: Address,
+        resource: Symbol,
+        min_price: i128,
+    ) -> Result<resource_minter::DexOffer, resource_minter::HarvestError> {
+        resource_minter::auto_list_on_dex(&env, &player, &resource, min_price)
+    }
 
     // ─── DEX Integration (Issue #9) ──────────────────────────────────────
 
@@ -1145,11 +1214,11 @@ impl NebulaNomadContract {
         env: Env,
         player: Address,
         ship_id: u64,
-        _layout: (),
+        layout: NebulaLayout,
         resource: Symbol,
         min_price: i128,
     ) -> Result<(dex_integration::HarvestResult, dex_integration::DexOffer), dex_integration::HarvestError> {
-        dex_integration::harvest_and_list(&env, &player, ship_id, &_layout, &resource, min_price)
+        dex_integration::harvest_and_list(&env, &player, ship_id, &layout, &resource, min_price)
     }
 
     /// Cancel an active DEX listing.
@@ -1431,6 +1500,176 @@ impl NebulaNomadContract {
         bonus: u32,
     ) -> Result<(), ShipUpgradeError> {
         ship_upgrade::apply_regen_upgrade(&env, ship_id, bonus)
+    }
+
+    // ─── Upgrade cost curve (Issue #454) ─────────────────────────────────
+
+    /// Quote what installing `component` on `ship_id` costs right now, under
+    /// the active exponential cost curve. Pure view — does not charge the
+    /// player.
+    pub fn quote_upgrade_cost(
+        env: Env,
+        ship_id: u64,
+        component: Symbol,
+    ) -> Result<u32, ShipUpgradeError> {
+        ship_upgrade::quote_upgrade_cost(&env, ship_id, component)
+    }
+
+    /// Read the active upgrade cost curve. Returns the rebalanced default when
+    /// the admin has never overridden it.
+    pub fn get_upgrade_economy(env: Env) -> UpgradeEconomy {
+        ship_upgrade::get_upgrade_economy(&env)
+    }
+
+    /// Override the upgrade cost curve. Upgrade-admin only. `growth_bps = 0`
+    /// restores the legacy flat schedule.
+    pub fn set_upgrade_economy(
+        env: Env,
+        admin: Address,
+        economy: UpgradeEconomy,
+    ) -> Result<(), ShipUpgradeError> {
+        ship_upgrade::set_upgrade_economy(&env, &admin, economy)
+    }
+
+    /// Total resource units burned by upgrades across all ships.
+    pub fn get_total_upgrade_spend(env: Env) -> u32 {
+        ship_upgrade::get_total_upgrade_spend(&env)
+    }
+
+    // ─── Paid ship repair — resource sink (Issue #453) ───────────────────
+
+    /// Price a repair without mutating state. `emergency = true` prices the
+    /// field-patch special action, which repairs more per call at a surcharge.
+    pub fn quote_repair(
+        env: Env,
+        owner: Address,
+        ship_id: u64,
+        asset_id: Symbol,
+        emergency: bool,
+    ) -> Result<RepairQuote, ShipRepairError> {
+        ship_repair::quote_repair(&env, &owner, ship_id, asset_id, emergency)
+    }
+
+    /// Repair a ship, permanently burning resources in proportion to the
+    /// durability restored. `emergency = true` performs the surcharged
+    /// field-patch special action.
+    pub fn repair_ship(
+        env: Env,
+        player: Address,
+        ship_id: u64,
+        asset_id: Symbol,
+        emergency: bool,
+    ) -> Result<RepairReceipt, ShipRepairError> {
+        ship_repair::repair_ship(&env, &player, ship_id, asset_id, emergency)
+    }
+
+    /// Cumulative resource units destroyed by repairs across all ships.
+    pub fn get_total_repair_burn(env: Env) -> u32 {
+        ship_repair::get_total_repair_burn(&env)
+    }
+
+    /// Read the active repair pricing. Falls back to the balanced default.
+    pub fn get_repair_config(env: Env) -> RepairConfig {
+        ship_repair::get_repair_config(&env)
+    }
+
+    /// Seed the repair sink admin so pricing can be retuned later. Once only,
+    /// and optional — the sink runs on defaults without it.
+    pub fn init_repair_config(
+        env: Env,
+        admin: Address,
+        config: RepairConfig,
+    ) -> Result<(), ShipRepairError> {
+        ship_repair::init_repair_config(&env, &admin, config)
+    }
+
+    /// Retune repair pricing. Admin-only.
+    pub fn set_repair_config(
+        env: Env,
+        admin: Address,
+        config: RepairConfig,
+    ) -> Result<(), ShipRepairError> {
+        ship_repair::set_repair_config(&env, &admin, config)
+    }
+
+    // ─── Dynamic Resource Pricing (#452) ──────────────────────────────────
+
+    /// Seed the dynamic pricing admin and guards. Admin-only, once.
+    pub fn init_pricing_config(
+        env: Env,
+        admin: Address,
+        config: PricingConfig,
+    ) -> Result<(), PricingError> {
+        dynamic_pricing::init_pricing_config(&env, &admin, config)
+    }
+
+    /// Retune the dynamic pricing guards. Admin-only.
+    pub fn set_pricing_config(
+        env: Env,
+        admin: Address,
+        config: PricingConfig,
+    ) -> Result<(), PricingError> {
+        dynamic_pricing::set_pricing_config(&env, &admin, config)
+    }
+
+    /// The active dynamic pricing configuration.
+    pub fn get_pricing_config(env: Env) -> PricingConfig {
+        dynamic_pricing::get_pricing_config(&env)
+    }
+
+    /// Feed one raw price print into the EMA engine. Admin-only.
+    ///
+    /// Returns [`PricingError::DeviationTooLarge`] when the print sits outside
+    /// `max_deviation_bps` of the current average, in which case the average is
+    /// left untouched.
+    pub fn observe_price(
+        env: Env,
+        source: Address,
+        resource: Symbol,
+        raw_price: i128,
+    ) -> Result<PriceState, PricingError> {
+        dynamic_pricing::observe_price(&env, &source, resource, raw_price)
+    }
+
+    /// Record the supply/demand balance for a resource. Admin-only.
+    pub fn observe_supply_demand(
+        env: Env,
+        source: Address,
+        resource: Symbol,
+        supply: i128,
+        demand: i128,
+    ) -> Result<i128, PricingError> {
+        dynamic_pricing::observe_supply_demand(&env, &source, resource, supply, demand)
+    }
+
+    /// The EMA-smoothed, volatility-clamped price the economy should use.
+    pub fn get_dynamic_price(
+        env: Env,
+        resource: Symbol,
+    ) -> Result<DynamicPrice, PricingError> {
+        dynamic_pricing::dynamic_price(&env, resource)
+    }
+
+    /// Rolling state for a resource, including realized volatility.
+    pub fn get_price_state(env: Env, resource: Symbol) -> Result<PriceState, PricingError> {
+        dynamic_pricing::get_price_state(&env, resource)
+    }
+
+    /// Rolling price history for a resource, oldest first.
+    pub fn get_pricing_history(env: Env, resource: Symbol) -> Vec<PricePoint> {
+        dynamic_pricing::get_pricing_history(&env, resource)
+    }
+
+    /// Harvest a resource and list it at the current dynamic market price,
+    /// instead of a caller-supplied price (#452).
+    pub fn list_at_market(
+        env: Env,
+        player: Address,
+        ship_id: u64,
+        layout: NebulaLayout,
+        resource: Symbol,
+    ) -> Result<(crate::resource_minter::HarvestResult, crate::resource_minter::DexOffer, i128), DynamicListError> {
+        dex_integration::list_at_market(&env, &player, ship_id, &layout, &resource)
     }
 
     // ─── Cross-Player Resource Gifting (#27) ──────────────────────────────
@@ -2648,7 +2887,7 @@ impl NebulaNomadContract {
         start_time: u64,
         reward_pool: i128,
     ) -> Result<u64, EventError> {
-        event_scheduler::schedule_event(&env, admin, event_type, start_time, reward_pool)
+        event_scheduler::schedule_event(&env, &admin, event_type, start_time, reward_pool)
     }
 
     /// Trigger a scheduled event when its time arrives.
@@ -2675,7 +2914,7 @@ impl NebulaNomadContract {
         admin: Address,
         reward_pool: i128,
     ) -> Result<u64, EventError> {
-        event_scheduler::schedule_weekly_festival(&env, admin, reward_pool)
+        event_scheduler::schedule_weekly_festival(&env, &admin, reward_pool)
     }
 
     /// Cancel a scheduled event (admin only).
@@ -2684,7 +2923,7 @@ impl NebulaNomadContract {
         admin: Address,
         event_id: u64,
     ) -> Result<(), EventError> {
-        event_scheduler::cancel_event(&env, admin, event_id)
+        event_scheduler::cancel_event(&env, &admin, event_id)
     }
 
     /// Update event participant count.
@@ -2704,6 +2943,108 @@ impl NebulaNomadContract {
     /// Reset event burst counter.
     pub fn reset_event_burst_counter(env: Env) {
         event_scheduler::reset_burst_counter(&env)
+    }
+
+    // ─── Seasons ──────────────────────────────────────────────────────────
+
+    /// Admin: start the first season.
+    pub fn init_season(env: Env, admin: Address, title: String) -> Result<u64, SeasonError> {
+        seasons::initialize_season(&env, &admin, title)
+    }
+
+    /// Get the current season.
+    pub fn get_current_season(env: Env) -> Result<Season, SeasonError> {
+        seasons::get_current_season(&env)
+    }
+
+    // ─── Time-Limited Seasonal Events ─────────────────────────────────────
+
+    /// Admin: schedule a time-limited seasonal event in the current season.
+    pub fn schedule_seasonal_event(
+        env: Env,
+        admin: Address,
+        config: SeasonalEventConfig,
+    ) -> Result<u64, EventError> {
+        event_scheduler::schedule_seasonal_event(&env, &admin, config)
+    }
+
+    /// Activate a seasonal event once its window opens.
+    pub fn activate_seasonal_event(env: Env, event_id: u64) -> Result<SeasonalEvent, EventError> {
+        event_scheduler::activate_seasonal_event(&env, event_id)
+    }
+
+    /// End a seasonal event once its window closes and start its cooldown.
+    pub fn end_seasonal_event(env: Env, event_id: u64) -> Result<SeasonalEvent, EventError> {
+        event_scheduler::end_seasonal_event(&env, event_id)
+    }
+
+    /// Admin: cancel a scheduled or active seasonal event.
+    pub fn cancel_seasonal_event(env: Env, admin: Address, event_id: u64) -> Result<(), EventError> {
+        event_scheduler::cancel_seasonal_event(&env, &admin, event_id)
+    }
+
+    /// Admin: attach an event-specific challenge to a seasonal event.
+    pub fn add_seasonal_event_challenge(
+        env: Env,
+        admin: Address,
+        event_id: u64,
+        spec: SeasonalChallengeSpec,
+    ) -> Result<u64, EventError> {
+        event_scheduler::add_seasonal_event_challenge(&env, &admin, event_id, spec)
+    }
+
+    /// Record points a player earned during a live seasonal event.
+    pub fn record_seasonal_event_points(
+        env: Env,
+        event_id: u64,
+        profile_id: u64,
+        points: u64,
+    ) -> Result<u64, EventError> {
+        event_scheduler::record_seasonal_event_points(&env, event_id, profile_id, points)
+    }
+
+    /// Claim a player's share of an ended seasonal event's reward pool.
+    pub fn claim_seasonal_event_reward(
+        env: Env,
+        player: Address,
+        event_id: u64,
+        profile_id: u64,
+    ) -> Result<i128, EventError> {
+        event_scheduler::claim_seasonal_event_reward(&env, &player, event_id, profile_id)
+    }
+
+    /// Get a seasonal event by ID.
+    pub fn get_seasonal_event(env: Env, event_id: u64) -> Result<SeasonalEvent, EventError> {
+        event_scheduler::get_seasonal_event(&env, event_id)
+    }
+
+    /// IDs of seasonal events that are scheduled or active.
+    pub fn get_pending_seasonal_events(env: Env) -> Vec<u64> {
+        event_scheduler::get_pending_seasonal_events(&env)
+    }
+
+    /// A player's participation in a seasonal event.
+    pub fn get_seasonal_event_entry(
+        env: Env,
+        event_id: u64,
+        profile_id: u64,
+    ) -> Option<SeasonalEventEntry> {
+        event_scheduler::get_seasonal_event_entry(&env, event_id, profile_id)
+    }
+
+    /// Timestamp before which no new event of `category` may start.
+    pub fn get_event_category_cooldown(env: Env, category: Symbol) -> u64 {
+        event_scheduler::get_category_cooldown(&env, category)
+    }
+
+    /// Record progress on a time-limited (or event-specific) challenge.
+    pub fn record_challenge_progress(
+        env: Env,
+        profile_id: u64,
+        challenge_id: u64,
+        metric_delta: u64,
+    ) -> Result<u64, EventError> {
+        event_scheduler::record_challenge_progress(&env, profile_id, challenge_id, metric_delta)
     }
 
     // ─── Ship Customization & Skins ───────────────────────────────────────
@@ -2798,6 +3139,38 @@ impl NebulaNomadContract {
 
     pub fn generate_economic_report(env: Env) -> (i128, i128, i128) {
         economics::balancer::generate_report(&env)
+    }
+
+    // ── Anti-Whale Economy Mechanics (Issue #455) ──────────────────────
+
+    pub fn process_anti_whale_action(
+        env: Env,
+        user: Address,
+        amount: u64,
+    ) -> Result<(u64, u64), AntiWhaleError> {
+        economics::anti_whale::process_anti_whale_action(&env, &user, amount)
+    }
+
+    pub fn set_anti_whale_cap(env: Env, admin: Address, cap: u64) {
+        admin.require_auth();
+        economics::anti_whale::set_daily_cap(&env, cap);
+    }
+
+    pub fn get_anti_whale_cap(env: Env) -> u64 {
+        economics::anti_whale::get_daily_cap(&env)
+    }
+
+    pub fn set_anti_whale_exempt(env: Env, admin: Address, user: Address, exempt: bool) {
+        admin.require_auth();
+        economics::anti_whale::set_exempt(&env, &user, exempt);
+    }
+
+    pub fn is_anti_whale_exempt(env: Env, user: Address) -> bool {
+        economics::anti_whale::is_exempt(&env, &user)
+    }
+
+    pub fn get_user_daily_volume(env: Env, user: Address) -> u64 {
+        economics::anti_whale::get_user_daily_volume(&env, &user)
     }
 
     // ─── Trading System ───────────────────────────────────────────────────

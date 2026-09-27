@@ -9,6 +9,23 @@ pub enum IndexerError {
     RateLimitExceeded = 3,
 }
 
+impl crate::error_standard::StandardContractError for IndexerError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::InvalidCallback => (ErrorKind::Validation, false),
+            Self::Unauthorized => (ErrorKind::Authorization, false),
+            Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "indexer_callbacks",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IndexerCallback {

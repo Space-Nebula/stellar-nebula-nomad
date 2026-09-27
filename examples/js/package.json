@@ -1,0 +1,26 @@
+{
+  "name": "stellar-nebula-nomad-examples",
+  "private": true,
+  "version": "1.0.0",
+  "description": "TypeScript dApp integration examples for Stellar Nebula Nomad contracts",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "nebula": "tsx nebula-exploration.ts",
+    "nebula-gen": "tsx nebula-generator.ts",
+    "ships": "tsx ship-nft.ts",
+    "onboarding": "tsx player-onboarding.ts",
+    "pvp": "tsx pvp-combat.ts",
+    "rbac": "tsx access-control.ts",
+    "events": "tsx events.ts",
+    "errors": "tsx error-handling.ts"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^11.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

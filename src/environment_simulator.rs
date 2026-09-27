@@ -29,6 +29,22 @@ pub enum EnvironmentError {
     SimulationFailed = 3,
 }
 
+impl crate::error_standard::StandardContractError for EnvironmentError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::InvalidCondition | Self::InvalidNebula => (ErrorKind::Validation, false),
+            Self::SimulationFailed => (ErrorKind::Internal, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "environment_simulator",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct EnvironmentCondition {

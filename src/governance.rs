@@ -13,6 +13,26 @@ pub enum GovError {
     NotAdmin = 7,
 }
 
+impl crate::error_standard::StandardContractError for GovError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        use crate::error_standard::ErrorKind;
+        let (kind, retryable) = match self {
+            Self::VotingClosed | Self::AlreadyVoted | Self::QuorumNotMet => {
+                (ErrorKind::Conflict, false)
+            }
+            Self::ProposalNotFound => (ErrorKind::NotFound, false),
+            Self::InsufficientEssence => (ErrorKind::ResourceLimit, false),
+            Self::NotDao | Self::NotAdmin => (ErrorKind::Authorization, false),
+        };
+        crate::error_standard::ErrorDescriptor {
+            module: "governance",
+            code: self as u32,
+            kind,
+            retryable,
+        }
+    }
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Proposal {
