@@ -551,31 +551,6 @@ impl NebulaGen {
     pub fn clean_expired_layout(env: Env, ship_id: u64) -> Result<bool, NebulaError> {
         let config = Self::require_config(&env)?;
         config.admin.require_auth();
-        let key = DataKey::ActiveLayout(ship_id);
-        let store = env.storage().persistent();
-        if let Some(layout) = store.get::<_, NebulaLayout>(&key) {
-            if is_expired(env.ledger().timestamp(), layout.generated_at, config.layout_ttl) {
-                store.remove(&key);
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
-    /// Delete multiple expired layouts in a batch operation. Admin only.
-    ///
-    /// Efficiently removes layouts for multiple ships if they have expired.
-    /// Returns the count of layouts actually deleted.
-    ///
-    /// # Parameters
-    /// - `env` - Soroban contract environment
-    /// - `ship_ids` - Vector of ship IDs to check and clean
-    ///
-    /// # Returns
-    /// Count of expired layouts that were successfully deleted.
-    pub fn clean_expired_layout(env: Env, ship_id: u64) -> Result<bool, NebulaError> {
-        let config = Self::require_config(&env)?;
-        config.admin.require_auth();
         let now = env.ledger().timestamp();
         Ok(Self::remove_if_expired(&env, &config, now, ship_id))
     }

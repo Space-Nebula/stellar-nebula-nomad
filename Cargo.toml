@@ -163,6 +163,10 @@ path = "tests/governance/test_governance.rs"
 name = "test_rbac"
 path = "tests/governance/test_rbac.rs"
 
+[[test]]
+name = "test_bug_bounty"
+path = "tests/governance/test_bug_bounty.rs"
+
 # Player-facing gameplay systems: ships, seasons, gifting, exploration
 [[test]]
 name = "test_difficulty_scaler"

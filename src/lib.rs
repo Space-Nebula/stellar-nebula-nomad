@@ -56,6 +56,7 @@ mod treasure_vault;
 
 mod yield_farming;
 pub mod governance;
+pub mod bug_bounty_payout;
 mod theme_customizer;
 mod indexer_callbacks;
 
@@ -430,6 +431,7 @@ pub use notifications::alerts::{check_low_resources, notify_rare_discovery, noti
 pub use mobile_views::{
     MobileDashboard, MobileBatchInfo, MobileViewError, QuickScanPreview,
 };
+pub use crate::bug_bounty_payout::*;
 
 #[contract]
 pub struct NebulaNomadContract;
@@ -3365,5 +3367,170 @@ impl NebulaNomadContract {
 
     pub fn claim_reputation_reward(env: Env, player: Address) -> Result<i128, ReputationError> {
         reputation::claim_reputation_reward(&env, &player)
+    }
+
+    /// Initialize the automated bug bounty payout engine.
+    pub fn init_bounty_engine(
+        env: Env,
+        admin: Address,
+        approvers: Vec<Address>,
+        approval_threshold: u32,
+        high_value_threshold: i128,
+        timelock_seconds: u64,
+    ) -> Result<(), BugBountyError> {
+        bug_bounty_payout::init_bounty_engine(
+            &env,
+            &admin,
+            approvers,
+            approval_threshold,
+            high_value_threshold,
+            timelock_seconds,
+        )
+    }
+
+    /// Deposit funds into the bug bounty reward pool.
+    pub fn fund_bounty_pool(env: Env, admin: Address, amount: i128) -> Result<i128, BugBountyError> {
+        bug_bounty_payout::fund_bounty_pool(&env, &admin, amount)
+    }
+
+    /// Submit a vulnerability report with duplicate detection.
+    pub fn submit_bug_report(
+        env: Env,
+        reporter: Address,
+        description: String,
+        severity: Symbol,
+    ) -> Result<u64, BugBountyError> {
+        bug_bounty_payout::submit_bug_report(&env, &reporter, description, severity)
+    }
+
+    /// Approve an open bug report and issue payout if consensus is reached.
+    pub fn approve_and_pay_bounty(
+        env: Env,
+        approver: Address,
+        report_id: u64,
+        amount: i128,
+    ) -> Result<bool, BugBountyError> {
+        bug_bounty_payout::approve_and_pay_bounty(&env, &approver, report_id, amount)
+    }
+
+    /// Approve and pay a batch of reports up to the burst limit.
+    pub fn approve_and_pay_bounty_burst(
+        env: Env,
+        approver: Address,
+        report_ids: Vec<u64>,
+        amounts: Vec<i128>,
+    ) -> Result<u32, BugBountyError> {
+        bug_bounty_payout::approve_and_pay_bounty_burst(&env, &approver, report_ids, amounts)
+    }
+
+    /// Reject a bug report with feedback from an authorized reviewer.
+    pub fn reject_bug_report(
+        env: Env,
+        reviewer: Address,
+        report_id: u64,
+        feedback: String,
+    ) -> Result<(), BugBountyError> {
+        bug_bounty_payout::reject_bug_report(&env, &reviewer, report_id, feedback)
+    }
+
+    /// Reclassify a bug report severity tier and adjust default reward.
+    pub fn reclassify_severity(
+        env: Env,
+        reviewer: Address,
+        report_id: u64,
+        new_severity: Symbol,
+    ) -> Result<(), BugBountyError> {
+        bug_bounty_payout::reclassify_severity(&env, &reviewer, report_id, new_severity)
+    }
+
+    /// Configure the reward amount for a severity level.
+    pub fn set_reward_tier(
+        env: Env,
+        admin: Address,
+        severity: Symbol,
+        amount: i128,
+    ) -> Result<(), BugBountyError> {
+        bug_bounty_payout::set_reward_tier(&env, &admin, severity, amount)
+    }
+
+    /// Retrieve the configured reward amount for a severity level.
+    pub fn get_reward_tier(env: Env, severity: Symbol) -> Option<i128> {
+        bug_bounty_payout::get_reward_tier(&env, severity)
+    }
+
+    /// Retrieve cumulative bounty payouts distributed by the contract.
+    pub fn get_total_bounties_paid(env: Env) -> i128 {
+        bug_bounty_payout::get_total_bounties_paid(&env)
+    }
+
+    /// Check if a bug report has passed its 90-day embargo period.
+    pub fn can_disclose_report(env: Env, report_id: u64) -> Result<bool, BugBountyError> {
+        bug_bounty_payout::can_disclose_report(&env, report_id)
+    }
+
+    /// Mark a bug report as publicly disclosed after embargo expiry.
+    pub fn disclose_bug_report(
+        env: Env,
+        caller: Address,
+        report_id: u64,
+    ) -> Result<(), BugBountyError> {
+        bug_bounty_payout::disclose_bug_report(&env, &caller, report_id)
+    }
+
+    /// Retrieve performance metrics for an individual security researcher.
+    pub fn get_researcher_stats(env: Env, researcher: Address) -> ResearcherStats {
+        bug_bounty_payout::get_researcher_stats(&env, &researcher)
+    }
+
+    /// Retrieve the list of researchers with approved bounty disclosures.
+    pub fn get_hall_of_fame(env: Env) -> Vec<Address> {
+        bug_bounty_payout::get_hall_of_fame(&env)
+    }
+
+    /// Allocate funding to the bounty pool from governance or treasury.
+    pub fn allocate_bounty_gov_budget(
+        env: Env,
+        governance_caller: Address,
+        amount: i128,
+    ) -> Result<i128, BugBountyError> {
+        bug_bounty_payout::allocate_bounty_gov_budget(&env, &governance_caller, amount)
+    }
+
+    /// Set authorized DAO contract address for bounty budget allocations.
+    pub fn set_governance_contract(
+        env: Env,
+        admin: Address,
+        dao: Address,
+    ) -> Result<(), BugBountyError> {
+        bug_bounty_payout::set_governance_contract(&env, &admin, &dao)
+    }
+
+    /// Toggle emergency pause state for the bounty engine.
+    pub fn set_emergency_pause(env: Env, admin: Address, paused: bool) -> Result<(), BugBountyError> {
+        bug_bounty_payout::set_emergency_pause(&env, &admin, paused)
+    }
+
+    /// Toggle community-voted mode for bug report evaluation.
+    pub fn set_community_voted_mode(
+        env: Env,
+        admin: Address,
+        enabled: bool,
+    ) -> Result<(), BugBountyError> {
+        bug_bounty_payout::set_community_voted_mode(&env, &admin, enabled)
+    }
+
+    /// Retrieve a submitted bug report by identifier.
+    pub fn get_report(env: Env, report_id: u64) -> Option<BugReport> {
+        bug_bounty_payout::get_report(&env, report_id)
+    }
+
+    /// Retrieve the claimable bounty balance for a security researcher.
+    pub fn get_bounty_balance(env: Env, reporter: Address) -> i128 {
+        bug_bounty_payout::get_bounty_balance(&env, &reporter)
+    }
+
+    /// Retrieve the current balance in the bounty pool.
+    pub fn get_bounty_pool(env: Env) -> i128 {
+        bug_bounty_payout::get_bounty_pool(&env)
     }
 }
