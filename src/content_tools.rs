@@ -204,8 +204,7 @@ pub fn create_content(
 ) -> Result<u64, ContentToolsError> {
     creator.require_auth();
 
-    input_validation::validate_name(env, &name)
-        .map_err(|_| ContentToolsError::InvalidContent)?;
+    input_validation::validate_name(env, &name).map_err(|_| ContentToolsError::InvalidContent)?;
     input_validation::validate_description(env, &description)
         .map_err(|_| ContentToolsError::InvalidContent)?;
 
@@ -896,7 +895,7 @@ mod tests {
 
     fn make_env() -> (Env, soroban_sdk::Address) {
         let env = Env::default();
-        let id = env.register_contract(None, Stub);
+        let id = env.register(Stub, ());
         (env, id)
     }
 

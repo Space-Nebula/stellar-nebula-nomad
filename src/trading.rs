@@ -83,6 +83,8 @@ pub enum TradingError {
     OrderCapReached = 4,
     InvalidPrice = 5,
     InvalidQuantity = 6,
+    /// A guarded section was re-entered (Issue #472).
+    Reentrancy = 7,
 }
 
 impl crate::error_standard::StandardContractError for TradingError {
@@ -95,6 +97,7 @@ impl crate::error_standard::StandardContractError for TradingError {
             Self::OrderNotFound => (ErrorKind::NotFound, false),
             Self::NotOrderOwner => (ErrorKind::Authorization, false),
             Self::OrderCapReached => (ErrorKind::ResourceLimit, false),
+            Self::Reentrancy => (ErrorKind::Conflict, false),
         };
         crate::error_standard::ErrorDescriptor {
             module: "trading",
@@ -102,6 +105,12 @@ impl crate::error_standard::StandardContractError for TradingError {
             kind,
             retryable,
         }
+    }
+}
+
+impl From<ReentrancyError> for TradingError {
+    fn from(_: ReentrancyError) -> Self {
+        TradingError::Reentrancy
     }
 }
 
@@ -124,7 +133,23 @@ fn next_order_id(env: &Env) -> u64 {
 /// Place a limit order (buy or sell). Emits `OrderPlaced`.
 ///
 /// Returns the new order ID.
+///
+/// # Reentrancy
+/// Runs under the global reentrancy guard (Issue #472): every check and state
+/// effect completes while the lock is held, following checks-effects-
+/// interactions, so a nested call into any guarded entry point while this one
+/// is in flight is rejected with a `Reentrancy` error.
 pub fn place_limit_order(
+    env: &Env,
+    trader: &Address,
+    order: LimitOrder,
+) -> Result<u64, TradingError> {
+    with_guard(env, || place_limit_order_unguarded(env, trader, order))
+}
+
+/// Unguarded body of [`place_limit_order`]; callers must already hold the
+/// reentrancy lock (e.g. another guarded entry point composing it).
+fn place_limit_order_unguarded(
     env: &Env,
     trader: &Address,
     mut order: LimitOrder,
@@ -172,7 +197,23 @@ pub fn place_limit_order(
 }
 
 /// Cancel an open limit order (owner only). Emits `OrderCancelled`.
+///
+/// # Reentrancy
+/// Runs under the global reentrancy guard (Issue #472): every check and state
+/// effect completes while the lock is held, following checks-effects-
+/// interactions, so a nested call into any guarded entry point while this one
+/// is in flight is rejected with a `Reentrancy` error.
 pub fn cancel_limit_order(env: &Env, trader: &Address, order_id: u64) -> Result<(), TradingError> {
+    with_guard(env, || cancel_limit_order_unguarded(env, trader, order_id))
+}
+
+/// Unguarded body of [`cancel_limit_order`]; callers must already hold the
+/// reentrancy lock (e.g. another guarded entry point composing it).
+fn cancel_limit_order_unguarded(
+    env: &Env,
+    trader: &Address,
+    order_id: u64,
+) -> Result<(), TradingError> {
     trader.require_auth();
 
     let order: LimitOrder = env
@@ -185,6 +226,18 @@ pub fn cancel_limit_order(env: &Env, trader: &Address, order_id: u64) -> Result<
         return Err(TradingError::NotOrderOwner);
     }
 
+    remove_order(env, trader, order_id);
+
+    env.events().publish(
+        (symbol_short!("trade"), symbol_short!("cancel")),
+        (trader.clone(), order_id),
+    );
+
+    Ok(())
+}
+
+/// Delete an order and drop it from its trader's open-order list.
+fn remove_order(env: &Env, trader: &Address, order_id: u64) {
     env.storage()
         .persistent()
         .remove(&TradingKey::Order(order_id));
@@ -196,8 +249,7 @@ pub fn cancel_limit_order(env: &Env, trader: &Address, order_id: u64) -> Result<
         .get(&TradingKey::TraderOrders(trader.clone()))
         .unwrap_or_else(|| Vec::new(env));
     let mut new_ids: Vec<u64> = Vec::new(env);
-    for i in 0..ids.len() {
-        let oid = ids.get(i).unwrap();
+    for oid in ids.iter() {
         if oid != order_id {
             new_ids.push_back(oid);
         }
@@ -205,13 +257,43 @@ pub fn cancel_limit_order(env: &Env, trader: &Address, order_id: u64) -> Result<
     env.storage()
         .persistent()
         .set(&TradingKey::TraderOrders(trader.clone()), &new_ids);
+}
 
-    env.events().publish(
-        (symbol_short!("trade"), symbol_short!("cancel")),
-        (trader.clone(), order_id),
-    );
+/// Consume `quantity` units of an open order, as when a counterparty fills it.
+///
+/// The order's remaining quantity is reduced; once it reaches zero the order
+/// is removed exactly as a cancellation would. Returns the order as it was
+/// *before* the fill. Auth is the caller's responsibility: the counterparty
+/// consents by filling, the order owner consented when placing it.
+///
+/// Used by [`crate::dex_integration::sell_to_order`].
+pub(crate) fn fill_limit_order(
+    env: &Env,
+    order_id: u64,
+    quantity: i128,
+) -> Result<LimitOrder, TradingError> {
+    let order: LimitOrder = env
+        .storage()
+        .persistent()
+        .get(&TradingKey::Order(order_id))
+        .ok_or(TradingError::OrderNotFound)?;
 
-    Ok(())
+    if quantity <= 0 || quantity > order.quantity {
+        return Err(TradingError::InvalidQuantity);
+    }
+
+    let remaining = order.quantity - quantity;
+    if remaining == 0 {
+        remove_order(env, &order.trader, order_id);
+    } else {
+        let mut updated = order.clone();
+        updated.quantity = remaining;
+        env.storage()
+            .persistent()
+            .set(&TradingKey::Order(order_id), &updated);
+    }
+
+    Ok(order)
 }
 
 /// Get a limit order by ID.
@@ -238,9 +320,39 @@ pub fn get_trader_orders(env: &Env, trader: &Address) -> Vec<LimitOrder> {
 }
 
 /// Record a completed trade in the history ring buffer. Emits `TradeExecuted`.
+///
+/// # Reentrancy
+/// Runs under the global reentrancy guard (Issue #472): every check and state
+/// effect completes while the lock is held, following checks-effects-
+/// interactions, so a nested call into any guarded entry point while this one
+/// is in flight is rejected with a `Reentrancy` error.
 pub fn record_trade(env: &Env, caller: &Address, trade: TradeRecord) -> Result<(), TradingError> {
+    with_guard(env, || record_trade_unguarded(env, caller, trade))
+}
+
+/// Unguarded body of [`record_trade`]; callers must already hold the
+/// reentrancy lock (e.g. another guarded entry point composing it).
+fn record_trade_unguarded(
+    env: &Env,
+    caller: &Address,
+    trade: TradeRecord,
+) -> Result<(), TradingError> {
     caller.require_auth();
 
+    push_trade_record(env, trade.clone());
+
+    env.events().publish(
+        (symbol_short!("trade"), symbol_short!("exec")),
+        (caller.clone(), trade.order_id, trade.price, trade.quantity),
+    );
+
+    Ok(())
+}
+
+/// Append `trade` to the history ring buffer, trimming the oldest records so
+/// at most [`MAX_HISTORY`] are kept. Emits nothing; callers publish their own
+/// event.
+pub(crate) fn push_trade_record(env: &Env, trade: TradeRecord) {
     let mut history: Vec<TradeRecord> = env
         .storage()
         .persistent()
@@ -257,17 +369,10 @@ pub fn record_trade(env: &Env, caller: &Address, trade: TradeRecord) -> Result<(
         history = trimmed;
     }
 
-    history.push_back(trade.clone());
+    history.push_back(trade);
     env.storage()
         .persistent()
         .set(&TradingKey::History, &history);
-
-    env.events().publish(
-        (symbol_short!("trade"), symbol_short!("exec")),
-        (caller.clone(), trade.order_id, trade.price, trade.quantity),
-    );
-
-    Ok(())
 }
 
 /// Return the full trading history (up to `MAX_HISTORY` records).
@@ -499,7 +604,27 @@ pub fn create_pool(
 
 /// Add liquidity to a pool. Provider receives LP tokens proportional to their share.
 /// Returns (lp_tokens_minted, pool after state).
+///
+/// # Reentrancy
+/// Runs under the global reentrancy guard (Issue #472): every check and state
+/// effect completes while the lock is held, following checks-effects-
+/// interactions, so a nested call into any guarded entry point while this one
+/// is in flight is rejected with a `Reentrancy` error.
 pub fn add_liquidity(
+    env: &Env,
+    provider: &Address,
+    pool_id: u64,
+    amount_a: i128,
+    amount_b: i128,
+) -> Result<(i128, LiquidityPool), AmmError> {
+    with_guard(env, || {
+        add_liquidity_unguarded(env, provider, pool_id, amount_a, amount_b)
+    })
+}
+
+/// Unguarded body of [`add_liquidity`]; callers must already hold the
+/// reentrancy lock (e.g. another guarded entry point composing it).
+fn add_liquidity_unguarded(
     env: &Env,
     provider: &Address,
     pool_id: u64,
@@ -568,7 +693,26 @@ pub fn add_liquidity(
 }
 
 /// Remove liquidity by burning LP tokens. Provider receives proportional reserves.
+///
+/// # Reentrancy
+/// Runs under the global reentrancy guard (Issue #472): every check and state
+/// effect completes while the lock is held, following checks-effects-
+/// interactions, so a nested call into any guarded entry point while this one
+/// is in flight is rejected with a `Reentrancy` error.
 pub fn remove_liquidity(
+    env: &Env,
+    provider: &Address,
+    pool_id: u64,
+    lp_amount: i128,
+) -> Result<(i128, i128), AmmError> {
+    with_guard(env, || {
+        remove_liquidity_unguarded(env, provider, pool_id, lp_amount)
+    })
+}
+
+/// Unguarded body of [`remove_liquidity`]; callers must already hold the
+/// reentrancy lock (e.g. another guarded entry point composing it).
+fn remove_liquidity_unguarded(
     env: &Env,
     provider: &Address,
     pool_id: u64,
@@ -847,6 +991,69 @@ mod tests {
             let out = swap_exact_input(&env, &trader, resource_a, 100, 0, route)
                 .expect("swap should succeed once unlocked");
             assert!(out > 0);
+        });
+    }
+
+    #[test]
+    fn test_liquidity_ops_rejected_while_guard_held() {
+        // Re-entering add/remove liquidity mid-call must not let a nested
+        // invocation mint or burn LP tokens against stale reserves (Issue #472).
+        let (env, contract_id) = make_env();
+        let provider = Address::generate(&env);
+        let resource_a = Symbol::new(&env, "stdust");
+        let resource_b = Symbol::new(&env, "drmatt");
+
+        let pool_id = env.as_contract(&contract_id, || {
+            seed_pool(&env, &provider, resource_a, resource_b)
+        });
+
+        env.as_contract(&contract_id, || {
+            let lp_before = get_lp_balance(&env, pool_id, &provider);
+
+            crate::reentrancy_guard::acquire(&env).expect("lock should be free");
+            assert_eq!(
+                add_liquidity(&env, &provider, pool_id, 500, 500).map(|(lp, _)| lp),
+                Err(AmmError::Reentrancy)
+            );
+            assert_eq!(
+                remove_liquidity(&env, &provider, pool_id, 100),
+                Err(AmmError::Reentrancy)
+            );
+            crate::reentrancy_guard::release(&env);
+
+            // Neither rejected call touched reserves or LP balances.
+            let pool = get_pool(&env, pool_id).unwrap();
+            assert_eq!((pool.reserve_a, pool.reserve_b), (10_000, 10_000));
+            assert_eq!(get_lp_balance(&env, pool_id, &provider), lp_before);
+        });
+
+        env.as_contract(&contract_id, || {
+            let (out_a, out_b) = remove_liquidity(&env, &provider, pool_id, 100)
+                .expect("remove_liquidity should succeed once unlocked");
+            assert!(out_a > 0 && out_b > 0);
+        });
+    }
+
+    #[test]
+    fn test_limit_order_ops_rejected_while_guard_held() {
+        let (env, contract_id) = make_env();
+        let trader = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            crate::reentrancy_guard::acquire(&env).expect("lock should be free");
+            assert_eq!(
+                cancel_limit_order(&env, &trader, 1),
+                Err(TradingError::Reentrancy)
+            );
+            crate::reentrancy_guard::release(&env);
+        });
+
+        // Unlocked, the call reaches its normal checks.
+        env.as_contract(&contract_id, || {
+            assert_eq!(
+                cancel_limit_order(&env, &trader, 1),
+                Err(TradingError::OrderNotFound)
+            );
         });
     }
 

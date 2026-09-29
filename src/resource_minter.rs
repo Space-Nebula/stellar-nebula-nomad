@@ -8,11 +8,14 @@
 //     at the top of mint_resource() before any state mutation.
 //   • RateLimitHit events are emitted inside check_rate_limit.
 
+use crate::economics::anti_whale::{process_anti_whale_action, AntiWhaleError};
 use crate::nebula_explorer::{CellType, NebulaLayout};
 use crate::nebula_gen::{NebulaError as NebulaGenError, NebulaGen};
 use crate::rate_limiter::{check_rate_limit, Operation, RateLimitError};
-use crate::economics::anti_whale::{process_anti_whale_action, AntiWhaleError};
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec};
+use crate::reentrancy_guard::{with_guard, ReentrancyError};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec,
+};
 
 pub type AssetId = ResourceType;
 
@@ -114,6 +117,8 @@ pub enum MinterError {
     InsufficientBalance = 205,
     /// Requested amount exceeds anti-whale daily operation cap (Issue #455).
     DailyCapExceeded = 206,
+    /// A guarded section was re-entered (Issue #472).
+    Reentrancy = 207,
 }
 
 impl From<AntiWhaleError> for MinterError {
@@ -136,6 +141,7 @@ impl crate::error_standard::StandardContractError for MinterError {
             Self::ArithmeticOverflow | Self::InsufficientBalance | Self::DailyCapExceeded => {
                 (ErrorKind::ResourceLimit, false)
             }
+            Self::Reentrancy => (ErrorKind::Conflict, false),
         };
         crate::error_standard::ErrorDescriptor {
             module: "resource_minter",
@@ -143,6 +149,12 @@ impl crate::error_standard::StandardContractError for MinterError {
             kind,
             retryable,
         }
+    }
+}
+
+impl From<ReentrancyError> for MinterError {
+    fn from(_: ReentrancyError) -> Self {
+        MinterError::Reentrancy
     }
 }
 
@@ -161,6 +173,11 @@ impl ResourceMinterContract {
     /// Mint `amount` units of `resource_type` for `caller`.
     ///
     /// Rate-limited to prevent spam (Issue #175).
+    ///
+    /// # Reentrancy
+    /// Runs under the global reentrancy guard (Issue #472). Balance, supply
+    /// and mint counters are all written before the `minted` event is
+    /// published, so a nested call can never observe a half-applied mint.
     pub fn mint_resource(
         env: &Env,
         caller: Address,
@@ -188,8 +205,7 @@ impl ResourceMinterContract {
         })?;
 
         // ── Anti-Whale check (Issue #455) ─────────────────────
-        let (effective_amount, _progressive_fee) =
-            process_anti_whale_action(env, &caller, amount)?;
+        let (effective_amount, _progressive_fee) = process_anti_whale_action(env, &caller, amount)?;
 
         // ── Update balances (checked: Issue #239) ──────────────
         let balance_key = MinterKey::Balance(caller.clone(), resource_type.clone());
@@ -231,6 +247,9 @@ impl ResourceMinterContract {
         );
 
         Ok(record)
+        with_guard(env, || {
+            mint_resource_unguarded(env, caller, ship_id, anomaly_index, resource_type, amount)
+        })
     }
 
     /// Query the balance of `owner` for `resource_type`.
@@ -253,6 +272,76 @@ impl ResourceMinterContract {
     pub fn total_minted(env: &Env, resource_type: ResourceType) -> u64 {
         self::total_minted(env, &resource_type)
     }
+}
+
+/// Unguarded body of [`ResourceMinterContract::mint_resource`]; callers must
+/// already hold the reentrancy lock.
+fn mint_resource_unguarded(
+    env: &Env,
+    caller: Address,
+    ship_id: u64,
+    anomaly_index: u32,
+    resource_type: ResourceType,
+    amount: u64,
+) -> Result<ResourceRecord, MinterError> {
+    // ── Rate limit check (Issue #175) ──────────────────────
+    check_rate_limit(env, &caller, Operation::ResourceMinting).map_err(MinterError::from)?;
+
+    // ── Basic validation ───────────────────────────────────
+    if amount == 0 {
+        return Err(MinterError::InvalidAmount);
+    }
+
+    // ── Confirm anomaly exists for this ship ───────────────
+    NebulaGen::has_anomaly(env.clone(), ship_id, anomaly_index).map_err(|e| match e {
+        NebulaGenError::LayoutNotFound => MinterError::NoLayoutForShip,
+        NebulaGenError::AnomalyOutOfBounds => MinterError::NoResourceAtAnomaly,
+        _ => MinterError::NoLayoutForShip,
+    })?;
+
+    // ── Anti-Whale check (Issue #455) ─────────────────────
+    let (effective_amount, _progressive_fee) = process_anti_whale_action(env, &caller, amount)?;
+
+    // ── Update balances (checked: Issue #239) ──────────────
+    let balance_key = MinterKey::Balance(caller.clone(), resource_type.clone());
+    let current: u64 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+    let new_balance = current
+        .checked_add(effective_amount)
+        .ok_or(MinterError::ArithmeticOverflow)?;
+    env.storage().persistent().set(&balance_key, &new_balance);
+
+    let supply_key = MinterKey::TotalSupply(resource_type.clone());
+    let supply: u64 = env.storage().persistent().get(&supply_key).unwrap_or(0);
+    let new_supply = supply
+        .checked_add(effective_amount)
+        .ok_or(MinterError::ArithmeticOverflow)?;
+    env.storage().persistent().set(&supply_key, &new_supply);
+
+    // ── Cumulative mint counter (Issue #281) ───────────────
+    // Unlike TotalSupply this is monotonic — burning reduces supply but
+    // never the historical mint total, which is the denominator of the
+    // deflation rate.
+    let minted_key = MinterKey::TotalMinted(resource_type.clone());
+    let minted: u64 = env.storage().persistent().get(&minted_key).unwrap_or(0);
+    let new_minted = minted
+        .checked_add(effective_amount)
+        .ok_or(MinterError::ArithmeticOverflow)?;
+    env.storage().persistent().set(&minted_key, &new_minted);
+
+    let record = ResourceRecord {
+        owner: caller.clone(),
+        resource_type: resource_type.clone(),
+        amount: effective_amount,
+        minted_at: env.ledger().timestamp(),
+    };
+
+    // ── Emit event ─────────────────────────────────────────
+    env.events().publish(
+        (symbol_short!("Minter"), symbol_short!("minted")),
+        (caller, resource_type, effective_amount),
+    );
+
+    Ok(record)
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -510,6 +599,18 @@ pub enum HarvestError {
     DexFailure = 6,
     /// Seller does not hold enough of `resource` to cover the listing.
     InsufficientBalance = 7,
+    /// A guarded section was re-entered (Issue #472).
+    Reentrancy = 8,
+    /// Buyer and seller are the same address.
+    SelfTrade = 9,
+    /// The offer's price is above the buyer's `max_price`, or the order's
+    /// price is below the seller's `min_price`.
+    SlippageExceeded = 10,
+    /// Requested amount is zero or larger than what the offer/order holds.
+    InvalidAmount = 11,
+    /// The limit order does not exist, is not a buy order, or is for a
+    /// different resource.
+    OrderUnavailable = 12,
 }
 
 impl crate::error_standard::StandardContractError for HarvestError {
@@ -520,6 +621,10 @@ impl crate::error_standard::StandardContractError for HarvestError {
             Self::EmptyHarvest | Self::InvalidPrice => (ErrorKind::Validation, false),
             Self::PriceOverflow | Self::DexFailure => (ErrorKind::Internal, false),
             Self::InsufficientBalance => (ErrorKind::ResourceLimit, false),
+            Self::Reentrancy | Self::SelfTrade => (ErrorKind::Conflict, false),
+            Self::SlippageExceeded => (ErrorKind::Conflict, true),
+            Self::InvalidAmount => (ErrorKind::Validation, false),
+            Self::OrderUnavailable => (ErrorKind::NotFound, false),
         };
         crate::error_standard::ErrorDescriptor {
             module: "resource_minter",
@@ -527,6 +632,12 @@ impl crate::error_standard::StandardContractError for HarvestError {
             kind,
             retryable,
         }
+    }
+}
+
+impl From<ReentrancyError> for HarvestError {
+    fn from(_: ReentrancyError) -> Self {
+        HarvestError::Reentrancy
     }
 }
 
@@ -545,6 +656,15 @@ pub(crate) fn next_dex_offer_id(env: &Env) -> Result<u64, HarvestError> {
         .instance()
         .set(&ResourceKey::DexOfferCounter, &next);
     Ok(next)
+}
+
+/// Highest DEX offer ID allocated so far (`0` when none exist). Offer IDs are
+/// dense, so `1..=dex_offer_count()` enumerates every offer ever created.
+pub(crate) fn dex_offer_count(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&ResourceKey::DexOfferCounter)
+        .unwrap_or(0)
 }
 
 /// Read a holder's harvest balance for `asset`.
@@ -584,7 +704,23 @@ pub fn credit_resource_balance(
 ///
 /// # Errors
 /// See [`HarvestError`].
+///
+/// # Reentrancy
+/// Runs under the global reentrancy guard (Issue #472): every check and state
+/// effect completes while the lock is held, following checks-effects-
+/// interactions, so a nested call into any guarded entry point while this one
+/// is in flight is rejected with a `Reentrancy` error.
 pub fn harvest_resources(
+    env: &Env,
+    ship_id: u64,
+    layout: &NebulaLayout,
+) -> Result<HarvestResult, HarvestError> {
+    with_guard(env, || harvest_resources_unguarded(env, ship_id, layout))
+}
+
+/// Unguarded body of [`harvest_resources`]; callers must already hold the
+/// reentrancy lock (e.g. another guarded entry point composing it).
+pub(crate) fn harvest_resources_unguarded(
     env: &Env,
     ship_id: u64,
     layout: &NebulaLayout,
@@ -643,7 +779,26 @@ pub fn harvest_resources(
 ///
 /// # Errors
 /// See [`HarvestError`].
+///
+/// # Reentrancy
+/// Runs under the global reentrancy guard (Issue #472): every check and state
+/// effect completes while the lock is held, following checks-effects-
+/// interactions, so a nested call into any guarded entry point while this one
+/// is in flight is rejected with a `Reentrancy` error.
 pub fn auto_list_on_dex(
+    env: &Env,
+    player: &Address,
+    resource: &Symbol,
+    min_price: i128,
+) -> Result<DexOffer, HarvestError> {
+    with_guard(env, || {
+        auto_list_on_dex_unguarded(env, player, resource, min_price)
+    })
+}
+
+/// Unguarded body of [`auto_list_on_dex`]; callers must already hold the
+/// reentrancy lock (e.g. another guarded entry point composing it).
+fn auto_list_on_dex_unguarded(
     env: &Env,
     player: &Address,
     resource: &Symbol,
@@ -679,6 +834,7 @@ pub fn auto_list_on_dex(
     env.storage()
         .instance()
         .set(&ResourceKey::DexOffer(offer_id), &offer);
+    crate::dex_integration::note_listing_opened(env, player);
 
     env.events().publish(
         (symbol_short!("dex"), symbol_short!("listed")),
@@ -754,16 +910,49 @@ mod tests {
         let env = make_env();
         let caller = Address::generate(&env);
         let result = in_contract(&env, || {
-            ResourceMinterContract::mint_resource(
+            ResourceMinterContract::mint_resource(&env, caller, 1, 0, ResourceType::StellarDust, 0)
+        });
+        assert_eq!(result, Err(MinterError::InvalidAmount));
+    }
+
+    #[test]
+    fn test_mint_rejected_while_guard_held() {
+        // Simulates a callback re-entering mint_resource while an earlier
+        // guarded invocation is still in flight (Issue #472).
+        let env = make_env();
+        let caller = Address::generate(&env);
+        let contract = env.register(ResourceMinterContract, ());
+
+        env.as_contract(&contract, || {
+            crate::reentrancy_guard::acquire(&env).expect("lock should be free");
+            let result = ResourceMinterContract::mint_resource(
                 &env,
-                caller,
+                caller.clone(),
+                1,
+                0,
+                ResourceType::StellarDust,
+                5,
+            );
+            assert_eq!(result, Err(MinterError::Reentrancy));
+            crate::reentrancy_guard::release(&env);
+
+            // The rejected call minted nothing.
+            assert_eq!(balance_of(&env, &caller, &ResourceType::StellarDust), 0);
+            assert_eq!(circulating_supply(&env, &ResourceType::StellarDust), 0);
+        });
+
+        // With the lock released the call proceeds past the guard to validation.
+        env.as_contract(&contract, || {
+            let result = ResourceMinterContract::mint_resource(
+                &env,
+                caller.clone(),
                 1,
                 0,
                 ResourceType::StellarDust,
                 0,
-            )
+            );
+            assert_eq!(result, Err(MinterError::InvalidAmount));
         });
-        assert_eq!(result, Err(MinterError::InvalidAmount));
     }
 
     #[test]
@@ -969,7 +1158,6 @@ mod tests {
         use crate::nebula_explorer::{CellType, NebulaCell};
         use soroban_sdk::contractimpl;
         use soroban_sdk::testutils::{Events as _, Ledger, LedgerInfo};
-        use soroban_sdk::Address as _;
 
         #[contract]
         struct Stub;
@@ -1048,7 +1236,7 @@ mod tests {
 
         /// Register a ship owned by `owner` and return its ID.
         fn ship_for(env: &Env, owner: &Address) -> u64 {
-            ship_nft::mint_ship(
+            crate::ship_nft::mint_ship(
                 env,
                 owner,
                 &soroban_sdk::symbol_short!("explorer"),
@@ -1112,7 +1300,7 @@ mod tests {
             let to = Address::generate(env);
 
             let ship_id = c.invoke(|env| ship_for(env, &from));
-            c.invoke(|env| ship_nft::transfer_ship(env, ship_id, &from, &to).unwrap());
+            c.invoke(|env| crate::ship_nft::transfer_ship(env, ship_id, &from, &to).unwrap());
 
             let layout = layout_with(env, CellType::DarkMatter, 12);
             c.invoke(|env| harvest_resources(env, ship_id, &layout).unwrap());
@@ -1243,11 +1431,11 @@ mod tests {
                 let owner = Address::generate(env);
                 let ship_id = ship_for(env, &owner);
                 let layout = layout_with(env, CellType::Wormhole, 8);
-                let before = env.events().all().len();
+                let before = env.events().all().events().len();
 
                 harvest_resources(env, ship_id, &layout).unwrap();
 
-                assert_eq!(env.events().all().len(), before + 1);
+                assert_eq!(env.events().all().events().len(), before + 1);
             });
         }
 
@@ -1357,11 +1545,125 @@ mod tests {
                 let seller = Address::generate(env);
                 let asset = soroban_sdk::symbol_short!("dust");
                 credit_resource_balance(env, &seller, &asset, 4).unwrap();
-                let before = env.events().all().len();
+                let before = env.events().all().events().len();
 
                 auto_list_on_dex(env, &seller, &asset, 2).unwrap();
 
-                assert_eq!(env.events().all().len(), before + 1);
+                assert_eq!(env.events().all().events().len(), before + 1);
+            });
+        }
+
+        // ── Reentrancy protection (Issue #472) ──────────────────
+
+        #[test]
+        fn harvest_is_rejected_while_guard_held() {
+            let c = Contract::new();
+            let env = c.env();
+            let owner = Address::generate(env);
+            let ship_id = c.invoke(|env| ship_for(env, &owner));
+            let layout = layout_with(env, CellType::StellarDust, 40);
+            let dust = soroban_sdk::symbol_short!("dust");
+
+            c.invoke(|env| {
+                crate::reentrancy_guard::acquire(env).expect("lock should be free");
+                assert_eq!(
+                    harvest_resources(env, ship_id, &layout),
+                    Err(HarvestError::Reentrancy)
+                );
+                crate::reentrancy_guard::release(env);
+                // The rejected harvest credited nothing.
+                assert_eq!(resource_balance(env, &owner, &dust), 0);
+            });
+
+            c.invoke(|env| {
+                harvest_resources(env, ship_id, &layout).unwrap();
+                assert_eq!(resource_balance(env, &owner, &dust), 40);
+                assert!(!crate::reentrancy_guard::is_locked(env));
+            });
+        }
+
+        #[test]
+        fn auto_list_is_rejected_while_guard_held() {
+            in_contract(|env| {
+                let seller = Address::generate(env);
+                let asset = soroban_sdk::symbol_short!("dust");
+                credit_resource_balance(env, &seller, &asset, 60).unwrap();
+
+                crate::reentrancy_guard::acquire(env).expect("lock should be free");
+                assert_eq!(
+                    auto_list_on_dex(env, &seller, &asset, 25),
+                    Err(HarvestError::Reentrancy)
+                );
+                crate::reentrancy_guard::release(env);
+
+                // No escrow was taken and no offer was created.
+                assert_eq!(resource_balance(env, &seller, &asset), 60);
+                assert_eq!(get_dex_offer(env, 1), None);
+
+                let offer = auto_list_on_dex(env, &seller, &asset, 25).unwrap();
+                assert_eq!(offer.amount, 60);
+            });
+        }
+
+        #[test]
+        fn harvest_and_list_rejects_reentry_but_composes_its_own_harvest() {
+            let c = Contract::new();
+            let env = c.env();
+            let owner = Address::generate(env);
+            let ship_id = c.invoke(|env| ship_for(env, &owner));
+            let layout = layout_with(env, CellType::StellarDust, 30);
+            let asset = soroban_sdk::symbol_short!("dust");
+
+            c.invoke(|env| {
+                crate::reentrancy_guard::acquire(env).expect("lock should be free");
+                assert_eq!(
+                    crate::dex_integration::harvest_and_list(
+                        env, &owner, ship_id, &layout, &asset, 5
+                    )
+                    .map(|(_, offer)| offer.offer_id),
+                    Err(HarvestError::Reentrancy)
+                );
+                crate::reentrancy_guard::release(env);
+                assert_eq!(resource_balance(env, &owner, &asset), 0);
+            });
+
+            // Unlocked, the harvest leg runs inside the same guard without
+            // tripping it, and the lock is released afterwards.
+            let (harvest, offer) = c.invoke(|env| {
+                crate::dex_integration::harvest_and_list(env, &owner, ship_id, &layout, &asset, 5)
+                    .unwrap()
+            });
+            assert_eq!(harvest.total_harvested, 30);
+            assert_eq!(offer.amount, 30);
+            c.invoke(|env| assert!(!crate::reentrancy_guard::is_locked(env)));
+        }
+
+        #[test]
+        fn cancel_listing_is_rejected_while_guard_held() {
+            let c = Contract::new();
+            let env = c.env();
+            let seller = Address::generate(env);
+            let asset = soroban_sdk::symbol_short!("dust");
+            let offer = c.invoke(|env| {
+                credit_resource_balance(env, &seller, &asset, 9).unwrap();
+                auto_list_on_dex(env, &seller, &asset, 4).unwrap()
+            });
+
+            c.invoke(|env| {
+                crate::reentrancy_guard::acquire(env).expect("lock should be free");
+                assert_eq!(
+                    crate::dex_integration::cancel_listing(env, &seller, offer.offer_id),
+                    Err(HarvestError::Reentrancy)
+                );
+                crate::reentrancy_guard::release(env);
+                // Offer is still live and the escrow was not refunded.
+                assert!(get_dex_offer(env, offer.offer_id).unwrap().active);
+                assert_eq!(resource_balance(env, &seller, &asset), 0);
+            });
+
+            c.invoke(|env| {
+                crate::dex_integration::cancel_listing(env, &seller, offer.offer_id).unwrap();
+                assert_eq!(resource_balance(env, &seller, &asset), 9);
             });
         }
 

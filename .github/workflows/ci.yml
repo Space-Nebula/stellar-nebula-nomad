@@ -41,7 +41,7 @@ jobs:
         run: cargo build --target wasm32-unknown-unknown --release --verbose
 
       - name: Upload WASM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: contract-wasm
           path: target/wasm32-unknown-unknown/release/*.wasm
@@ -108,7 +108,7 @@ jobs:
             --output-dir coverage/
 
       - name: Upload coverage HTML report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage/
@@ -129,7 +129,7 @@ jobs:
 
       - name: Post coverage summary to PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -165,7 +165,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download WASM artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: contract-wasm
           path: wasm/
@@ -195,6 +195,52 @@ jobs:
           done
           [ "$FAILED" -eq 0 ] || exit 1
 
+  # ─── Documentation ────────────────────────────────────────────────────────
+  docs:
+    name: Rustdoc (generate + check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check for missing docs on public items
+        env:
+          RUSTDOCFLAGS: "-D missing_docs"
+        run: cargo doc --all --no-deps --document-private-items=false
+
+      - name: Upload rustdoc artifact
+        uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: target/doc
+
+  publish-docs:
+    name: Publish Rustdocs to GitHub Pages
+    needs: docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
   # ─── Benchmarks ───────────────────────────────────────────────────────────
   benchmark:
     name: Performance Benchmarks
@@ -219,7 +265,7 @@ jobs:
         run: cargo bench --all 2>&1 | tee benchmark-output.txt
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
           path: benchmark-output.txt
