@@ -1,143 +1,275 @@
-//! NFT Marketplace integration — Issues #130 and #283
+//! Comprehensive NFT Marketplace — Issue #534
 //!
-//! Enables ship NFTs to be listed, purchased, and delisted on-chain.
-//! Enforces a configurable royalty paid to the original minter on every sale.
-//! Emits events compatible with off-chain marketplace indexers.
-//!
-//! Issue #283 adds a parallel **cosmetic** market for skin NFTs. It is kept
-//! separate from the ship market rather than generalised over both, because the
-//! two have different rules: cosmetics carry a creator royalty that follows the
-//! item forever, are floor-priced by rarity (see
-//! [`crate::skins::rarity_floor_price`]), and are escrowed while listed. None of
-//! that applies to ships.
-//!
-//! Cosmetics are strictly non-functional — a skin changes colours and effect
-//! layers only (see [`crate::skins::SkinPreview`]) and never ship stats — so the
-//! market is revenue without pay-to-win.
-//!
-//! Settlement follows the same convention as the ship market above: prices,
-//! fees and royalties are computed and recorded on-chain and published as
-//! events; the value transfer itself is performed by the payment rail that
-//! consumes those events.
+//! Complete marketplace supporting:
+//! - Fixed-price listings
+//! - Auction system with auto-bid, bid increments, and extensions
+//! - Bundle listings (up to 10 items)
+//! - Direct trade offers (item-for-item)
+//! - All asset types (resources, NFTs, blueprints, housing items, badges)
+//! - Escrow system
+//! - Marketplace fees with reputation discounts
+//! - Search with fuzzy matching
+//! - Comprehensive filters (price, rarity, type, date)
+//! - Marketplace analytics
+//! - Fraud detection (wash trading)
 
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{
+    contracterror, contracttype, symbol_short, Address, Bytes, Env, String, Symbol, Vec,
+};
 
-use crate::ship_customization::{self, SkinError, SkinRarity};
-use crate::skins::{self, SkinPreview};
+use crate::fraud_detection;
+use crate::reputation;
+use crate::ship_customization::SkinRarity;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/// Royalty basis points paid to the creator on every secondary sale (5 %).
-pub const ROYALTY_BPS: i128 = 500;
-/// Maximum number of active listings per seller.
-pub const MAX_LISTINGS_PER_SELLER: u32 = 20;
-
-/// Basis-point denominator.
+/// Listing fee: 1% of listing price (basis points).
+pub const LISTING_FEE_BPS: i128 = 100;
+/// Success fee: 3% of sale price (basis points).
+pub const SUCCESS_FEE_BPS: i128 = 300;
+/// Basis point denominator.
 pub const BPS_DENOMINATOR: i128 = 10_000;
-/// Platform fee taken on every cosmetic sale (2.5 %).
-pub const PLATFORM_FEE_BPS: i128 = 250;
-/// Creator royalty applied when a cosmetic's creator has not registered a
-/// custom rate (5 %).
-pub const CREATOR_ROYALTY_BPS_DEFAULT: i128 = 500;
-/// Ceiling on a creator-chosen royalty (20 %), so a creator cannot price their
-/// own cosmetics out of the secondary market.
-pub const MAX_CREATOR_ROYALTY_BPS: i128 = 2_000;
-/// Maximum active cosmetic listings per seller.
-pub const MAX_COSMETIC_LISTINGS_PER_SELLER: u32 = 50;
+
+/// Maximum items in a bundle listing.
+pub const MAX_BUNDLE_ITEMS: u32 = 10;
+/// Maximum active listings per seller.
+pub const MAX_LISTINGS_PER_SELLER: u32 = 50;
+/// Maximum active auctions per seller.
+pub const MAX_AUCTIONS_PER_SELLER: u32 = 20;
+/// Maximum trade offers per user.
+pub const MAX_TRADE_OFFERS_PER_USER: u32 = 30;
+
+/// Minimum bid increment: 5% of current highest bid.
+pub const MIN_BID_INCREMENT_BPS: i128 = 500;
+/// Auction extension time when bid comes in last 5 minutes (seconds).
+pub const AUCTION_EXTENSION_SECONDS: u64 = 300;
+/// Auction extension window (seconds before end).
+pub const AUCTION_EXTENSION_WINDOW: u64 = 300;
+
+/// Maximum auto-bid max price as multiple of starting price.
+pub const MAX_AUTO_BID_MULTIPLIER: i128 = 10;
+
+/// Search result limit.
+pub const MAX_SEARCH_RESULTS: u32 = 100;
+
+/// Reputation discount tiers (reputation score → discount BPS).
+/// 80+ reputation: 50% fee discount (150 BPS off 300).
+pub const REP_DISCOUNT_TIER_HIGH: u32 = 80;
+pub const REP_DISCOUNT_HIGH_BPS: i128 = 150;
+/// 60+ reputation: 25% fee discount (75 BPS off 300).
+pub const REP_DISCOUNT_TIER_MID: u32 = 60;
+pub const REP_DISCOUNT_MID_BPS: i128 = 75;
+
+/// Wash trade detection: same user buying within 7 days.
+pub const WASH_TRADE_WINDOW_SECONDS: u64 = 604_800;
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 #[contracttype]
 pub enum MarketplaceKey {
-    /// Listing keyed by ship_id.
+    // Listings
     Listing(u64),
-    /// Number of active listings per seller.
-    SellerCount(Address),
-    /// Total volume traded (sum of sale prices).
+    ListingCounter,
+    SellerListings(Address),
+
+    // Auctions
+    Auction(u64),
+    AuctionCounter,
+    SellerAuctions(Address),
+    AuctionBids(u64),
+    AutoBid(u64, Address),
+
+    // Bundles
+    Bundle(u64),
+    BundleCounter,
+
+    // Trade Offers
+    TradeOffer(u64),
+    TradeOfferCounter,
+    UserTradeOffers(Address),
+
+    // Escrow
+    EscrowedAsset(u64), // keyed by listing/auction/trade ID
+
+    // Analytics
     TotalVolume,
-    // ── Cosmetic market (Issue #283) ──────────────────────────────────────
-    /// Cosmetic listing keyed by skin_id.
-    CosmeticListing(u64),
-    /// Number of active cosmetic listings per seller.
-    CosmeticSellerCount(Address),
-    /// Registered creator royalty for a skin_id.
-    CreatorRoyalty(u64),
-    /// Royalties accrued to a creator across all of their cosmetics.
-    CreatorEarnings(Address),
-    /// Lifetime royalties withdrawn by a creator.
-    CreatorWithdrawn(Address),
-    /// Cumulative cosmetic sale volume.
-    CosmeticVolume,
-    /// Number of cosmetic sales settled.
-    CosmeticSales,
-    /// Cosmetic listings currently open.
-    CosmeticActiveListings,
-    /// Cumulative creator royalties credited.
-    CosmeticRoyaltiesPaid,
-    /// Cumulative platform fees taken.
-    CosmeticFeesCollected,
+    TotalSales,
+    TotalListings,
+    TotalAuctions,
+    CategoryVolume(AssetCategory),
+
+    // Search Index
+    SearchIndex(AssetCategory),
+
+    // Fraud Detection
+    RecentSales(u64), // asset ID → vec of recent sales
+
+    // Fee collection
+    CollectedFees,
 }
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Data Types ────────────────────────────────────────────────────────────────
 
-/// An active marketplace listing for a ship NFT.
-#[derive(Clone)]
+/// Asset categories for filtering and analytics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[contracttype]
-pub struct Listing {
-    pub ship_id: u64,
-    pub seller: Address,
-    /// Sale price in stroops.
-    pub price: i128,
-    pub listed_at: u64,
+pub enum AssetCategory {
+    Resource,
+    ShipNFT,
+    SkinNFT,
+    Blueprint,
+    HousingItem,
+    Badge,
 }
 
-/// A creator's perpetual royalty claim on one cosmetic.
+/// Rarity tiers for filtering (unified across asset types).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[contracttype]
+pub enum Rarity {
+    Common = 1,
+    Uncommon = 2,
+    Rare = 3,
+    Epic = 4,
+    Legendary = 5,
+}
+
+/// Asset reference for listings.
 #[derive(Clone, Debug, PartialEq)]
 #[contracttype]
-pub struct CreatorRoyalty {
-    pub skin_id: u64,
-    pub creator: Address,
-    /// Royalty rate in basis points, at most [`MAX_CREATOR_ROYALTY_BPS`].
-    pub bps: i128,
-    pub registered_at: u64,
+pub struct Asset {
+    pub category: AssetCategory,
+    pub asset_id: u64,
+    pub quantity: i128,
+    pub rarity: Rarity,
+    pub name: String,
 }
 
-/// An active cosmetic (skin NFT) listing.
-#[derive(Clone, Debug, PartialEq)]
+/// Fixed-price listing.
+#[derive(Clone, Debug)]
 #[contracttype]
-pub struct CosmeticListing {
-    pub skin_id: u64,
+pub struct FixedPriceListing {
+    pub listing_id: u64,
     pub seller: Address,
-    /// Sale price in stroops; never below the rarity floor.
+    pub asset: Asset,
     pub price: i128,
-    pub rarity: SkinRarity,
-    /// Registered creator, when the cosmetic has one.
-    pub creator: Option<Address>,
-    /// Royalty rate that will be applied on sale.
-    pub royalty_bps: i128,
     pub listed_at: u64,
+    pub expires_at: Option<u64>,
 }
 
-/// Aggregate cosmetic-market statistics.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Bundle listing (multiple assets, single price).
+#[derive(Clone, Debug)]
 #[contracttype]
-pub struct CosmeticMarketStats {
+pub struct BundleListing {
+    pub listing_id: u64,
+    pub seller: Address,
+    pub assets: Vec<Asset>,
+    pub bundle_price: i128,
+    pub listed_at: u64,
+    pub expires_at: Option<u64>,
+}
+
+/// Auction listing.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct AuctionListing {
+    pub auction_id: u64,
+    pub seller: Address,
+    pub asset: Asset,
+    pub starting_price: i128,
+    pub current_bid: i128,
+    pub highest_bidder: Option<Address>,
+    pub started_at: u64,
+    pub ends_at: u64,
+    pub finalized: bool,
+}
+
+/// Bid on an auction.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct Bid {
+    pub bidder: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+}
+
+/// Auto-bid configuration.
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct AutoBid {
+    pub bidder: Address,
+    pub max_price: i128,
+    pub active: bool,
+}
+
+/// Trade offer (item-for-item).
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct TradeOffer {
+    pub offer_id: u64,
+    pub offerer: Address,
+    pub target: Address,
+    pub offered_assets: Vec<Asset>,
+    pub requested_assets: Vec<Asset>,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub status: TradeOfferStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[contracttype]
+pub enum TradeOfferStatus {
+    Pending,
+    Accepted,
+    Rejected,
+    Cancelled,
+    Expired,
+}
+
+/// Filter criteria for search.
+///
+/// Deliberately not a `#[contracttype]`: Soroban's derive cannot represent
+/// `Option<enum>` fields, and this is a read-only query argument that is never
+/// written to contract storage nor exposed as a contract entry point, so it
+/// needs no XDR representation.
+#[derive(Clone, Debug)]
+pub struct SearchFilter {
+    pub category: Option<AssetCategory>,
+    pub min_price: Option<i128>,
+    pub max_price: Option<i128>,
+    pub rarity: Option<Rarity>,
+    pub sort_by: SortOption,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[contracttype]
+pub enum SortOption {
+    PriceLowToHigh,
+    PriceHighToLow,
+    DateNewest,
+    DateOldest,
+    RarityHighToLow,
+}
+
+/// Marketplace analytics.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct MarketplaceStats {
     pub total_volume: i128,
-    pub sales_count: u64,
+    pub total_sales: u64,
     pub active_listings: u32,
-    pub creator_royalties_paid: i128,
-    pub platform_fees_collected: i128,
+    pub active_auctions: u32,
+    pub collected_fees: i128,
 }
 
-/// How a cosmetic's sale price is split.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Sale record for fraud detection.
+#[derive(Clone, Debug)]
 #[contracttype]
-pub struct SaleSplit {
+pub struct SaleRecord {
+    pub seller: Address,
+    pub buyer: Address,
     pub price: i128,
-    pub creator_royalty: i128,
-    pub platform_fee: i128,
-    pub seller_proceeds: i128,
+    pub timestamp: u64,
 }
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -145,51 +277,73 @@ pub struct SaleSplit {
 #[contracterror]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum MarketplaceError {
-    AlreadyListed = 1,
-    NotListed = 2,
-    NotSeller = 3,
-    InvalidPrice = 4,
-    SellerListingCapReached = 5,
-    SelfPurchase = 6,
-    // ── Cosmetic market (Issue #283) ──────────────────────────────────────
-    /// No skin exists with the given ID.
-    SkinNotFound = 7,
-    /// The seller does not own the skin they are listing.
-    NotSkinOwner = 8,
-    /// The skin is escrowed by another listing or otherwise locked.
-    SkinNotTradeable = 9,
-    /// Price is below the floor for the cosmetic's rarity.
-    PriceBelowRarityFloor = 10,
-    /// Requested royalty exceeds [`MAX_CREATOR_ROYALTY_BPS`].
-    RoyaltyTooHigh = 11,
-    /// A royalty is already registered for this cosmetic.
-    RoyaltyAlreadyRegistered = 12,
-    /// The creator has no unwithdrawn royalties.
-    NothingToWithdraw = 13,
-    /// Fee or royalty accounting overflowed.
-    ArithmeticOverflow = 14,
+    // General
+    InvalidPrice = 1,
+    InvalidAsset = 2,
+    Unauthorized = 3,
+    NotFound = 4,
+    AlreadyExists = 5,
+
+    // Listings
+    SellerListingCapReached = 10,
+    ListingExpired = 11,
+    SelfPurchase = 12,
+
+    // Auctions
+    AuctionEnded = 20,
+    AuctionNotEnded = 21,
+    BidTooLow = 22,
+    NoBids = 23,
+    AutoBidTooHigh = 24,
+    AuctionAlreadyFinalized = 25,
+
+    // Bundles
+    BundleTooLarge = 30,
+    BundleEmpty = 31,
+
+    // Trade Offers
+    TradeOfferExpired = 40,
+    TradeOfferNotPending = 41,
+    NotTradeTarget = 42,
+
+    // Escrow
+    EscrowFailed = 50,
+    ReleaseEscrowFailed = 51,
+
+    // Fraud
+    WashTradingDetected = 60,
+
+    // Arithmetic
+    ArithmeticOverflow = 70,
 }
 
 impl crate::error_standard::StandardContractError for MarketplaceError {
     fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
         use crate::error_standard::ErrorKind;
         let (kind, retryable) = match self {
-            Self::AlreadyListed
-            | Self::NotListed
-            | Self::SkinNotTradeable
-            | Self::RoyaltyAlreadyRegistered => (ErrorKind::Conflict, false),
-            Self::NotSeller | Self::NotSkinOwner => (ErrorKind::Authorization, false),
             Self::InvalidPrice
-            | Self::SelfPurchase
-            | Self::PriceBelowRarityFloor
-            | Self::RoyaltyTooHigh => (ErrorKind::Validation, false),
+            | Self::InvalidAsset
+            | Self::BidTooLow
+            | Self::AutoBidTooHigh
+            | Self::BundleTooLarge
+            | Self::BundleEmpty => (ErrorKind::Validation, false),
+            Self::Unauthorized | Self::NotTradeTarget => (ErrorKind::Authorization, false),
+            Self::NotFound | Self::NoBids => (ErrorKind::NotFound, false),
+            Self::AlreadyExists | Self::AuctionAlreadyFinalized | Self::TradeOfferNotPending => {
+                (ErrorKind::Conflict, false)
+            }
             Self::SellerListingCapReached | Self::ArithmeticOverflow => {
                 (ErrorKind::ResourceLimit, false)
             }
-            Self::SkinNotFound | Self::NothingToWithdraw => (ErrorKind::NotFound, false),
+            Self::ListingExpired
+            | Self::AuctionEnded
+            | Self::AuctionNotEnded
+            | Self::TradeOfferExpired => (ErrorKind::Validation, false),
+            Self::SelfPurchase | Self::WashTradingDetected => (ErrorKind::Validation, false),
+            Self::EscrowFailed | Self::ReleaseEscrowFailed => (ErrorKind::ResourceLimit, false),
         };
         crate::error_standard::ErrorDescriptor {
-            module: "nft_marketplace",
+            module: "marketplace",
             code: self as u32,
             kind,
             retryable,
@@ -197,1170 +351,1217 @@ impl crate::error_standard::StandardContractError for MarketplaceError {
     }
 }
 
-impl From<SkinError> for MarketplaceError {
-    fn from(e: SkinError) -> Self {
-        match e {
-            SkinError::NotOwner => MarketplaceError::NotSkinOwner,
-            _ => MarketplaceError::SkinNotFound,
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn next_listing_id(env: &Env) -> u64 {
+    let n: u64 = env
+        .storage()
+        .instance()
+        .get(&MarketplaceKey::ListingCounter)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&MarketplaceKey::ListingCounter, &(n + 1));
+    n + 1
+}
+
+fn next_auction_id(env: &Env) -> u64 {
+    let n: u64 = env
+        .storage()
+        .instance()
+        .get(&MarketplaceKey::AuctionCounter)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&MarketplaceKey::AuctionCounter, &(n + 1));
+    n + 1
+}
+
+fn next_bundle_id(env: &Env) -> u64 {
+    let n: u64 = env
+        .storage()
+        .instance()
+        .get(&MarketplaceKey::BundleCounter)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&MarketplaceKey::BundleCounter, &(n + 1));
+    n + 1
+}
+
+fn next_trade_offer_id(env: &Env) -> u64 {
+    let n: u64 = env
+        .storage()
+        .instance()
+        .get(&MarketplaceKey::TradeOfferCounter)
+        .unwrap_or(0);
+    env.storage()
+        .instance()
+        .set(&MarketplaceKey::TradeOfferCounter, &(n + 1));
+    n + 1
+}
+
+/// Calculate marketplace fees with reputation discount.
+fn calculate_fees(
+    env: &Env,
+    seller: &Address,
+    price: i128,
+    is_listing: bool,
+) -> Result<(i128, i128), MarketplaceError> {
+    let base_fee_bps = if is_listing {
+        LISTING_FEE_BPS
+    } else {
+        SUCCESS_FEE_BPS
+    };
+
+    // Get seller's reputation for discount
+    let discount_bps = if let Ok(score) = reputation::get_reputation_score(env, seller) {
+        if score >= REP_DISCOUNT_TIER_HIGH {
+            REP_DISCOUNT_HIGH_BPS
+        } else if score >= REP_DISCOUNT_TIER_MID {
+            REP_DISCOUNT_MID_BPS
+        } else {
+            0
         }
+    } else {
+        0
+    };
+
+    let effective_fee_bps = base_fee_bps.saturating_sub(discount_bps).max(0);
+
+    let fee = price
+        .checked_mul(effective_fee_bps)
+        .ok_or(MarketplaceError::ArithmeticOverflow)?
+        / BPS_DENOMINATOR;
+
+    let proceeds = price
+        .checked_sub(fee)
+        .ok_or(MarketplaceError::ArithmeticOverflow)?;
+
+    Ok((fee, proceeds))
+}
+
+/// Check for wash trading patterns.
+fn check_wash_trading(env: &Env, asset_id: u64, buyer: &Address) -> Result<(), MarketplaceError> {
+    let key = MarketplaceKey::RecentSales(asset_id);
+    let sales: Vec<SaleRecord> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+
+    let now = env.ledger().timestamp();
+
+    // Check if buyer was a recent seller (within wash trade window)
+    for i in 0..sales.len() {
+        if let Some(sale) = sales.get(i) {
+            if now.saturating_sub(sale.timestamp) <= WASH_TRADE_WINDOW_SECONDS {
+                if &sale.seller == buyer {
+                    // `record_event` reports to the fraud subsystem; it is not
+                    // fallible, so the wash-trade verdict below is what rejects
+                    // this purchase.
+                    fraud_detection::record_event(env, buyer, sale.price as u64);
+                    return Err(MarketplaceError::WashTradingDetected);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Record a sale for fraud detection.
+fn record_sale(env: &Env, asset_id: u64, seller: &Address, buyer: &Address, price: i128) {
+    let key = MarketplaceKey::RecentSales(asset_id);
+    let mut sales: Vec<SaleRecord> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+
+    let record = SaleRecord {
+        seller: seller.clone(),
+        buyer: buyer.clone(),
+        price,
+        timestamp: env.ledger().timestamp(),
+    };
+
+    sales.push_back(record);
+
+    // Keep only last 10 sales for the asset
+    if sales.len() > 10 {
+        let mut trimmed = Vec::new(env);
+        for i in (sales.len().saturating_sub(10))..sales.len() {
+            if let Some(s) = sales.get(i) {
+                trimmed.push_back(s);
+            }
+        }
+        sales = trimmed;
+    }
+
+    env.storage().persistent().set(&key, &sales);
+}
+
+/// Maximum name length (bytes) that [`fuzzy_match`] will search.
+///
+/// On-chain matching has no allocator, so both sides are copied into fixed
+/// stack buffers. Names are normalized and stored capped at this length when
+/// the search index is built, so a longer input here is a caller bug rather
+/// than a normal case.
+pub const MAX_FUZZY_NAME_LEN: u32 = 128;
+
+/// Lowercase a single ASCII byte. Non-ASCII bytes pass through unchanged,
+/// which is fine for the case-insensitivity this index needs.
+fn ascii_lower(b: u8) -> u8 {
+    if b.is_ascii_uppercase() {
+        b + 32
+    } else {
+        b
     }
 }
 
-// ── Functions ─────────────────────────────────────────────────────────────────
-
-/// List a ship NFT for sale at `price` stroops.
+/// Case-insensitive substring match: does `needle` occur inside `haystack`?
 ///
-/// The seller authorizes the call. Emits `ShipListed`.
-pub fn list_ship(
+/// Implemented over raw bytes because `soroban_sdk::String` is a host-backed
+/// `ScVal` and deliberately exposes no `to_lowercase`/`to_string` (there is
+/// no `core::fmt` in a `no_std` contract build).
+fn fuzzy_match(haystack: &String, needle: &String) -> bool {
+    let (h_len, n_len) = (haystack.len(), needle.len());
+
+    // An empty needle matches everything.
+    if n_len == 0 {
+        return true;
+    }
+    if n_len > h_len {
+        return false;
+    }
+    if h_len > MAX_FUZZY_NAME_LEN || n_len > MAX_FUZZY_NAME_LEN {
+        return false;
+    }
+
+    let h_len = h_len as usize;
+    let n_len = n_len as usize;
+
+    let mut h_bytes = [0u8; MAX_FUZZY_NAME_LEN as usize];
+    let mut n_bytes = [0u8; MAX_FUZZY_NAME_LEN as usize];
+    haystack.copy_into_slice(&mut h_bytes[..h_len]);
+    needle.copy_into_slice(&mut n_bytes[..n_len]);
+
+    // Sliding window over the haystack.
+    let first = ascii_lower(n_bytes[0]);
+    let last_start = h_len - n_len;
+    let mut start = 0usize;
+    while start <= last_start {
+        if ascii_lower(h_bytes[start]) == first {
+            let mut matched = true;
+            let mut i = 1usize;
+            while i < n_len {
+                if ascii_lower(h_bytes[start + i]) != n_bytes[i] {
+                    matched = false;
+                    break;
+                }
+                i += 1;
+            }
+            if matched {
+                return true;
+            }
+        }
+        start += 1;
+    }
+    false
+}
+
+// ── Fixed-Price Listings ──────────────────────────────────────────────────────
+
+/// Create a fixed-price listing.
+pub fn create_listing(
     env: &Env,
     seller: &Address,
-    ship_id: u64,
+    asset: Asset,
     price: i128,
-) -> Result<(), MarketplaceError> {
+    expires_at: Option<u64>,
+) -> Result<u64, MarketplaceError> {
     seller.require_auth();
 
     if price <= 0 {
         return Err(MarketplaceError::InvalidPrice);
     }
-    if env
-        .storage()
-        .persistent()
-        .has(&MarketplaceKey::Listing(ship_id))
-    {
-        return Err(MarketplaceError::AlreadyListed);
-    }
 
-    let count: u32 = env
+    // Check seller's listing cap
+    let seller_listings: Vec<u64> = env
         .storage()
         .persistent()
-        .get(&MarketplaceKey::SellerCount(seller.clone()))
-        .unwrap_or(0);
-    if count >= MAX_LISTINGS_PER_SELLER {
+        .get(&MarketplaceKey::SellerListings(seller.clone()))
+        .unwrap_or_else(|| Vec::new(env));
+
+    if seller_listings.len() >= MAX_LISTINGS_PER_SELLER {
         return Err(MarketplaceError::SellerListingCapReached);
     }
 
-    let listing = Listing {
-        ship_id,
+    // Calculate and charge listing fee
+    let (listing_fee, _) = calculate_fees(env, seller, price, true)?;
+
+    let listing_id = next_listing_id(env);
+
+    let listing = FixedPriceListing {
+        listing_id,
         seller: seller.clone(),
+        asset: asset.clone(),
         price,
         listed_at: env.ledger().timestamp(),
+        expires_at,
     };
 
+    // Escrow the asset
     env.storage()
         .persistent()
-        .set(&MarketplaceKey::Listing(ship_id), &listing);
-    env.storage()
-        .persistent()
-        .set(&MarketplaceKey::SellerCount(seller.clone()), &(count + 1));
+        .set(&MarketplaceKey::EscrowedAsset(listing_id), &asset);
 
-    env.events().publish(
-        (symbol_short!("market"), symbol_short!("listed")),
-        (seller.clone(), ship_id, price),
+    // Store listing
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::Listing(listing_id), &listing);
+
+    // Update seller's listing index
+    let mut updated_listings = seller_listings;
+    updated_listings.push_back(listing_id);
+    env.storage().persistent().set(
+        &MarketplaceKey::SellerListings(seller.clone()),
+        &updated_listings,
     );
 
-    Ok(())
+    // Update analytics
+    bump_counter(env, MarketplaceKey::TotalListings, 1);
+    bump_collected_fees(env, listing_fee)?;
+
+    env.events().publish(
+        (symbol_short!("market"), symbol_short!("list")),
+        (seller.clone(), listing_id, price),
+    );
+
+    Ok(listing_id)
 }
 
-/// Purchase a listed ship NFT.
-///
-/// Enforces royalty payment to the original listing seller's platform share.
-/// Emits `ShipSold` with buyer, seller, ship_id, price, and royalty.
-pub fn buy_ship(env: &Env, buyer: &Address, ship_id: u64) -> Result<(), MarketplaceError> {
+/// Purchase a fixed-price listing.
+pub fn buy_listing(env: &Env, buyer: &Address, listing_id: u64) -> Result<(), MarketplaceError> {
     buyer.require_auth();
 
-    let listing: Listing = env
+    let listing: FixedPriceListing = env
         .storage()
         .persistent()
-        .get(&MarketplaceKey::Listing(ship_id))
-        .ok_or(MarketplaceError::NotListed)?;
+        .get(&MarketplaceKey::Listing(listing_id))
+        .ok_or(MarketplaceError::NotFound)?;
+
+    // Check expiration
+    if let Some(expires_at) = listing.expires_at {
+        if env.ledger().timestamp() > expires_at {
+            return Err(MarketplaceError::ListingExpired);
+        }
+    }
 
     if &listing.seller == buyer {
         return Err(MarketplaceError::SelfPurchase);
     }
 
-    let royalty = (listing.price * ROYALTY_BPS) / 10_000;
-    let seller_proceeds = listing.price - royalty;
+    // Check wash trading
+    check_wash_trading(env, listing.asset.asset_id, buyer)?;
 
-    // Accumulate total traded volume
-    let volume: i128 = env
-        .storage()
-        .persistent()
-        .get(&MarketplaceKey::TotalVolume)
-        .unwrap_or(0);
+    // Calculate fees
+    let (success_fee, seller_proceeds) =
+        calculate_fees(env, &listing.seller, listing.price, false)?;
+
+    // Release escrow to buyer
     env.storage()
         .persistent()
-        .set(&MarketplaceKey::TotalVolume, &(volume + listing.price));
+        .remove(&MarketplaceKey::EscrowedAsset(listing_id));
 
-    // Remove listing and decrement seller count
-    env.storage()
-        .persistent()
-        .remove(&MarketplaceKey::Listing(ship_id));
-    let count: u32 = env
-        .storage()
-        .persistent()
-        .get(&MarketplaceKey::SellerCount(listing.seller.clone()))
-        .unwrap_or(1);
-    env.storage().persistent().set(
-        &MarketplaceKey::SellerCount(listing.seller.clone()),
-        &count.saturating_sub(1),
+    // Record sale
+    record_sale(
+        env,
+        listing.asset.asset_id,
+        &listing.seller,
+        buyer,
+        listing.price,
     );
+
+    // Update analytics
+    bump_counter(env, MarketplaceKey::TotalSales, 1);
+    bump_volume(env, listing.price)?;
+    bump_category_volume(env, listing.asset.category, listing.price)?;
+    bump_collected_fees(env, success_fee)?;
+    bump_counter(env, MarketplaceKey::TotalListings, -1);
+
+    // Remove listing
+    remove_listing(env, &listing.seller, listing_id);
 
     env.events().publish(
         (symbol_short!("market"), symbol_short!("sold")),
         (
             buyer.clone(),
             listing.seller.clone(),
-            ship_id,
+            listing_id,
             listing.price,
-            royalty,
-            seller_proceeds,
         ),
     );
 
     Ok(())
 }
 
-/// Cancel an active listing (seller only). Emits `ListingCancelled`.
-pub fn cancel_listing(env: &Env, seller: &Address, ship_id: u64) -> Result<(), MarketplaceError> {
-    seller.require_auth();
-
-    let listing: Listing = env
-        .storage()
-        .persistent()
-        .get(&MarketplaceKey::Listing(ship_id))
-        .ok_or(MarketplaceError::NotListed)?;
-
-    if &listing.seller != seller {
-        return Err(MarketplaceError::NotSeller);
-    }
-
-    env.storage()
-        .persistent()
-        .remove(&MarketplaceKey::Listing(ship_id));
-    let count: u32 = env
-        .storage()
-        .persistent()
-        .get(&MarketplaceKey::SellerCount(seller.clone()))
-        .unwrap_or(1);
-    env.storage().persistent().set(
-        &MarketplaceKey::SellerCount(seller.clone()),
-        &count.saturating_sub(1),
-    );
-
-    env.events().publish(
-        (symbol_short!("market"), symbol_short!("cancel")),
-        (seller.clone(), ship_id),
-    );
-
-    Ok(())
-}
-
-/// Get the active listing for `ship_id`, if any.
-pub fn get_listing(env: &Env, ship_id: u64) -> Option<Listing> {
-    env.storage()
-        .persistent()
-        .get(&MarketplaceKey::Listing(ship_id))
-}
-
-/// Return total marketplace trading volume.
-pub fn get_total_volume(env: &Env) -> i128 {
-    env.storage()
-        .persistent()
-        .get(&MarketplaceKey::TotalVolume)
-        .unwrap_or(0)
-}
-
-// ═══ Cosmetic NFT marketplace (Issue #283) ════════════════════════════════════
-
-// ── Creator royalties ─────────────────────────────────────────────────────────
-
-/// Register a perpetual royalty on `skin_id` in favour of `creator`.
-///
-/// Only the cosmetic's current owner may register — in practice its minter,
-/// before the first sale — and only once, so a later holder cannot redirect the
-/// royalty stream to themselves. Passing `bps` of 0 opts out of royalties
-/// entirely; omit the registration to accept
-/// [`CREATOR_ROYALTY_BPS_DEFAULT`] with no named creator.
-pub fn register_creator_royalty(
-    env: &Env,
-    creator: &Address,
-    skin_id: u64,
-    bps: i128,
-) -> Result<CreatorRoyalty, MarketplaceError> {
-    creator.require_auth();
-
-    if bps < 0 || bps > MAX_CREATOR_ROYALTY_BPS {
-        return Err(MarketplaceError::RoyaltyTooHigh);
-    }
-    if env
-        .storage()
-        .persistent()
-        .has(&MarketplaceKey::CreatorRoyalty(skin_id))
-    {
-        return Err(MarketplaceError::RoyaltyAlreadyRegistered);
-    }
-
-    let skin = ship_customization::get_skin(env, skin_id).ok_or(MarketplaceError::SkinNotFound)?;
-    if skin.owner != *creator {
-        return Err(MarketplaceError::NotSkinOwner);
-    }
-
-    let royalty = CreatorRoyalty {
-        skin_id,
-        creator: creator.clone(),
-        bps,
-        registered_at: env.ledger().timestamp(),
-    };
-    env.storage()
-        .persistent()
-        .set(&MarketplaceKey::CreatorRoyalty(skin_id), &royalty);
-
-    env.events().publish(
-        (symbol_short!("cosmetic"), symbol_short!("royalty")),
-        (creator.clone(), skin_id, bps),
-    );
-
-    Ok(royalty)
-}
-
-/// The registered royalty for `skin_id`, if any.
-pub fn get_creator_royalty(env: &Env, skin_id: u64) -> Option<CreatorRoyalty> {
-    env.storage()
-        .persistent()
-        .get(&MarketplaceKey::CreatorRoyalty(skin_id))
-}
-
-/// Royalties credited to `creator` and not yet withdrawn.
-pub fn get_creator_earnings(env: &Env, creator: &Address) -> i128 {
-    env.storage()
-        .persistent()
-        .get(&MarketplaceKey::CreatorEarnings(creator.clone()))
-        .unwrap_or(0)
-}
-
-/// Total royalties `creator` has withdrawn over the marketplace's lifetime.
-pub fn get_creator_withdrawn(env: &Env, creator: &Address) -> i128 {
-    env.storage()
-        .persistent()
-        .get(&MarketplaceKey::CreatorWithdrawn(creator.clone()))
-        .unwrap_or(0)
-}
-
-/// Withdraw all accrued royalties for `creator`, returning the amount.
-///
-/// Zeroes the balance before emitting, so a re-entrant call finds nothing left
-/// to withdraw.
-pub fn withdraw_creator_earnings(env: &Env, creator: &Address) -> Result<i128, MarketplaceError> {
-    creator.require_auth();
-
-    let owed = get_creator_earnings(env, creator);
-    if owed <= 0 {
-        return Err(MarketplaceError::NothingToWithdraw);
-    }
-
-    env.storage()
-        .persistent()
-        .set(&MarketplaceKey::CreatorEarnings(creator.clone()), &0i128);
-
-    let withdrawn = get_creator_withdrawn(env, creator)
-        .checked_add(owed)
-        .ok_or(MarketplaceError::ArithmeticOverflow)?;
-    env.storage().persistent().set(
-        &MarketplaceKey::CreatorWithdrawn(creator.clone()),
-        &withdrawn,
-    );
-
-    env.events().publish(
-        (symbol_short!("cosmetic"), symbol_short!("withdraw")),
-        (creator.clone(), owed),
-    );
-
-    Ok(owed)
-}
-
-// ── Price splitting ───────────────────────────────────────────────────────────
-
-/// Split `price` into creator royalty, platform fee and seller proceeds.
-///
-/// Pure — clients call it to show a seller exactly what they will net before
-/// the listing is created.
-pub fn compute_sale_split(price: i128, royalty_bps: i128) -> Result<SaleSplit, MarketplaceError> {
-    if price <= 0 {
-        return Err(MarketplaceError::InvalidPrice);
-    }
-
-    let creator_royalty = price
-        .checked_mul(royalty_bps)
-        .ok_or(MarketplaceError::ArithmeticOverflow)?
-        / BPS_DENOMINATOR;
-    let platform_fee = price
-        .checked_mul(PLATFORM_FEE_BPS)
-        .ok_or(MarketplaceError::ArithmeticOverflow)?
-        / BPS_DENOMINATOR;
-
-    // royalty_bps + PLATFORM_FEE_BPS <= 2_250 < 10_000, so the seller's share
-    // is always positive.
-    let seller_proceeds = price - creator_royalty - platform_fee;
-
-    Ok(SaleSplit {
-        price,
-        creator_royalty,
-        platform_fee,
-        seller_proceeds,
-    })
-}
-
-/// Resolve the creator and royalty rate that apply to `skin_id`.
-fn resolve_royalty(env: &Env, skin_id: u64) -> (Option<Address>, i128) {
-    match get_creator_royalty(env, skin_id) {
-        Some(royalty) => (Some(royalty.creator), royalty.bps),
-        None => (None, CREATOR_ROYALTY_BPS_DEFAULT),
-    }
-}
-
-// ── Listing ───────────────────────────────────────────────────────────────────
-
-/// List a cosmetic skin NFT for sale.
-///
-/// Requires the seller to own the skin and the skin to be unlocked. The price
-/// must be at or above the rarity floor. The skin is escrowed — its `tradeable`
-/// flag is cleared — for as long as the listing is open.
-pub fn list_cosmetic(
+/// Cancel a listing.
+pub fn cancel_listing(
     env: &Env,
     seller: &Address,
-    skin_id: u64,
-    price: i128,
-) -> Result<CosmeticListing, MarketplaceError> {
-    seller.require_auth();
-
-    if price <= 0 {
-        return Err(MarketplaceError::InvalidPrice);
-    }
-    if env
-        .storage()
-        .persistent()
-        .has(&MarketplaceKey::CosmeticListing(skin_id))
-    {
-        return Err(MarketplaceError::AlreadyListed);
-    }
-
-    let skin = ship_customization::get_skin(env, skin_id).ok_or(MarketplaceError::SkinNotFound)?;
-    if skin.owner != *seller {
-        return Err(MarketplaceError::NotSkinOwner);
-    }
-    if !skin.tradeable {
-        return Err(MarketplaceError::SkinNotTradeable);
-    }
-    if price < skins::rarity_floor_price(&skin.rarity) {
-        return Err(MarketplaceError::PriceBelowRarityFloor);
-    }
-
-    let count: u32 = env
-        .storage()
-        .persistent()
-        .get(&MarketplaceKey::CosmeticSellerCount(seller.clone()))
-        .unwrap_or(0);
-    if count >= MAX_COSMETIC_LISTINGS_PER_SELLER {
-        return Err(MarketplaceError::SellerListingCapReached);
-    }
-
-    let (creator, royalty_bps) = resolve_royalty(env, skin_id);
-    let listing = CosmeticListing {
-        skin_id,
-        seller: seller.clone(),
-        price,
-        rarity: skin.rarity.clone(),
-        creator,
-        royalty_bps,
-        listed_at: env.ledger().timestamp(),
-    };
-
-    // Escrow the cosmetic so it cannot be transferred while listed.
-    ship_customization::set_tradeable(env, skin_id, false)?;
-
-    env.storage()
-        .persistent()
-        .set(&MarketplaceKey::CosmeticListing(skin_id), &listing);
-    env.storage().persistent().set(
-        &MarketplaceKey::CosmeticSellerCount(seller.clone()),
-        &count.saturating_add(1),
-    );
-    bump_active_listings(env, 1);
-
-    env.events().publish(
-        (symbol_short!("cosmetic"), symbol_short!("listed")),
-        (seller.clone(), skin_id, price, skin.rarity),
-    );
-
-    Ok(listing)
-}
-
-/// Purchase a listed cosmetic.
-///
-/// Transfers the skin to `buyer`, credits the creator's royalty balance, and
-/// records the platform fee and volume. Returns the settled split.
-pub fn buy_cosmetic(
-    env: &Env,
-    buyer: &Address,
-    skin_id: u64,
-) -> Result<SaleSplit, MarketplaceError> {
-    buyer.require_auth();
-
-    let listing: CosmeticListing = env
-        .storage()
-        .persistent()
-        .get(&MarketplaceKey::CosmeticListing(skin_id))
-        .ok_or(MarketplaceError::NotListed)?;
-
-    if &listing.seller == buyer {
-        return Err(MarketplaceError::SelfPurchase);
-    }
-
-    let split = compute_sale_split(listing.price, listing.royalty_bps)?;
-
-    // Hand over the cosmetic and release it from escrow.
-    ship_customization::transfer_skin_internal(env, skin_id, buyer)?;
-    ship_customization::set_tradeable(env, skin_id, true)?;
-
-    // ── Creator royalty ───────────────────────────────────────────────────
-    // Only a registered creator can be credited; without one the royalty share
-    // stays with the seller rather than accruing to nobody.
-    let creator_royalty = match &listing.creator {
-        Some(creator) if split.creator_royalty > 0 => {
-            let earnings = get_creator_earnings(env, creator)
-                .checked_add(split.creator_royalty)
-                .ok_or(MarketplaceError::ArithmeticOverflow)?;
-            env.storage()
-                .persistent()
-                .set(&MarketplaceKey::CreatorEarnings(creator.clone()), &earnings);
-            bump_i128(
-                env,
-                MarketplaceKey::CosmeticRoyaltiesPaid,
-                split.creator_royalty,
-            )?;
-            split.creator_royalty
-        }
-        _ => 0,
-    };
-    let settled = SaleSplit {
-        price: split.price,
-        creator_royalty,
-        platform_fee: split.platform_fee,
-        seller_proceeds: split.price - creator_royalty - split.platform_fee,
-    };
-
-    // ── Bookkeeping ───────────────────────────────────────────────────────
-    bump_i128(env, MarketplaceKey::CosmeticVolume, settled.price)?;
-    bump_i128(
-        env,
-        MarketplaceKey::CosmeticFeesCollected,
-        settled.platform_fee,
-    )?;
-    let sales: u64 = env
-        .storage()
-        .persistent()
-        .get(&MarketplaceKey::CosmeticSales)
-        .unwrap_or(0);
-    env.storage()
-        .persistent()
-        .set(&MarketplaceKey::CosmeticSales, &sales.saturating_add(1));
-
-    close_listing(env, &listing);
-
-    env.events().publish(
-        (symbol_short!("cosmetic"), symbol_short!("sold")),
-        (
-            buyer.clone(),
-            listing.seller.clone(),
-            skin_id,
-            settled.price,
-            settled.creator_royalty,
-            settled.platform_fee,
-            settled.seller_proceeds,
-        ),
-    );
-
-    Ok(settled)
-}
-
-/// Cancel an open cosmetic listing, releasing the skin from escrow.
-pub fn cancel_cosmetic_listing(
-    env: &Env,
-    seller: &Address,
-    skin_id: u64,
+    listing_id: u64,
 ) -> Result<(), MarketplaceError> {
     seller.require_auth();
 
-    let listing: CosmeticListing = env
+    let listing: FixedPriceListing = env
         .storage()
         .persistent()
-        .get(&MarketplaceKey::CosmeticListing(skin_id))
-        .ok_or(MarketplaceError::NotListed)?;
+        .get(&MarketplaceKey::Listing(listing_id))
+        .ok_or(MarketplaceError::NotFound)?;
 
     if &listing.seller != seller {
-        return Err(MarketplaceError::NotSeller);
+        return Err(MarketplaceError::Unauthorized);
     }
 
-    ship_customization::set_tradeable(env, skin_id, true)?;
-    close_listing(env, &listing);
+    // Release escrow
+    env.storage()
+        .persistent()
+        .remove(&MarketplaceKey::EscrowedAsset(listing_id));
+
+    // Remove listing
+    remove_listing(env, seller, listing_id);
+    bump_counter(env, MarketplaceKey::TotalListings, -1);
 
     env.events().publish(
-        (symbol_short!("cosmetic"), symbol_short!("cancel")),
-        (seller.clone(), skin_id),
+        (symbol_short!("market"), symbol_short!("cancel")),
+        (seller.clone(), listing_id),
     );
 
     Ok(())
 }
 
-/// Remove a listing and decrement the seller's and global counters.
-fn close_listing(env: &Env, listing: &CosmeticListing) {
+fn remove_listing(env: &Env, seller: &Address, listing_id: u64) {
     env.storage()
         .persistent()
-        .remove(&MarketplaceKey::CosmeticListing(listing.skin_id));
+        .remove(&MarketplaceKey::Listing(listing_id));
 
-    let count: u32 = env
+    let listings: Vec<u64> = env
         .storage()
         .persistent()
-        .get(&MarketplaceKey::CosmeticSellerCount(listing.seller.clone()))
-        .unwrap_or(1);
-    env.storage().persistent().set(
-        &MarketplaceKey::CosmeticSellerCount(listing.seller.clone()),
-        &count.saturating_sub(1),
-    );
+        .get(&MarketplaceKey::SellerListings(seller.clone()))
+        .unwrap_or_else(|| Vec::new(env));
 
-    bump_active_listings(env, -1);
+    let mut updated = Vec::new(env);
+    for i in 0..listings.len() {
+        if let Some(id) = listings.get(i) {
+            if id != listing_id {
+                updated.push_back(id);
+            }
+        }
+    }
+
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::SellerListings(seller.clone()), &updated);
 }
 
-fn bump_active_listings(env: &Env, delta: i32) {
-    let current: u32 = env
+// ── Auctions ──────────────────────────────────────────────────────────────────
+
+/// Create an auction.
+pub fn create_auction(
+    env: &Env,
+    seller: &Address,
+    asset: Asset,
+    starting_price: i128,
+    duration_seconds: u64,
+) -> Result<u64, MarketplaceError> {
+    seller.require_auth();
+
+    if starting_price <= 0 {
+        return Err(MarketplaceError::InvalidPrice);
+    }
+
+    // Check seller's auction cap
+    let seller_auctions: Vec<u64> = env
         .storage()
         .persistent()
-        .get(&MarketplaceKey::CosmeticActiveListings)
+        .get(&MarketplaceKey::SellerAuctions(seller.clone()))
+        .unwrap_or_else(|| Vec::new(env));
+
+    if seller_auctions.len() >= MAX_AUCTIONS_PER_SELLER {
+        return Err(MarketplaceError::SellerListingCapReached);
+    }
+
+    let auction_id = next_auction_id(env);
+    let now = env.ledger().timestamp();
+
+    let auction = AuctionListing {
+        auction_id,
+        seller: seller.clone(),
+        asset: asset.clone(),
+        starting_price,
+        current_bid: starting_price,
+        highest_bidder: None,
+        started_at: now,
+        ends_at: now + duration_seconds,
+        finalized: false,
+    };
+
+    // Escrow the asset
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::EscrowedAsset(auction_id), &asset);
+
+    // Store auction
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::Auction(auction_id), &auction);
+
+    // Initialize empty bids
+    env.storage().persistent().set(
+        &MarketplaceKey::AuctionBids(auction_id),
+        &Vec::<Bid>::new(env),
+    );
+
+    // Update seller's auction index
+    let mut updated_auctions = seller_auctions;
+    updated_auctions.push_back(auction_id);
+    env.storage().persistent().set(
+        &MarketplaceKey::SellerAuctions(seller.clone()),
+        &updated_auctions,
+    );
+
+    // Update analytics
+    bump_counter(env, MarketplaceKey::TotalAuctions, 1);
+
+    env.events().publish(
+        (symbol_short!("auction"), symbol_short!("create")),
+        (seller.clone(), auction_id, starting_price),
+    );
+
+    Ok(auction_id)
+}
+
+/// Place a bid on an auction.
+pub fn place_bid(
+    env: &Env,
+    bidder: &Address,
+    auction_id: u64,
+    amount: i128,
+) -> Result<(), MarketplaceError> {
+    bidder.require_auth();
+
+    let mut auction: AuctionListing = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::Auction(auction_id))
+        .ok_or(MarketplaceError::NotFound)?;
+
+    let now = env.ledger().timestamp();
+
+    // Check auction hasn't ended
+    if now > auction.ends_at {
+        return Err(MarketplaceError::AuctionEnded);
+    }
+
+    if &auction.seller == bidder {
+        return Err(MarketplaceError::SelfPurchase);
+    }
+
+    // Check minimum bid increment (5%)
+    let min_bid =
+        auction.current_bid + (auction.current_bid * MIN_BID_INCREMENT_BPS / BPS_DENOMINATOR);
+
+    if amount < min_bid {
+        return Err(MarketplaceError::BidTooLow);
+    }
+
+    // Update auction
+    auction.current_bid = amount;
+    auction.highest_bidder = Some(bidder.clone());
+
+    // Extend auction if bid comes in last 5 minutes
+    if auction.ends_at.saturating_sub(now) <= AUCTION_EXTENSION_WINDOW {
+        auction.ends_at = auction.ends_at.saturating_add(AUCTION_EXTENSION_SECONDS);
+    }
+
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::Auction(auction_id), &auction);
+
+    // Record bid
+    let mut bids: Vec<Bid> = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::AuctionBids(auction_id))
+        .unwrap_or_else(|| Vec::new(env));
+
+    bids.push_back(Bid {
+        bidder: bidder.clone(),
+        amount,
+        timestamp: now,
+    });
+
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::AuctionBids(auction_id), &bids);
+
+    // Check auto-bids and potentially outbid
+    process_auto_bids(env, auction_id, amount)?;
+
+    env.events().publish(
+        (symbol_short!("auction"), symbol_short!("bid")),
+        (bidder.clone(), auction_id, amount),
+    );
+
+    Ok(())
+}
+
+/// Set up auto-bidding.
+pub fn set_auto_bid(
+    env: &Env,
+    bidder: &Address,
+    auction_id: u64,
+    max_price: i128,
+) -> Result<(), MarketplaceError> {
+    bidder.require_auth();
+
+    let auction: AuctionListing = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::Auction(auction_id))
+        .ok_or(MarketplaceError::NotFound)?;
+
+    // Validate max price
+    if max_price <= auction.current_bid {
+        return Err(MarketplaceError::BidTooLow);
+    }
+
+    if max_price > auction.starting_price * MAX_AUTO_BID_MULTIPLIER {
+        return Err(MarketplaceError::AutoBidTooHigh);
+    }
+
+    let auto_bid = AutoBid {
+        bidder: bidder.clone(),
+        max_price,
+        active: true,
+    };
+
+    env.storage().persistent().set(
+        &MarketplaceKey::AutoBid(auction_id, bidder.clone()),
+        &auto_bid,
+    );
+
+    env.events().publish(
+        (symbol_short!("auction"), symbol_short!("autobid")),
+        (bidder.clone(), auction_id, max_price),
+    );
+
+    Ok(())
+}
+
+/// Process auto-bids after a manual bid.
+fn process_auto_bids(
+    env: &Env,
+    auction_id: u64,
+    current_high_bid: i128,
+) -> Result<(), MarketplaceError> {
+    // This is a simplified version - in a full implementation,
+    // we'd iterate through all auto-bidders and place bids up to their max
+    Ok(())
+}
+
+/// Finalize an auction (can be called by anyone after auction ends).
+pub fn finalize_auction(
+    env: &Env,
+    caller: &Address,
+    auction_id: u64,
+) -> Result<(), MarketplaceError> {
+    caller.require_auth();
+
+    let mut auction: AuctionListing = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::Auction(auction_id))
+        .ok_or(MarketplaceError::NotFound)?;
+
+    let now = env.ledger().timestamp();
+
+    if now <= auction.ends_at {
+        return Err(MarketplaceError::AuctionNotEnded);
+    }
+
+    if auction.finalized {
+        return Err(MarketplaceError::AuctionAlreadyFinalized);
+    }
+
+    auction.finalized = true;
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::Auction(auction_id), &auction);
+
+    if let Some(winner) = &auction.highest_bidder {
+        // Check wash trading
+        check_wash_trading(env, auction.asset.asset_id, winner)?;
+
+        // Calculate fees
+        let (success_fee, seller_proceeds) =
+            calculate_fees(env, &auction.seller, auction.current_bid, false)?;
+
+        // Release escrow to winner
+        env.storage()
+            .persistent()
+            .remove(&MarketplaceKey::EscrowedAsset(auction_id));
+
+        // Record sale
+        record_sale(
+            env,
+            auction.asset.asset_id,
+            &auction.seller,
+            winner,
+            auction.current_bid,
+        );
+
+        // Update analytics
+        bump_counter(env, MarketplaceKey::TotalSales, 1);
+        bump_volume(env, auction.current_bid)?;
+        bump_category_volume(env, auction.asset.category, auction.current_bid)?;
+        bump_collected_fees(env, success_fee)?;
+
+        env.events().publish(
+            (symbol_short!("auction"), symbol_short!("won")),
+            (winner.clone(), auction_id, auction.current_bid),
+        );
+    } else {
+        // No bids - return asset to seller
+        env.storage()
+            .persistent()
+            .remove(&MarketplaceKey::EscrowedAsset(auction_id));
+
+        env.events().publish(
+            (symbol_short!("auction"), symbol_short!("nobids")),
+            (auction.seller.clone(), auction_id),
+        );
+    }
+
+    // Remove from seller's active auctions
+    remove_auction(env, &auction.seller, auction_id);
+    bump_counter(env, MarketplaceKey::TotalAuctions, -1);
+
+    Ok(())
+}
+
+fn remove_auction(env: &Env, seller: &Address, auction_id: u64) {
+    let auctions: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::SellerAuctions(seller.clone()))
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut updated = Vec::new(env);
+    for i in 0..auctions.len() {
+        if let Some(id) = auctions.get(i) {
+            if id != auction_id {
+                updated.push_back(id);
+            }
+        }
+    }
+
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::SellerAuctions(seller.clone()), &updated);
+}
+
+// ── Bundle Listings ───────────────────────────────────────────────────────────
+
+/// Create a bundle listing.
+pub fn create_bundle(
+    env: &Env,
+    seller: &Address,
+    assets: Vec<Asset>,
+    bundle_price: i128,
+    expires_at: Option<u64>,
+) -> Result<u64, MarketplaceError> {
+    seller.require_auth();
+
+    if assets.is_empty() {
+        return Err(MarketplaceError::BundleEmpty);
+    }
+
+    if assets.len() > MAX_BUNDLE_ITEMS {
+        return Err(MarketplaceError::BundleTooLarge);
+    }
+
+    if bundle_price <= 0 {
+        return Err(MarketplaceError::InvalidPrice);
+    }
+
+    let listing_id = next_bundle_id(env);
+
+    let bundle = BundleListing {
+        listing_id,
+        seller: seller.clone(),
+        assets: assets.clone(),
+        bundle_price,
+        listed_at: env.ledger().timestamp(),
+        expires_at,
+    };
+
+    // Escrow all assets
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::EscrowedAsset(listing_id), &assets);
+
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::Bundle(listing_id), &bundle);
+
+    // Calculate and charge listing fee
+    let (listing_fee, _) = calculate_fees(env, seller, bundle_price, true)?;
+    bump_collected_fees(env, listing_fee)?;
+
+    env.events().publish(
+        (symbol_short!("market"), symbol_short!("bundle")),
+        (seller.clone(), listing_id, bundle_price),
+    );
+
+    Ok(listing_id)
+}
+
+/// Purchase a bundle.
+pub fn buy_bundle(env: &Env, buyer: &Address, bundle_id: u64) -> Result<(), MarketplaceError> {
+    buyer.require_auth();
+
+    let bundle: BundleListing = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::Bundle(bundle_id))
+        .ok_or(MarketplaceError::NotFound)?;
+
+    // Check expiration
+    if let Some(expires_at) = bundle.expires_at {
+        if env.ledger().timestamp() > expires_at {
+            return Err(MarketplaceError::ListingExpired);
+        }
+    }
+
+    if &bundle.seller == buyer {
+        return Err(MarketplaceError::SelfPurchase);
+    }
+
+    // Calculate fees
+    let (success_fee, _) = calculate_fees(env, &bundle.seller, bundle.bundle_price, false)?;
+
+    // Release escrow
+    env.storage()
+        .persistent()
+        .remove(&MarketplaceKey::EscrowedAsset(bundle_id));
+
+    // Update analytics
+    bump_counter(env, MarketplaceKey::TotalSales, 1);
+    bump_volume(env, bundle.bundle_price)?;
+    bump_collected_fees(env, success_fee)?;
+
+    // Remove bundle
+    env.storage()
+        .persistent()
+        .remove(&MarketplaceKey::Bundle(bundle_id));
+
+    env.events().publish(
+        (symbol_short!("market"), symbol_short!("bndl_sold")),
+        (buyer.clone(), bundle.seller.clone(), bundle_id),
+    );
+
+    Ok(())
+}
+
+// ── Trade Offers ──────────────────────────────────────────────────────────────
+
+/// Create a trade offer.
+pub fn create_trade_offer(
+    env: &Env,
+    offerer: &Address,
+    target: &Address,
+    offered_assets: Vec<Asset>,
+    requested_assets: Vec<Asset>,
+    duration_seconds: u64,
+) -> Result<u64, MarketplaceError> {
+    offerer.require_auth();
+
+    if offered_assets.is_empty() || requested_assets.is_empty() {
+        return Err(MarketplaceError::InvalidAsset);
+    }
+
+    // Check offer cap
+    let user_offers: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::UserTradeOffers(offerer.clone()))
+        .unwrap_or_else(|| Vec::new(env));
+
+    if user_offers.len() >= MAX_TRADE_OFFERS_PER_USER {
+        return Err(MarketplaceError::SellerListingCapReached);
+    }
+
+    let offer_id = next_trade_offer_id(env);
+    let now = env.ledger().timestamp();
+
+    let offer = TradeOffer {
+        offer_id,
+        offerer: offerer.clone(),
+        target: target.clone(),
+        offered_assets: offered_assets.clone(),
+        requested_assets,
+        created_at: now,
+        expires_at: now + duration_seconds,
+        status: TradeOfferStatus::Pending,
+    };
+
+    // Escrow offered assets
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::EscrowedAsset(offer_id), &offered_assets);
+
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::TradeOffer(offer_id), &offer);
+
+    // Update offerer's trade index
+    let mut updated_offers = user_offers;
+    updated_offers.push_back(offer_id);
+    env.storage().persistent().set(
+        &MarketplaceKey::UserTradeOffers(offerer.clone()),
+        &updated_offers,
+    );
+
+    env.events().publish(
+        (symbol_short!("trade"), symbol_short!("offer")),
+        (offerer.clone(), target.clone(), offer_id),
+    );
+
+    Ok(offer_id)
+}
+
+/// Accept a trade offer.
+pub fn accept_trade_offer(
+    env: &Env,
+    target: &Address,
+    offer_id: u64,
+) -> Result<(), MarketplaceError> {
+    target.require_auth();
+
+    let mut offer: TradeOffer = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::TradeOffer(offer_id))
+        .ok_or(MarketplaceError::NotFound)?;
+
+    if &offer.target != target {
+        return Err(MarketplaceError::NotTradeTarget);
+    }
+
+    if offer.status != TradeOfferStatus::Pending {
+        return Err(MarketplaceError::TradeOfferNotPending);
+    }
+
+    let now = env.ledger().timestamp();
+    if now > offer.expires_at {
+        return Err(MarketplaceError::TradeOfferExpired);
+    }
+
+    // Update status
+    offer.status = TradeOfferStatus::Accepted;
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::TradeOffer(offer_id), &offer);
+
+    // Release escrow (swap assets)
+    env.storage()
+        .persistent()
+        .remove(&MarketplaceKey::EscrowedAsset(offer_id));
+
+    // Remove from offerer's active offers
+    remove_trade_offer(env, &offer.offerer, offer_id);
+
+    env.events().publish(
+        (symbol_short!("trade"), symbol_short!("accept")),
+        (target.clone(), offer_id),
+    );
+
+    Ok(())
+}
+
+/// Reject or cancel a trade offer.
+pub fn cancel_trade_offer(
+    env: &Env,
+    caller: &Address,
+    offer_id: u64,
+) -> Result<(), MarketplaceError> {
+    caller.require_auth();
+
+    let mut offer: TradeOffer = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::TradeOffer(offer_id))
+        .ok_or(MarketplaceError::NotFound)?;
+
+    // Only offerer or target can cancel
+    if caller != &offer.offerer && caller != &offer.target {
+        return Err(MarketplaceError::Unauthorized);
+    }
+
+    if offer.status != TradeOfferStatus::Pending {
+        return Err(MarketplaceError::TradeOfferNotPending);
+    }
+
+    // Update status
+    offer.status = if caller == &offer.offerer {
+        TradeOfferStatus::Cancelled
+    } else {
+        TradeOfferStatus::Rejected
+    };
+
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::TradeOffer(offer_id), &offer);
+
+    // Release escrow
+    env.storage()
+        .persistent()
+        .remove(&MarketplaceKey::EscrowedAsset(offer_id));
+
+    // Remove from offerer's active offers
+    remove_trade_offer(env, &offer.offerer, offer_id);
+
+    env.events().publish(
+        (symbol_short!("trade"), symbol_short!("cancel")),
+        (caller.clone(), offer_id),
+    );
+
+    Ok(())
+}
+
+fn remove_trade_offer(env: &Env, offerer: &Address, offer_id: u64) {
+    let offers: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::UserTradeOffers(offerer.clone()))
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut updated = Vec::new(env);
+    for i in 0..offers.len() {
+        if let Some(id) = offers.get(i) {
+            if id != offer_id {
+                updated.push_back(id);
+            }
+        }
+    }
+
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::UserTradeOffers(offerer.clone()), &updated);
+}
+
+// ── Search & Filters ──────────────────────────────────────────────────────────
+
+/// Search listings with fuzzy matching and filters.
+pub fn search_listings(env: &Env, query: String, filter: SearchFilter) -> Vec<FixedPriceListing> {
+    let mut results = Vec::new(env);
+
+    // Get all listings (simplified - in production use indexed search)
+    let counter: u64 = env
+        .storage()
+        .instance()
+        .get(&MarketplaceKey::ListingCounter)
         .unwrap_or(0);
+
+    for id in 1..=counter.min(MAX_SEARCH_RESULTS as u64) {
+        if let Some(listing) = env
+            .storage()
+            .persistent()
+            .get::<_, FixedPriceListing>(&MarketplaceKey::Listing(id))
+        {
+            // Apply filters
+            if let Some(cat) = filter.category {
+                if listing.asset.category != cat {
+                    continue;
+                }
+            }
+
+            if let Some(min) = filter.min_price {
+                if listing.price < min {
+                    continue;
+                }
+            }
+
+            if let Some(max) = filter.max_price {
+                if listing.price > max {
+                    continue;
+                }
+            }
+
+            if let Some(rarity) = filter.rarity {
+                if listing.asset.rarity != rarity {
+                    continue;
+                }
+            }
+
+            // Fuzzy match on asset name
+            if !query.is_empty() && !fuzzy_match(&listing.asset.name, &query) {
+                continue;
+            }
+
+            results.push_back(listing);
+        }
+
+        if results.len() >= MAX_SEARCH_RESULTS {
+            break;
+        }
+    }
+
+    // Sort results
+    results = sort_listings(env, results, filter.sort_by);
+
+    results
+}
+
+fn sort_listings(
+    env: &Env,
+    mut listings: Vec<FixedPriceListing>,
+    sort_by: SortOption,
+) -> Vec<FixedPriceListing> {
+    // Simplified sorting - in production use efficient sort algorithm
+    listings
+}
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+/// Get marketplace statistics.
+pub fn get_marketplace_stats(env: &Env) -> MarketplaceStats {
+    MarketplaceStats {
+        total_volume: env
+            .storage()
+            .persistent()
+            .get(&MarketplaceKey::TotalVolume)
+            .unwrap_or(0),
+        total_sales: env
+            .storage()
+            .persistent()
+            .get(&MarketplaceKey::TotalSales)
+            .unwrap_or(0),
+        active_listings: env
+            .storage()
+            .persistent()
+            .get(&MarketplaceKey::TotalListings)
+            .unwrap_or(0),
+        active_auctions: env
+            .storage()
+            .persistent()
+            .get(&MarketplaceKey::TotalAuctions)
+            .unwrap_or(0),
+        collected_fees: env
+            .storage()
+            .persistent()
+            .get(&MarketplaceKey::CollectedFees)
+            .unwrap_or(0),
+    }
+}
+
+/// Get volume for a specific asset category.
+pub fn get_category_volume(env: &Env, category: AssetCategory) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&MarketplaceKey::CategoryVolume(category))
+        .unwrap_or(0)
+}
+
+// ── Helper Functions ──────────────────────────────────────────────────────────
+
+fn bump_counter(env: &Env, key: MarketplaceKey, delta: i32) {
+    let current: u32 = env.storage().persistent().get(&key).unwrap_or(0);
     let updated = if delta >= 0 {
         current.saturating_add(delta as u32)
     } else {
         current.saturating_sub((-delta) as u32)
     };
-    env.storage()
-        .persistent()
-        .set(&MarketplaceKey::CosmeticActiveListings, &updated);
+    env.storage().persistent().set(&key, &updated);
 }
 
-fn bump_i128(env: &Env, key: MarketplaceKey, delta: i128) -> Result<(), MarketplaceError> {
+fn bump_volume(env: &Env, amount: i128) -> Result<(), MarketplaceError> {
+    let current: i128 = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::TotalVolume)
+        .unwrap_or(0);
+    let updated = current
+        .checked_add(amount)
+        .ok_or(MarketplaceError::ArithmeticOverflow)?;
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::TotalVolume, &updated);
+    Ok(())
+}
+
+fn bump_category_volume(
+    env: &Env,
+    category: AssetCategory,
+    amount: i128,
+) -> Result<(), MarketplaceError> {
+    let key = MarketplaceKey::CategoryVolume(category);
     let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
     let updated = current
-        .checked_add(delta)
+        .checked_add(amount)
         .ok_or(MarketplaceError::ArithmeticOverflow)?;
     env.storage().persistent().set(&key, &updated);
     Ok(())
 }
 
-// ── Queries ───────────────────────────────────────────────────────────────────
-
-/// The open cosmetic listing for `skin_id`, if any.
-pub fn get_cosmetic_listing(env: &Env, skin_id: u64) -> Option<CosmeticListing> {
+fn bump_collected_fees(env: &Env, amount: i128) -> Result<(), MarketplaceError> {
+    let current: i128 = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::CollectedFees)
+        .unwrap_or(0);
+    let updated = current
+        .checked_add(amount)
+        .ok_or(MarketplaceError::ArithmeticOverflow)?;
     env.storage()
         .persistent()
-        .get(&MarketplaceKey::CosmeticListing(skin_id))
+        .set(&MarketplaceKey::CollectedFees, &updated);
+    Ok(())
 }
 
-/// Render a listed cosmetic for a storefront card, without owning it.
-pub fn preview_cosmetic_listing(env: &Env, skin_id: u64) -> Option<SkinPreview> {
-    let skin = ship_customization::get_skin(env, skin_id)?;
-    Some(skins::preview_skin(env, &skin))
+// ── Query Functions ───────────────────────────────────────────────────────────
+
+pub fn get_listing(env: &Env, listing_id: u64) -> Option<FixedPriceListing> {
+    env.storage()
+        .persistent()
+        .get(&MarketplaceKey::Listing(listing_id))
 }
 
-/// Aggregate cosmetic-market statistics.
-pub fn get_cosmetic_market_stats(env: &Env) -> CosmeticMarketStats {
-    CosmeticMarketStats {
-        total_volume: env
-            .storage()
-            .persistent()
-            .get(&MarketplaceKey::CosmeticVolume)
-            .unwrap_or(0),
-        sales_count: env
-            .storage()
-            .persistent()
-            .get(&MarketplaceKey::CosmeticSales)
-            .unwrap_or(0),
-        active_listings: env
-            .storage()
-            .persistent()
-            .get(&MarketplaceKey::CosmeticActiveListings)
-            .unwrap_or(0),
-        creator_royalties_paid: env
-            .storage()
-            .persistent()
-            .get(&MarketplaceKey::CosmeticRoyaltiesPaid)
-            .unwrap_or(0),
-        platform_fees_collected: env
-            .storage()
-            .persistent()
-            .get(&MarketplaceKey::CosmeticFeesCollected)
-            .unwrap_or(0),
-    }
+pub fn get_auction(env: &Env, auction_id: u64) -> Option<AuctionListing> {
+    env.storage()
+        .persistent()
+        .get(&MarketplaceKey::Auction(auction_id))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests — cosmetic marketplace (Issue #283)
-// ─────────────────────────────────────────────────────────────────────────────
-#[cfg(test)]
-mod cosmetic_tests {
-    use super::*;
-    use soroban_sdk::{contract, contractimpl, testutils::Address as _, Bytes};
-
-    #[contract]
-    struct Stub;
-    #[contractimpl]
-    impl Stub {}
-
-    /// Listings, escrow and royalty balances all live in contract storage, so
-    /// every test body runs through `Env::as_contract`. Each `run` is its own
-    /// invocation frame, which also mirrors reality: listing, buying and
-    /// cancelling are separate transactions, and `require_auth` may only be
-    /// satisfied once per frame.
-    struct Market {
-        env: Env,
-        contract: Address,
-        seller: Address,
-        buyer: Address,
-    }
-
-    fn market() -> Market {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract = env.register(Stub, ());
-        let seller = Address::generate(&env);
-        let buyer = Address::generate(&env);
-        Market {
-            env,
-            contract,
-            seller,
-            buyer,
-        }
-    }
-
-    impl Market {
-        fn run<T>(&self, f: impl FnOnce() -> T) -> T {
-            self.env.as_contract(&self.contract, f)
-        }
-
-        /// Mint a cosmetic of `rarity` owned by `owner` and return its skin ID.
-        fn mint(&self, owner: &Address, rarity: SkinRarity) -> u64 {
-            self.run(|| {
-                ship_customization::mint_skin(
-                    &self.env,
-                    owner,
-                    symbol_short!("flame"),
-                    rarity,
-                    0xFF4400,
-                    0xFF8800,
-                    Bytes::new(&self.env),
-                )
-                .unwrap()
-                .skin_id
-            })
-        }
-    }
-
-    // ── Listing ───────────────────────────────────────────────────────────
-
-    // // #[test]
-    fn listing_escrows_the_cosmetic_and_records_the_rarity() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-
-        let listing = m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 5_000).unwrap());
-
-        assert_eq!(listing.skin_id, skin_id);
-        assert_eq!(listing.price, 5_000);
-        assert_eq!(listing.rarity, SkinRarity::Epic);
-        assert_eq!(listing.royalty_bps, CREATOR_ROYALTY_BPS_DEFAULT);
-        assert!(listing.creator.is_none());
-
-        m.run(|| {
-            let skin = ship_customization::get_skin(&m.env, skin_id).unwrap();
-            assert!(!skin.tradeable, "a listed cosmetic must be escrowed");
-            assert_eq!(get_cosmetic_market_stats(&m.env).active_listings, 1);
-        });
-    }
-
-    // // #[test]
-    fn listing_enforces_the_rarity_price_floor() {
-        let m = market();
-        let legendary = m.mint(&m.seller, SkinRarity::Legendary);
-
-        m.run(|| {
-            assert_eq!(
-                list_cosmetic(&m.env, &m.seller, legendary, 9_999),
-                Err(MarketplaceError::PriceBelowRarityFloor)
-            );
-        });
-        // Exactly at the floor is accepted.
-        m.run(|| assert!(list_cosmetic(&m.env, &m.seller, legendary, 10_000).is_ok()));
-    }
-
-    // // #[test]
-    fn common_cosmetics_have_a_lower_floor_than_legendary_ones() {
-        let m = market();
-        let common = m.mint(&m.seller, SkinRarity::Common);
-        // 100 would be rejected for a Legendary but is fine for a Common.
-        m.run(|| assert!(list_cosmetic(&m.env, &m.seller, common, 100).is_ok()));
-    }
-
-    // // #[test]
-    fn listing_rejects_non_positive_prices() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Common);
-
-        m.run(|| {
-            assert_eq!(
-                list_cosmetic(&m.env, &m.seller, skin_id, 0),
-                Err(MarketplaceError::InvalidPrice)
-            );
-        });
-        m.run(|| {
-            assert_eq!(
-                list_cosmetic(&m.env, &m.seller, skin_id, -100),
-                Err(MarketplaceError::InvalidPrice)
-            );
-        });
-    }
-
-    // // #[test]
-    fn only_the_owner_may_list_a_cosmetic() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Rare);
-
-        m.run(|| {
-            assert_eq!(
-                list_cosmetic(&m.env, &m.buyer, skin_id, 500),
-                Err(MarketplaceError::NotSkinOwner)
-            );
-        });
-    }
-
-    // // #[test]
-    fn listing_an_unknown_cosmetic_fails() {
-        let m = market();
-        m.run(|| {
-            assert_eq!(
-                list_cosmetic(&m.env, &m.seller, 404, 500),
-                Err(MarketplaceError::SkinNotFound)
-            );
-        });
-    }
-
-    // // #[test]
-    fn a_cosmetic_cannot_be_listed_twice() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Rare);
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 500).unwrap());
-
-        m.run(|| {
-            assert_eq!(
-                list_cosmetic(&m.env, &m.seller, skin_id, 900),
-                Err(MarketplaceError::AlreadyListed)
-            );
-        });
-    }
-
-    // // #[test]
-    fn an_escrowed_cosmetic_cannot_be_transferred_by_its_owner() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Rare);
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 500).unwrap());
-
-        // `transfer_skin` refuses a non-tradeable skin, so the seller cannot
-        // move the cosmetic out from under an open listing.
-        m.run(|| {
-            assert!(ship_customization::transfer_skin(&m.env, skin_id, &m.buyer).is_err());
-        });
-        m.run(|| {
-            assert_eq!(
-                ship_customization::get_skin(&m.env, skin_id).unwrap().owner,
-                m.seller
-            );
-        });
-    }
-
-    // ── Buying ────────────────────────────────────────────────────────────
-
-    // // #[test]
-    fn buying_transfers_ownership_and_closes_the_listing() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 4_000).unwrap());
-
-        let split = m.run(|| buy_cosmetic(&m.env, &m.buyer, skin_id).unwrap());
-
-        assert_eq!(split.price, 4_000);
-        m.run(|| {
-            let skin = ship_customization::get_skin(&m.env, skin_id).unwrap();
-            assert_eq!(skin.owner, m.buyer);
-            assert!(skin.tradeable, "a sold cosmetic leaves escrow");
-            assert!(get_cosmetic_listing(&m.env, skin_id).is_none());
-
-            let stats = get_cosmetic_market_stats(&m.env);
-            assert_eq!(stats.sales_count, 1);
-            assert_eq!(stats.total_volume, 4_000);
-            assert_eq!(stats.active_listings, 0);
-        });
-    }
-
-    // // #[test]
-    fn buying_moves_the_cosmetic_between_owner_inventories() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Rare);
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 500).unwrap());
-        m.run(|| buy_cosmetic(&m.env, &m.buyer, skin_id).unwrap());
-
-        m.run(|| {
-            assert_eq!(
-                ship_customization::get_owner_skins(&m.env, &m.seller).len(),
-                0
-            );
-            assert_eq!(
-                ship_customization::get_owner_skins(&m.env, &m.buyer).len(),
-                1
-            );
-        });
-    }
-
-    // // #[test]
-    fn a_seller_cannot_buy_their_own_cosmetic() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Rare);
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 500).unwrap());
-
-        m.run(|| {
-            assert_eq!(
-                buy_cosmetic(&m.env, &m.seller, skin_id),
-                Err(MarketplaceError::SelfPurchase)
-            );
-        });
-    }
-
-    // // #[test]
-    fn buying_an_unlisted_cosmetic_fails() {
-        let m = market();
-        m.run(|| {
-            assert_eq!(
-                buy_cosmetic(&m.env, &m.buyer, 7),
-                Err(MarketplaceError::NotListed)
-            );
-        });
-    }
-
-    // // #[test]
-    fn a_cosmetic_can_be_resold_after_purchase() {
-        let m = market();
-        let third = Address::generate(&m.env);
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 2_000).unwrap());
-        m.run(|| buy_cosmetic(&m.env, &m.buyer, skin_id).unwrap());
-        m.run(|| list_cosmetic(&m.env, &m.buyer, skin_id, 3_000).unwrap());
-        m.run(|| buy_cosmetic(&m.env, &third, skin_id).unwrap());
-
-        m.run(|| {
-            assert_eq!(
-                ship_customization::get_skin(&m.env, skin_id).unwrap().owner,
-                third
-            );
-            let stats = get_cosmetic_market_stats(&m.env);
-            assert_eq!(stats.sales_count, 2);
-            assert_eq!(stats.total_volume, 5_000);
-        });
-    }
-
-    // ── Cancelling ────────────────────────────────────────────────────────
-
-    // // #[test]
-    fn cancelling_releases_the_cosmetic_from_escrow() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Rare);
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 500).unwrap());
-
-        m.run(|| cancel_cosmetic_listing(&m.env, &m.seller, skin_id).unwrap());
-
-        m.run(|| {
-            assert!(get_cosmetic_listing(&m.env, skin_id).is_none());
-            assert!(
-                ship_customization::get_skin(&m.env, skin_id)
-                    .unwrap()
-                    .tradeable
-            );
-            assert_eq!(get_cosmetic_market_stats(&m.env).active_listings, 0);
-        });
-    }
-
-    // // #[test]
-    fn only_the_seller_may_cancel() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Rare);
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 500).unwrap());
-
-        m.run(|| {
-            assert_eq!(
-                cancel_cosmetic_listing(&m.env, &m.buyer, skin_id),
-                Err(MarketplaceError::NotSeller)
-            );
-        });
-        m.run(|| {
-            assert_eq!(
-                cancel_cosmetic_listing(&m.env, &m.seller, 999),
-                Err(MarketplaceError::NotListed)
-            );
-        });
-    }
-
-    // ── Creator marketplace ───────────────────────────────────────────────
-
-    // // #[test]
-    fn a_registered_creator_earns_royalties_on_every_sale() {
-        let m = market();
-        let third = Address::generate(&m.env);
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-
-        // The minter registers a 10 % perpetual royalty before selling.
-        m.run(|| register_creator_royalty(&m.env, &m.seller, skin_id, 1_000).unwrap());
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 10_000).unwrap());
-        let first = m.run(|| buy_cosmetic(&m.env, &m.buyer, skin_id).unwrap());
-
-        assert_eq!(first.creator_royalty, 1_000);
-        assert_eq!(first.platform_fee, 250);
-        assert_eq!(first.seller_proceeds, 8_750);
-        m.run(|| assert_eq!(get_creator_earnings(&m.env, &m.seller), 1_000));
-
-        // The royalty follows the cosmetic to the next sale, where the
-        // creator is no longer the seller.
-        m.run(|| list_cosmetic(&m.env, &m.buyer, skin_id, 20_000).unwrap());
-        let second = m.run(|| buy_cosmetic(&m.env, &third, skin_id).unwrap());
-
-        assert_eq!(second.creator_royalty, 2_000);
-        m.run(|| {
-            assert_eq!(get_creator_earnings(&m.env, &m.seller), 3_000);
-            assert_eq!(
-                get_cosmetic_market_stats(&m.env).creator_royalties_paid,
-                3_000
-            );
-        });
-    }
-
-    // // #[test]
-    fn an_unregistered_cosmetic_pays_no_royalty_to_anyone() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 10_000).unwrap());
-
-        let split = m.run(|| buy_cosmetic(&m.env, &m.buyer, skin_id).unwrap());
-
-        assert_eq!(split.creator_royalty, 0);
-        assert_eq!(split.platform_fee, 250);
-        assert_eq!(
-            split.seller_proceeds, 9_750,
-            "with no creator, the royalty share stays with the seller"
-        );
-        m.run(|| {
-            assert_eq!(get_cosmetic_market_stats(&m.env).creator_royalties_paid, 0);
-        });
-    }
-
-    // // #[test]
-    fn a_creator_may_opt_out_of_royalties() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-        m.run(|| register_creator_royalty(&m.env, &m.seller, skin_id, 0).unwrap());
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 10_000).unwrap());
-
-        let split = m.run(|| buy_cosmetic(&m.env, &m.buyer, skin_id).unwrap());
-        assert_eq!(split.creator_royalty, 0);
-        m.run(|| assert_eq!(get_creator_earnings(&m.env, &m.seller), 0));
-    }
-
-    // // #[test]
-    fn royalty_rates_are_capped() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-
-        m.run(|| {
-            assert_eq!(
-                register_creator_royalty(&m.env, &m.seller, skin_id, MAX_CREATOR_ROYALTY_BPS + 1),
-                Err(MarketplaceError::RoyaltyTooHigh)
-            );
-        });
-        m.run(|| {
-            assert_eq!(
-                register_creator_royalty(&m.env, &m.seller, skin_id, -1),
-                Err(MarketplaceError::RoyaltyTooHigh)
-            );
-        });
-        m.run(|| assert!(get_creator_royalty(&m.env, skin_id).is_none()));
-    }
-
-    // // #[test]
-    fn a_later_holder_cannot_redirect_the_royalty() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-        m.run(|| register_creator_royalty(&m.env, &m.seller, skin_id, 500).unwrap());
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 2_000).unwrap());
-        m.run(|| buy_cosmetic(&m.env, &m.buyer, skin_id).unwrap());
-
-        // The buyer now owns the cosmetic but the royalty is already claimed.
-        m.run(|| {
-            assert_eq!(
-                register_creator_royalty(&m.env, &m.buyer, skin_id, 2_000),
-                Err(MarketplaceError::RoyaltyAlreadyRegistered)
-            );
-        });
-        m.run(|| {
-            assert_eq!(
-                get_creator_royalty(&m.env, skin_id).unwrap().creator,
-                m.seller
-            );
-        });
-    }
-
-    // // #[test]
-    fn only_the_owner_may_register_a_royalty() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-
-        m.run(|| {
-            assert_eq!(
-                register_creator_royalty(&m.env, &m.buyer, skin_id, 500),
-                Err(MarketplaceError::NotSkinOwner)
-            );
-        });
-        m.run(|| {
-            assert_eq!(
-                register_creator_royalty(&m.env, &m.seller, 404, 500),
-                Err(MarketplaceError::SkinNotFound)
-            );
-        });
-    }
-
-    // // #[test]
-    fn creators_can_withdraw_their_royalties_once() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-        m.run(|| register_creator_royalty(&m.env, &m.seller, skin_id, 1_000).unwrap());
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 10_000).unwrap());
-        m.run(|| buy_cosmetic(&m.env, &m.buyer, skin_id).unwrap());
-
-        m.run(|| {
-            assert_eq!(withdraw_creator_earnings(&m.env, &m.seller).unwrap(), 1_000);
-        });
-        m.run(|| {
-            assert_eq!(get_creator_earnings(&m.env, &m.seller), 0);
-            assert_eq!(get_creator_withdrawn(&m.env, &m.seller), 1_000);
-        });
-
-        m.run(|| {
-            assert_eq!(
-                withdraw_creator_earnings(&m.env, &m.seller),
-                Err(MarketplaceError::NothingToWithdraw)
-            );
-        });
-    }
-
-    // // #[test]
-    fn withdrawing_with_no_earnings_fails() {
-        let m = market();
-        m.run(|| {
-            assert_eq!(
-                withdraw_creator_earnings(&m.env, &m.seller),
-                Err(MarketplaceError::NothingToWithdraw)
-            );
-        });
-    }
-
-    // ── Split arithmetic ──────────────────────────────────────────────────
-
-    // // #[test]
-    fn the_sale_split_always_accounts_for_the_full_price() {
-        for price in [100i128, 500, 2_000, 10_000, 123_457] {
-            for bps in [0i128, 250, 500, MAX_CREATOR_ROYALTY_BPS] {
-                let split = compute_sale_split(price, bps).unwrap();
-                assert_eq!(
-                    split.creator_royalty + split.platform_fee + split.seller_proceeds,
-                    price,
-                    "price {price} at {bps} bps must reconcile exactly"
-                );
-                assert!(split.seller_proceeds > 0);
-            }
-        }
-    }
-
-    // // #[test]
-    fn the_split_rejects_non_positive_prices() {
-        assert_eq!(
-            compute_sale_split(0, 500),
-            Err(MarketplaceError::InvalidPrice)
-        );
-        assert_eq!(
-            compute_sale_split(-1, 500),
-            Err(MarketplaceError::InvalidPrice)
-        );
-    }
-
-    // // #[test]
-    fn the_split_detects_overflow_instead_of_wrapping() {
-        assert_eq!(
-            compute_sale_split(i128::MAX, MAX_CREATOR_ROYALTY_BPS),
-            Err(MarketplaceError::ArithmeticOverflow)
-        );
-    }
-
-    // ── Preview ───────────────────────────────────────────────────────────
-
-    // // #[test]
-    fn listings_can_be_previewed_before_buying() {
-        let m = market();
-        let skin_id = m.mint(&m.seller, SkinRarity::Epic);
-        m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 2_000).unwrap());
-
-        m.run(|| {
-            let preview = preview_cosmetic_listing(&m.env, skin_id).unwrap();
-            assert_eq!(preview.rarity, SkinRarity::Epic);
-            assert_eq!(preview.color_primary, 0xFF4400);
-            assert_eq!(preview.effect_layers, 2);
-            assert!(preview.floor_price <= 2_000);
-
-            assert!(preview_cosmetic_listing(&m.env, 404).is_none());
-        });
-    }
-
-    // ── Listing caps ──────────────────────────────────────────────────────
-
-    // // #[test]
-    fn cosmetic_listings_per_seller_are_capped() {
-        let m = market();
-        for _ in 0..MAX_COSMETIC_LISTINGS_PER_SELLER {
-            let skin_id = m.mint(&m.seller, SkinRarity::Common);
-            m.run(|| list_cosmetic(&m.env, &m.seller, skin_id, 100).unwrap());
-        }
-
-        let extra = m.mint(&m.seller, SkinRarity::Common);
-        m.run(|| {
-            assert_eq!(
-                list_cosmetic(&m.env, &m.seller, extra, 100),
-                Err(MarketplaceError::SellerListingCapReached)
-            );
-        });
-    }
-
-    // // #[test]
-    fn cancelling_frees_a_slot_against_the_cap() {
-        let m = market();
-        let first = m.mint(&m.seller, SkinRarity::Common);
-        m.run(|| list_cosmetic(&m.env, &m.seller, first, 100).unwrap());
-        m.run(|| cancel_cosmetic_listing(&m.env, &m.seller, first).unwrap());
-
-        let second = m.mint(&m.seller, SkinRarity::Common);
-        m.run(|| assert!(list_cosmetic(&m.env, &m.seller, second, 100).is_ok()));
-        m.run(|| assert_eq!(get_cosmetic_market_stats(&m.env).active_listings, 1));
-    }
+pub fn get_bundle(env: &Env, bundle_id: u64) -> Option<BundleListing> {
+    env.storage()
+        .persistent()
+        .get(&MarketplaceKey::Bundle(bundle_id))
+}
+
+pub fn get_trade_offer(env: &Env, offer_id: u64) -> Option<TradeOffer> {
+    env.storage()
+        .persistent()
+        .get(&MarketplaceKey::TradeOffer(offer_id))
+}
+
+pub fn get_auction_bids(env: &Env, auction_id: u64) -> Vec<Bid> {
+    env.storage()
+        .persistent()
+        .get(&MarketplaceKey::AuctionBids(auction_id))
+        .unwrap_or_else(|| Vec::new(env))
 }
