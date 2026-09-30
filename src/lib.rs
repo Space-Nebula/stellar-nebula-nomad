@@ -46,11 +46,18 @@ mod ship_nft;
 mod ship_registry;
 
 mod achievement_engine;
+// `achievements` (catalog + progress + leaderboard) and `badges` (NFT badge
+// minting/transfer) are the user-facing layer over `achievement_engine`.
+// They were present on disk but never declared here, so the whole achievement
+// system was dead code; player housing's achievement display cases need them.
+mod achievements;
+mod badges;
 mod batch_processor;
 mod data_exporter;
 mod dex_integration;
 mod difficulty_curve;
 mod difficulty_scaler;
+pub use difficulty_scaler::{DifficultyError, DifficultyResult, RarityWeights};
 pub mod dynamic_pricing;
 pub mod emergency_controls;
 pub mod event_framework;
@@ -147,6 +154,7 @@ mod composability_examples;
 pub mod guild_quests;
 mod input_validation;
 mod nomad_bonding;
+mod player_housing;
 mod quest_system;
 mod reentrancy_guard;
 mod reputation;
@@ -270,7 +278,6 @@ pub use audit_logger::{
     AuditLoggerError, RetentionPolicy, DEFAULT_AUDIT_RETENTION_SECS, DEFAULT_MAX_AUDIT_ENTRIES,
     MAX_QUERY_LIMIT,
 };
-pub use difficulty_scaler::{DifficultyError, DifficultyResult};
 pub use energy_manager::{
     apply_passive_regen, consume_energy, get_energy_balance, get_regen_rate, recharge_energy,
     set_regen_rate, EnergyBalance, EnergyError, PassiveRegenResult, RechargeResult,
@@ -459,6 +466,21 @@ pub use notifications::alerts::{
     check_low_resources, notify_crafting_complete, notify_rare_discovery,
 };
 pub use notifications::push_service::{emit_notification, Notification};
+pub use player_housing::{
+    customize_theme, define_furniture, feature_house, get_featured_houses, get_furniture,
+    get_house, get_placements, get_rating, get_visitors, initialize_house, place_furniture,
+    purchase_furniture, rate_house, remove_furniture, set_house_access, upgrade_house, visit_house,
+    FurnitureCategory, FurnitureItem, FurnitureRarity, HouseAccess, HouseInstance, HouseRating,
+    HouseSize, HousingError, PlacedFurniture, VisitorRecord, MAX_FEATURED_HOUSES,
+    MAX_FURNITURE_PER_HOUSE, MAX_VISITOR_RECORDS,
+};
+pub use quest_system::{
+    add_quest_node, choose_branch, claim_quest_reward, define_chain, get_active_quest_states,
+    get_active_quests, get_chain, get_chain_progress, get_quest_node, get_quest_state,
+    on_mission_completed, record_progress, start_chain, validate_chain, ChainProgress, QuestBranch,
+    QuestChain, QuestError, QuestNode, QuestReward, QuestState, QuestStatus, CHAIN_TERMINUS,
+    MAX_ACTIVE_QUESTS, MAX_BRANCHES_PER_NODE, MAX_CHAIN_LENGTH,
+};
 pub use recipes::{set_recipe, unlock_rare_recipe, RecipeError};
 pub use ship_repair::{
     get_repair_config, get_total_repair_burn, quote_repair, repair_cost, set_repair_config,
@@ -4145,4 +4167,9 @@ impl NebulaNomadContract {
     }
 }
 
+// Game Systems Modules (Issues #528-531)
+// `seasons`, `event_scheduler`, `alliance_manager`, `privacy_stats`, `crafting`
+// and `recipes` are already declared above with their original visibility; only
+// `clan_wars` is introduced here. Re-declaring them here shadowed the originals
+// and broke the crate (E0428).
 pub mod clan_wars;
