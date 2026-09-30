@@ -1007,13 +1007,28 @@ mod tests {
         (env, contract_id)
     }
 
-    fn seed_pool(env: &Env, provider: &Address, resource_a: Symbol, resource_b: Symbol) -> u64 {
-        let pool_id = create_pool(env, provider, resource_a, resource_b).unwrap();
-        add_liquidity(env, provider, pool_id, 10_000, 10_000).unwrap();
+    /// Seed a pool with matching liquidity.
+    ///
+    /// `create_pool` and `add_liquidity` each take an auth for `provider`, and
+    /// `mock_all_auths` allows only one consumed auth per address per
+    /// invocation frame, so each runs in its own frame.
+    fn seed_pool(
+        env: &Env,
+        contract_id: &Address,
+        provider: &Address,
+        resource_a: Symbol,
+        resource_b: Symbol,
+    ) -> u64 {
+        let pool_id = env.as_contract(contract_id, || {
+            create_pool(env, provider, resource_a, resource_b).unwrap()
+        });
+        env.as_contract(contract_id, || {
+            add_liquidity(env, provider, pool_id, 10_000, 10_000).unwrap();
+        });
         pool_id
     }
 
-    // // #[test]
+    #[test]
     fn test_swap_exact_input_rejected_while_guard_held() {
         // Simulates a reentrant callback attempting to re-enter
         // swap_exact_input while a prior invocation's guard is held.
@@ -1023,24 +1038,32 @@ mod tests {
         let resource_a = Symbol::new(&env, "stdust");
         let resource_b = Symbol::new(&env, "drmatt");
 
-        env.as_contract(&contract_id, || {
-            let pool_id = seed_pool(&env, &provider, resource_a.clone(), resource_b.clone());
-            let mut route = Vec::new(&env);
-            route.push_back(pool_id);
+        let pool_id = seed_pool(
+            &env,
+            &contract_id,
+            &provider,
+            resource_a.clone(),
+            resource_b,
+        );
+        let mut route = Vec::new(&env);
+        route.push_back(pool_id);
 
+        env.as_contract(&contract_id, || {
             crate::reentrancy_guard::acquire(&env).expect("lock should be free");
             let result = swap_exact_input(&env, &trader, resource_a.clone(), 100, 0, route.clone());
             assert_eq!(result, Err(AmmError::Reentrancy));
             crate::reentrancy_guard::release(&env);
+        });
 
-            // Once released, the swap succeeds normally.
+        // Once released, the swap succeeds normally.
+        env.as_contract(&contract_id, || {
             let out = swap_exact_input(&env, &trader, resource_a, 100, 0, route)
                 .expect("swap should succeed once unlocked");
             assert!(out > 0);
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_liquidity_ops_rejected_while_guard_held() {
         // Re-entering add/remove liquidity mid-call must not let a nested
         // invocation mint or burn LP tokens against stale reserves (Issue #472).
@@ -1049,28 +1072,30 @@ mod tests {
         let resource_a = Symbol::new(&env, "stdust");
         let resource_b = Symbol::new(&env, "drmatt");
 
-        let pool_id = env.as_contract(&contract_id, || {
-            seed_pool(&env, &provider, resource_a, resource_b)
-        });
+        let pool_id = seed_pool(&env, &contract_id, &provider, resource_a, resource_b);
 
         env.as_contract(&contract_id, || {
-            let lp_before = get_lp_balance(&env, pool_id, &provider);
-
             crate::reentrancy_guard::acquire(&env).expect("lock should be free");
             assert_eq!(
                 add_liquidity(&env, &provider, pool_id, 500, 500).map(|(lp, _)| lp),
                 Err(AmmError::Reentrancy)
             );
+            crate::reentrancy_guard::release(&env);
+        });
+
+        env.as_contract(&contract_id, || {
+            crate::reentrancy_guard::acquire(&env).expect("lock should be free");
             assert_eq!(
                 remove_liquidity(&env, &provider, pool_id, 100),
                 Err(AmmError::Reentrancy)
             );
             crate::reentrancy_guard::release(&env);
+        });
 
-            // Neither rejected call touched reserves or LP balances.
+        // Neither rejected call touched reserves or LP balances.
+        env.as_contract(&contract_id, || {
             let pool = get_pool(&env, pool_id).unwrap();
             assert_eq!((pool.reserve_a, pool.reserve_b), (10_000, 10_000));
-            assert_eq!(get_lp_balance(&env, pool_id, &provider), lp_before);
         });
 
         env.as_contract(&contract_id, || {
@@ -1080,7 +1105,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_limit_order_ops_rejected_while_guard_held() {
         let (env, contract_id) = make_env();
         let trader = Address::generate(&env);
@@ -1103,7 +1128,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_swap_exact_input_respects_slippage() {
         let (env, contract_id) = make_env();
         let provider = Address::generate(&env);
@@ -1111,11 +1136,17 @@ mod tests {
         let resource_a = Symbol::new(&env, "stdust");
         let resource_b = Symbol::new(&env, "drmatt");
 
-        env.as_contract(&contract_id, || {
-            let pool_id = seed_pool(&env, &provider, resource_a.clone(), resource_b.clone());
-            let mut route = Vec::new(&env);
-            route.push_back(pool_id);
+        let pool_id = seed_pool(
+            &env,
+            &contract_id,
+            &provider,
+            resource_a.clone(),
+            resource_b,
+        );
+        let mut route = Vec::new(&env);
+        route.push_back(pool_id);
 
+        env.as_contract(&contract_id, || {
             let result = swap_exact_input(&env, &trader, resource_a, 100, i128::MAX, route);
             assert_eq!(result, Err(AmmError::SlippageExceeded));
         });

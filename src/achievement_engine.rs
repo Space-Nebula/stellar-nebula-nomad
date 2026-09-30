@@ -83,6 +83,10 @@ pub struct AchievementProgress {
 fn default_templates(env: &Env) -> Vec<AchievementTemplate> {
     let mut templates = Vec::new(env);
 
+    // Generate templates using the comprehensive achievement system
+    // For backward compatibility, we keep the original 20 templates
+    // and delegate to achievements.rs for IDs 21+
+
     templates.push_back(AchievementTemplate {
         id: 1,
         title: String::from_str(env, "First Scan"),
