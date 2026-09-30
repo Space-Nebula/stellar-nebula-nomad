@@ -19,7 +19,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
           components: clippy
 
       - name: Run clippy (pedantic, warn-level)
@@ -40,5 +40,10 @@ jobs:
       - name: Run performance benchmarks (regression gate)
         run: cargo test --benches -- --test-threads=1 --nocapture
 
+      - name: Install Stellar CLI
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Build release
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: stellar contract build

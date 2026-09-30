@@ -2,10 +2,10 @@
 //! Implements Exponential Moving Average (EMA), Time-Weighted Average Price (TWAP),
 //! bounds damping, and circuit breakers.
 
-use soroban_sdk::{contracterror, contracttype, symbol_short, Env, Symbol, Vec};
 use crate::constants::{
     CIRCUIT_BREAKER_THRESHOLD_PERCENT, MAX_HOURLY_PRICE_CHANGE_PERCENT, MAX_PRICE_HISTORY_POINTS,
 };
+use soroban_sdk::{contracterror, contracttype, symbol_short, Env, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -50,8 +50,10 @@ pub fn clamp_price(
     min_limit: u128,
     max_limit: u128,
 ) -> u128 {
-    let max_allowed_increase = last_price + (last_price * MAX_HOURLY_PRICE_CHANGE_PERCENT as u128 / 100);
-    let max_allowed_decrease = last_price.saturating_sub(last_price * MAX_HOURLY_PRICE_CHANGE_PERCENT as u128 / 100);
+    let max_allowed_increase =
+        last_price + (last_price * MAX_HOURLY_PRICE_CHANGE_PERCENT as u128 / 100);
+    let max_allowed_decrease =
+        last_price.saturating_sub(last_price * MAX_HOURLY_PRICE_CHANGE_PERCENT as u128 / 100);
 
     let bounded = proposed_price.clamp(max_allowed_decrease, max_allowed_increase);
     bounded.clamp(min_limit, max_limit)
@@ -78,15 +80,19 @@ pub fn update_market_price(
     trade_volume: u128,
 ) -> Result<u128, PricingError> {
     let key = (symbol_short!("PRC_ST"), resource.clone());
-    let mut state: DynamicPriceState = env.storage().instance().get(&key).unwrap_or(DynamicPriceState {
-        current_price: trade_price,
-        twap_24h: trade_price,
-        ema_price: trade_price,
-        min_price_limit: trade_price / 10,
-        max_price_limit: trade_price * 10,
-        last_updated_at: env.ledger().timestamp(),
-        is_circuit_broken: false,
-    });
+    let mut state: DynamicPriceState =
+        env.storage()
+            .instance()
+            .get(&key)
+            .unwrap_or(DynamicPriceState {
+                current_price: trade_price,
+                twap_24h: trade_price,
+                ema_price: trade_price,
+                min_price_limit: trade_price / 10,
+                max_price_limit: trade_price * 10,
+                last_updated_at: env.ledger().timestamp(),
+                is_circuit_broken: false,
+            });
 
     if state.is_circuit_broken {
         return Err(PricingError::CircuitBreakerActive);
@@ -114,7 +120,11 @@ pub fn update_market_price(
 
     // Record price point in history
     let history_key = (symbol_short!("PRC_HST"), resource);
-    let mut history: Vec<PricePoint> = env.storage().instance().get(&history_key).unwrap_or(Vec::new(env));
+    let mut history: Vec<PricePoint> = env
+        .storage()
+        .instance()
+        .get(&history_key)
+        .unwrap_or(Vec::new(env));
     if history.len() >= MAX_PRICE_HISTORY_POINTS {
         history.pop_front();
     }

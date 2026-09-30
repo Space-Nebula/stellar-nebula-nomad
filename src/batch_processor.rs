@@ -532,10 +532,17 @@ mod tests {
 
     // // #[test]
     fn new_batch_op_types_available() {
-        assert_eq!(BatchOpType::MintResource, BatchOpType::MintResource);
-        assert_eq!(BatchOpType::ExecuteTrade, BatchOpType::ExecuteTrade);
-        assert_eq!(BatchOpType::TransferResource, BatchOpType::TransferResource);
-        assert_eq!(BatchOpType::UpdateRankings, BatchOpType::UpdateRankings);
-        assert_eq!(BatchOpType::GrantRole, BatchOpType::GrantRole);
+        let types = [
+            BatchOpType::MintResource,
+            BatchOpType::ExecuteTrade,
+            BatchOpType::TransferResource,
+            BatchOpType::UpdateRankings,
+            BatchOpType::GrantRole,
+        ];
+        for (i, a) in types.iter().enumerate() {
+            for (j, b) in types.iter().enumerate() {
+                assert_eq!(a == b, i == j);
+            }
+        }
     }
 }

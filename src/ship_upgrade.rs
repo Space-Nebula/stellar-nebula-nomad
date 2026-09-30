@@ -1,3 +1,4 @@
+use crate::economics::progression_model::{self, ProgressionCurve, ProgressionReport, MAX_LEVEL};
 use crate::rate_limiter::{check_rate_limit, Operation, RateLimitError};
 use crate::resource_minter::ResourceKey;
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Map, Symbol, Vec};
@@ -128,6 +129,12 @@ pub enum ShipUpgradeError {
     RateLimitExceeded = 209,
     /// The submitted cost curve is invalid (Issue #454).
     InvalidEconomy = 210,
+    /// The ship is already at [`MAX_LEVEL`].
+    MaxLevelReached = 211,
+    /// Caller does not own the ship being levelled.
+    NotShipOwner = 212,
+    /// The submitted level cost curve has a zero base or absurd growth.
+    InvalidProgressionCurve = 213,
 }
 
 impl crate::error_standard::StandardContractError for ShipUpgradeError {
@@ -142,7 +149,9 @@ impl crate::error_standard::StandardContractError for ShipUpgradeError {
                 (ErrorKind::Validation, false)
             }
             Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
-            Self::InvalidEconomy => (ErrorKind::Validation, false),
+            Self::InvalidEconomy | Self::InvalidProgressionCurve => (ErrorKind::Validation, false),
+            Self::MaxLevelReached => (ErrorKind::Conflict, false),
+            Self::NotShipOwner => (ErrorKind::Authorization, false),
         };
         crate::error_standard::ErrorDescriptor {
             module: "ship_upgrade",
@@ -211,6 +220,12 @@ enum UpgradeDataKey {
     Economy,
     /// Cumulative resource units burned by upgrades across all ships (Issue #454).
     TotalUpgradedSpend,
+    /// Progression level of a ship (0 = never levelled).
+    ShipLevel(u64),
+    /// Active level cost curve. Absent means the rebalanced default.
+    Progression,
+    /// Cumulative resource units burned by level upgrades.
+    TotalLevelSpend,
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -541,6 +556,164 @@ pub fn apply_regen_upgrade(env: &Env, ship_id: u64, bonus: u32) -> Result<(), Sh
 }
 
 // ── Upgrade cost curve tests (Issue #454) ────────────────────────────────────
+// ── Ship level ladder ────────────────────────────────────────────────────────
+//
+// Modules (above) are the *horizontal* build-out of a hull: five slots, each
+// priced off how many are already installed. Levels are the *vertical* ladder
+// that gates power: twenty steps priced by `economics::progression_model`, in
+// a single asset the player chooses, with the curve tuned so casual, regular
+// and hardcore sessions all hit their retention milestones (see
+// `docs/adr/011-ship-progression-balance.md`).
+
+/// Outcome of a successful level upgrade.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LevelUpgradeResult {
+    /// Ship that was levelled.
+    pub ship_id: u64,
+    /// Level reached.
+    pub level: u32,
+    /// Units burned.
+    pub cost: u32,
+    /// Asset the cost was paid in.
+    pub asset_id: Symbol,
+}
+
+/// Current progression level of `ship_id` (0 if never levelled).
+pub fn get_ship_level(env: &Env, ship_id: u64) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&UpgradeDataKey::ShipLevel(ship_id))
+        .unwrap_or(0)
+}
+
+/// Active level cost curve; the rebalanced default unless overridden.
+pub fn get_progression_curve(env: &Env) -> ProgressionCurve {
+    env.storage()
+        .instance()
+        .get(&UpgradeDataKey::Progression)
+        .unwrap_or_else(ProgressionCurve::default_rebalanced)
+}
+
+/// Override the level cost curve. Upgrade-admin only.
+pub fn set_progression_curve(
+    env: &Env,
+    admin: &Address,
+    curve: ProgressionCurve,
+) -> Result<(), ShipUpgradeError> {
+    let stored: Address = env
+        .storage()
+        .instance()
+        .get(&UpgradeDataKey::Admin)
+        .ok_or(ShipUpgradeError::NotInitialized)?;
+    admin.require_auth();
+    if *admin != stored {
+        return Err(ShipUpgradeError::NotInitialized);
+    }
+    if !curve.is_valid() {
+        return Err(ShipUpgradeError::InvalidProgressionCurve);
+    }
+    env.storage()
+        .instance()
+        .set(&UpgradeDataKey::Progression, &curve);
+    Ok(())
+}
+
+/// Price of taking `ship_id` to its next level under the active curve.
+/// Pure view. Errors with `MaxLevelReached` at the top of the ladder.
+pub fn level_upgrade_cost(env: &Env, ship_id: u64) -> Result<u64, ShipUpgradeError> {
+    if ship_id == 0 {
+        return Err(ShipUpgradeError::InvalidShipId);
+    }
+    let level = get_ship_level(env, ship_id);
+    if level >= MAX_LEVEL {
+        return Err(ShipUpgradeError::MaxLevelReached);
+    }
+    Ok(progression_model::level_cost(
+        &get_progression_curve(env),
+        level + 1,
+    ))
+}
+
+/// Price of reaching `level` from `level - 1` under the active curve, for
+/// frontends that want to render the whole ladder.
+pub fn level_cost_at(env: &Env, level: u32) -> u64 {
+    progression_model::level_cost(&get_progression_curve(env), level)
+}
+
+/// Days-to-level for every play style under the active curve.
+pub fn simulate_progression(env: &Env) -> ProgressionReport {
+    progression_model::simulate(&get_progression_curve(env))
+}
+
+/// Cumulative resource units burned by level upgrades.
+pub fn get_total_level_spend(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&UpgradeDataKey::TotalLevelSpend)
+        .unwrap_or(0)
+}
+
+/// Take `ship_id` to its next level, burning the level cost in `asset_id`
+/// from the owner's harvested balance.
+///
+/// Steps: authorise and rate-limit the player, verify ownership, price the
+/// next level, burn the resource, persist the level, emit `upgrade/level`.
+pub fn upgrade_ship_level(
+    env: &Env,
+    player: &Address,
+    ship_id: u64,
+    asset_id: Symbol,
+) -> Result<LevelUpgradeResult, ShipUpgradeError> {
+    player.require_auth();
+    check_rate_limit(env, player, Operation::ShipUpgrade)?;
+    if ship_id == 0 {
+        return Err(ShipUpgradeError::InvalidShipId);
+    }
+    let ship =
+        crate::ship_nft::get_ship(env, ship_id).map_err(|_| ShipUpgradeError::InvalidShipId)?;
+    if ship.owner != *player {
+        return Err(ShipUpgradeError::NotShipOwner);
+    }
+    let level = get_ship_level(env, ship_id);
+    if level >= MAX_LEVEL {
+        return Err(ShipUpgradeError::MaxLevelReached);
+    }
+    let next = level + 1;
+    let cost_u64 = progression_model::level_cost(&get_progression_curve(env), next);
+    // Balances are u32; a curve priced beyond that is unaffordable by
+    // definition.
+    let cost = u32::try_from(cost_u64).map_err(|_| ShipUpgradeError::InsufficientResources)?;
+
+    let res_key = ResourceKey::ResourceBalance(player.clone(), asset_id.clone());
+    let balance: u32 = env.storage().instance().get(&res_key).unwrap_or(0);
+    if balance < cost {
+        return Err(ShipUpgradeError::InsufficientResources);
+    }
+    env.storage().instance().set(&res_key, &(balance - cost));
+
+    let spend = get_total_level_spend(env);
+    env.storage().instance().set(
+        &UpgradeDataKey::TotalLevelSpend,
+        &spend.saturating_add(u64::from(cost)),
+    );
+    env.storage()
+        .persistent()
+        .set(&UpgradeDataKey::ShipLevel(ship_id), &next);
+
+    env.events().publish(
+        (symbol_short!("upgrade"), symbol_short!("level")),
+        (player.clone(), ship_id, next, cost, asset_id.clone()),
+    );
+
+    Ok(LevelUpgradeResult {
+        ship_id,
+        level: next,
+        cost,
+        asset_id,
+    })
+}
+
 #[cfg(test)]
 mod economy_tests {
     use super::*;

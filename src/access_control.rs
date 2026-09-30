@@ -50,11 +50,11 @@
 //! ### Adding a New Guarded Action
 //!
 //! 1. Define an action Symbol constant in the calling module or lib.rs:
-//!    ```rust
+//!    ```rust,ignore
 //!    const TRANSFER_ACTION: Symbol = symbol_short!("transfer");
 //!    ```
 //! 2. In the function performing that action, add an early-exit guard as the first statement:
-//!    ```rust
+//!    ```rust,ignore
 //!    pub fn transfer(..., caller: Address, ...) -> Result<...> {
 //!        caller.require_auth();
 //!        access_control::check_permission(&env, &caller, symbol_short!("transfer"))?;
@@ -630,7 +630,7 @@ pub fn grant_role_batch(
 ///
 /// # Usage
 /// - Call this function as the first statement in any mutating contract function:
-///   ```rust
+///   ```rust,ignore
 ///   pub fn sensitive_operation(env: Env, caller: Address, ...) -> Result<...> {
 ///       check_permission(&env, &caller, symbol_short!("sensitive_op"))?;
 ///       // ... operation logic

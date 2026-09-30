@@ -37,6 +37,8 @@ pub enum ShipError {
     ReentrancyDetected = 7,
     /// Metadata URI must use a marketplace-compatible URI scheme.
     InvalidMetadataUri = 8,
+    /// Ship is staked in yield farming and cannot move until unstaked.
+    Staked = 9,
 }
 
 impl crate::error_standard::StandardContractError for ShipError {
@@ -50,6 +52,7 @@ impl crate::error_standard::StandardContractError for ShipError {
                 (ErrorKind::Validation, false)
             }
             Self::BatchLimitExceeded => (ErrorKind::ResourceLimit, false),
+            Self::Staked => (ErrorKind::Conflict, false),
         };
         crate::error_standard::ErrorDescriptor {
             module: "ship_nft",
@@ -379,6 +382,9 @@ pub fn transfer_ownership(
     new_owner: &Address,
 ) -> Result<ShipNft, ShipError> {
     let ship = get_ship(env, ship_id)?;
+    if crate::yield_farming::is_ship_staked(env, ship_id) {
+        return Err(ShipError::Staked);
+    }
     transfer_ship(env, ship_id, &ship.owner, new_owner)
 }
 

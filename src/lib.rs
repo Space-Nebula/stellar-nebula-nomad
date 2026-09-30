@@ -25,11 +25,12 @@ pub use crate::nebula_explorer::{
 };
 
 pub mod access_control;
-pub mod constants;
-pub mod error_standard;
 mod analytics;
 mod blueprint_factory;
+pub mod constants;
 mod content_tools;
+pub mod error_standard;
+pub mod traits;
 
 mod gifting_system;
 mod leaderboards;
@@ -96,10 +97,9 @@ mod yield_forecast;
 
 mod gas_sponsor;
 
-mod cache_ttl_manager;
+pub mod cache_ttl_manager;
 mod metrics_exporter;
 mod migration_framework;
-pub mod cache_ttl_manager;
 mod state_snapshot;
 mod storage_optim;
 
@@ -135,7 +135,7 @@ pub mod mobile_views;
 #[path = "../integrations/mod.rs"]
 pub mod integrations;
 
-mod economics;
+pub mod economics;
 
 // Gas optimization modules
 mod gas_optimized_compute;
@@ -208,9 +208,6 @@ pub use batch_processor::{
     clear_batch, execute_batch, get_player_batch, queue_batch_operation, BatchError, BatchOp,
     BatchOpType, BatchResult, MAX_BATCH_SIZE,
 };
-pub use dex_integration::{
-    buy_offer, cancel_listing, get_open_offers, harvest_and_list, list_at_market, list_resource,
-    sell_to_order, DexFill, DynamicListError, OfferPage, MAX_OFFER_PAGE, MAX_OFFER_SCAN,
 pub use bounty_board::{
     claim_bounty, get_bounty, initialize_bounty_board, post_bounty, set_bounty_expiry, Bounty,
     BountyError, DEFAULT_BOUNTY_EXPIRY, MAX_ACTIVE_BOUNTIES,
@@ -220,6 +217,9 @@ pub use contract_versioning::{
     is_auto_migrate_enabled, migrate_data, set_auto_migrate, MigrationRecord, VersioningError,
     CURRENT_VERSION, MIGRATION_BATCH_SIZE,
 };
+pub use dex_integration::{
+    buy_offer, cancel_listing, get_open_offers, harvest_and_list, list_at_market, list_resource,
+    sell_to_order, DexFill, DynamicListError, OfferPage, MAX_OFFER_PAGE, MAX_OFFER_SCAN,
 };
 pub use dynamic_pricing::{
     deviation_bps, dynamic_price, ema_step, get_price_state, get_pricing_config,
@@ -265,9 +265,12 @@ pub use anomaly_classifier::{
     ClassificationRecord,
 };
 pub use audit_logger::{
-    get_audit_count, log_audit_event, query_audit_logs, AuditEntry, AuditLoggerError,
+    get_audit_count, get_audit_retention, get_retained_audit_count, log_audit_event,
+    oldest_audit_id, prune_audit_logs, query_audit_logs, set_audit_retention, AuditEntry,
+    AuditLoggerError, RetentionPolicy, DEFAULT_AUDIT_RETENTION_SECS, DEFAULT_MAX_AUDIT_ENTRIES,
     MAX_QUERY_LIMIT,
 };
+pub use difficulty_scaler::{DifficultyError, DifficultyResult};
 pub use energy_manager::{
     apply_passive_regen, consume_energy, get_energy_balance, get_regen_rate, recharge_energy,
     set_regen_rate, EnergyBalance, EnergyError, PassiveRegenResult, RechargeResult,
@@ -280,15 +283,6 @@ pub use escrow_trader::{
     cancel_escrow, complete_escrow, confirm_escrow, get_escrow, initiate_escrow, Escrow,
     EscrowError, EscrowResult, TradeAsset,
 };
-pub use audit_logger::{
-    get_audit_count, get_audit_retention, get_retained_audit_count, log_audit_event,
-    oldest_audit_id, prune_audit_logs, query_audit_logs, set_audit_retention, AuditEntry,
-    AuditLoggerError, RetentionPolicy, DEFAULT_AUDIT_RETENTION_SECS, DEFAULT_MAX_AUDIT_ENTRIES,
-    MAX_QUERY_LIMIT,
-};
-pub use sustainability_metrics::{claim_sustainability_reward, get_footprint, record_transaction_footprint, FootprintRecord, SustainabilityError};
-pub use anomaly_classifier::{classify_anomaly, classify_batch, get_classification, refine_classification, AnomalyError, ClassificationRecord};
-pub use shared_lib::{calculate_yield, validate_address, SharedError};
 pub use gas_sponsor::{
     claim_sponsorship_fund, get_admin, get_config, get_daily_count, get_fund_balance,
     get_remaining_daily_slots, has_been_sponsored, initialize as initialize_sponsorship,
@@ -319,25 +313,6 @@ pub use yield_forecast::{
     MAX_HISTORY_POINTS,
 };
 
-pub use storage_optim::{
-    store_with_bump, get_optimized_entry, batch_store_with_bump, guard_reentrancy,
-    release_guard, store_ship_nebula, get_ship_nebula, initialize_bump_config,
-    update_bump_config, get_bump_config, set_upgrade_target, get_upgrade_target,
-    reset_burst_counter, get_optimized_entries, get_ship_nebula_batch, StorageError,
-    OptimizedEntry, ShipNebulaData, OptimResult, BumpConfig, CachedEntry, StorageTier,
-    DEFAULT_BUMP_TTL, MAX_BUMP_TTL, MAX_BURST_READS, pack_u32x3, unpack_u32x3, pack_u64x2,
-    unpack_u64x2, bloom_insert, bloom_may_contain, prune_expired_data, PruneReport,
-    MAX_PRUNE_NAMESPACES,
-};
-pub use state_snapshot::{
-    take_snapshot, restore_from_snapshot, get_snapshot, get_ship_snapshots,
-    auto_snapshot, reset_session_count, StateSnapshot, SnapshotError,
-    RestoreResult, MAX_SNAPSHOTS_PER_SESSION, SNAPSHOT_TTL, AUTO_SNAPSHOT_INTERVAL,
-};
-pub use prize_distributor::{
-    initialize_prize_distributor, fund_prize_pool, submit_leaderboard_snapshot,
-    distribute_weekly_prizes, get_prize_pool, get_total_distributed, get_last_reset,
-    PrizeError, PrizeRecord, WEEK_SECONDS, MAX_PAYOUT_POSITIONS,};
 pub use alliance_manager::{
     contribute_to_treasury, found_alliance, get_alliance, get_alliance_treasury,
     get_member_contribution, get_player_alliance, join_alliance, leave_alliance, Alliance,
@@ -404,10 +379,11 @@ pub use state_snapshot::{
 pub use storage_optim::{
     batch_store_with_bump, bloom_insert, bloom_may_contain, get_bump_config, get_optimized_entries,
     get_optimized_entry, get_ship_nebula, get_ship_nebula_batch, get_upgrade_target,
-    guard_reentrancy, initialize_bump_config, pack_u32x3, pack_u64x2, release_guard,
-    reset_burst_counter, set_upgrade_target, store_ship_nebula, store_with_bump, unpack_u32x3,
-    unpack_u64x2, update_bump_config, BumpConfig, CachedEntry, OptimResult, OptimizedEntry,
-    ShipNebulaData, StorageError, StorageTier, DEFAULT_BUMP_TTL, MAX_BUMP_TTL, MAX_BURST_READS,
+    guard_reentrancy, initialize_bump_config, pack_u32x3, pack_u64x2, prune_expired_data,
+    release_guard, reset_burst_counter, set_upgrade_target, store_ship_nebula, store_with_bump,
+    unpack_u32x3, unpack_u64x2, update_bump_config, BumpConfig, CachedEntry, OptimResult,
+    OptimizedEntry, PruneReport, ShipNebulaData, StorageError, StorageTier, DEFAULT_BUMP_TTL,
+    MAX_BUMP_TTL, MAX_BURST_READS, MAX_PRUNE_NAMESPACES,
 };
 pub use wormhole_traveler::{
     calculate_travel_cost, cleanup_expired_wormholes, get_active_wormholes, get_travel_history,
@@ -422,11 +398,20 @@ pub use ship_customization::{
 pub use skins::{get_skin_templates, SkinTemplate};
 
 pub use economics::anti_whale::{
-    calculate_diminishing_returns, calculate_progressive_fee, get_daily_cap, get_day_index,
-    get_user_daily_volume, is_exempt, process_anti_whale_action, set_daily_cap, set_exempt,
-    AntiWhaleError, AntiWhaleKey, DAILY_WINDOW_SECONDS, DEFAULT_DAILY_CAP, PROGRESSIVE_FEE_BPS,
-    TIER1_MULTIPLIER_BPS, TIER1_THRESHOLD, TIER2_MULTIPLIER_BPS, TIER2_THRESHOLD,
-    TIER3_MULTIPLIER_BPS,
+    apply_gathering, calculate_diminishing_returns, calculate_progressive_fee,
+    charge_progressive_fee, check_guild_contribution, check_operation, diminishing_returns,
+    effective_config as get_anti_whale_config, get_daily_cap, get_day_index, get_impact_stats,
+    get_player_activity, get_player_tier, get_tier_leaderboard, get_user_daily_volume, is_exempt,
+    process_anti_whale_action, progressive_trade_fee, record_tier_score, tier_for_activity,
+    AntiWhaleConfig, AntiWhaleError, AntiWhaleKey, ImpactStats, OpKind, PlayerTier, TierEntry,
+    DAILY_WINDOW_SECONDS, DEFAULT_DAILY_CAP, DEFAULT_GUILD_DAILY_CAP, DEFAULT_MAX_MINTS_PER_DAY,
+    DEFAULT_MAX_SCANS_PER_DAY, DEFAULT_MAX_TRADES_PER_DAY, DEFAULT_TIER_WIDTH,
+    PROGRESSIVE_FEE_BANDS, PROGRESSIVE_FEE_BPS, TIER_MULTIPLIERS_BPS,
+};
+pub use economics::apy_calculator::{
+    accrued_yield, emergency_withdrawal, il_protection_bps, impermanent_loss_bps,
+    nft_accrued_yield, nft_daily_yield, simple_yield, tier_for_days, tvl_adjusted_apy_bps,
+    LockTier, APY_30_DAYS_BPS, APY_7_DAYS_BPS, APY_90_DAYS_BPS, EMERGENCY_PENALTY_BPS,
 };
 pub use economics::balancer::{
     apply_adjustment, detect_imbalance, generate_report, suggest_adjustment, BalanceAdjustment,
@@ -442,33 +427,26 @@ pub use economics::monitor::{
     calculate_inflation_rate, get_metrics, get_resource_metrics, initialize_monitor,
     track_resource_activity, update_supply_metrics, EconomicMetrics, ResourceMetrics,
 };
+pub use economics::progression_model::{
+    cumulative_cost, days_to_level, level_after_days, level_cost, meets_retention_targets,
+    psychological_price, simulate as simulate_progression_curve, CurveKind, PlayStyle,
+    ProgressionCurve, ProgressionReport, DEFAULT_BASE_COST as PROGRESSION_BASE_COST,
+    DEFAULT_GROWTH_BPS as PROGRESSION_GROWTH_BPS, MAX_LEVEL, UNITS_PER_HOUR,
+};
+pub use ship_upgrade::LevelUpgradeResult;
+pub use staking::{
+    GlobalStakingStats, GuildStake, StakeRecord, StakingError, StakingTier, GUILD_STAKE_LOCK_SECS,
+};
+pub use yield_farming::{
+    EmergencyWithdrawal, FarmError, LpPoolState, LpStake, NftStake, ResourceStake, TvlReport,
+    DEFAULT_TVL_TARGET, IL_POT_SHARE_BPS,
+};
 
 pub use trading::{
-    add_liquidity,
-    cancel_limit_order,
-    // AMM (Issue #189)
-    create_pool,
-    get_all_pools,
-    get_limit_order,
-    get_lp_balance,
-    get_pool,
-    get_trader_orders,
-    get_trading_history,
-    place_limit_order,
-    quote_swap,
-    record_trade,
-    remove_liquidity,
-    swap_exact_input,
-    AmmError,
-    LimitOrder,
-    LiquidityPool,
-    LiquidityProvider,
-    OrderSide,
-    TradeRecord,
-    TradingError,
-    AMM_MAX_ROUTE_HOPS,
-    MAX_SLIPPAGE_BPS,
-    SWAP_FEE_BPS,
+    add_liquidity, cancel_limit_order, create_pool, get_all_pools, get_limit_order, get_lp_balance,
+    get_pool, get_trader_orders, get_trading_history, place_limit_order, quote_swap, record_trade,
+    remove_liquidity, swap_exact_input, AmmError, LimitOrder, LiquidityPool, LiquidityProvider,
+    OrderSide, TradeRecord, TradingError, AMM_MAX_ROUTE_HOPS, MAX_SLIPPAGE_BPS, SWAP_FEE_BPS,
 };
 
 pub use crafting::{add_xp, craft, craft_with_overcharge, get_level, get_total_craft_sink, get_xp};
@@ -512,6 +490,11 @@ impl NebulaNomadContract {
     /// total_essence_accrued) and registers the player for the leaderboard.
     pub fn scan_nebula(env: Env, seed: BytesN<32>, player: Address) -> (NebulaLayout, Rarity) {
         player.require_auth();
+        // Daily scan cap (anti-whale). The signature has no error channel, so
+        // a capped player gets the contract error code (303) via a trap.
+        if let Err(e) = economics::anti_whale::check_operation(&env, &player, OpKind::Scan, 1) {
+            soroban_sdk::panic_with_error!(&env, e);
+        }
         let layout = nebula_explorer::generate_nebula_layout(&env, &seed, &player);
         let rarity = nebula_explorer::calculate_rarity_tier(&env, &layout);
         let layout_hash = nebula_explorer::compute_layout_hash(&env, &layout);
@@ -552,7 +535,11 @@ impl NebulaNomadContract {
         time_period: Symbol,
         score: u64,
     ) -> Result<(), LeaderboardError> {
-        leaderboards::update_score(&env, &player, category, time_period, score)
+        leaderboards::update_score(&env, &player, category, time_period, score)?;
+        // Mirror the score onto the player's power-tier board so whales rank
+        // against whales, not against newcomers.
+        economics::anti_whale::record_tier_score(&env, &player, score);
+        Ok(())
     }
 
     /// Get leaderboard entries for a category and time period.
@@ -1280,6 +1267,11 @@ impl NebulaNomadContract {
         ship_type: Symbol,
         metadata: Bytes,
     ) -> Result<ShipNft, ShipError> {
+        // `ship_nft::mint_ship` authorises the owner; a failed auth reverts
+        // this counter along with everything else.
+        if let Err(e) = economics::anti_whale::check_operation(&env, &owner, OpKind::Mint, 1) {
+            soroban_sdk::panic_with_error!(&env, e);
+        }
         let result = ship_nft::mint_ship(&env, &owner, &ship_type, &metadata);
         if result.is_ok() {
             let details = BytesN::from_array(&env, &[0u8; 128]);
@@ -1295,6 +1287,10 @@ impl NebulaNomadContract {
         ship_types: Vec<Symbol>,
         metadata: Bytes,
     ) -> Result<Vec<ShipNft>, ShipError> {
+        let count = ship_types.len().max(1);
+        if let Err(e) = economics::anti_whale::check_operation(&env, &owner, OpKind::Mint, count) {
+            soroban_sdk::panic_with_error!(&env, e);
+        }
         let result = ship_nft::batch_mint_ships(&env, &owner, &ship_types, &metadata);
         if result.is_ok() {
             let details = BytesN::from_array(&env, &[0u8; 128]);
@@ -2341,7 +2337,10 @@ impl NebulaNomadContract {
 
     /// Delete expired cache entries in `namespaces` and audit entries outside
     /// the retention policy. Permissionless and bounded per call.
-    pub fn prune_expired_data(env: Env, namespaces: Vec<Symbol>) -> Result<PruneReport, StorageError> {
+    pub fn prune_expired_data(
+        env: Env,
+        namespaces: Vec<Symbol>,
+    ) -> Result<PruneReport, StorageError> {
         storage_optim::prune_expired_data(&env, &namespaces)
     }
 
@@ -3532,18 +3531,30 @@ impl NebulaNomadContract {
         economics::anti_whale::process_anti_whale_action(&env, &user, amount)
     }
 
-    pub fn set_anti_whale_cap(env: Env, admin: Address, cap: u64) {
-        admin.require_auth();
-        economics::anti_whale::set_daily_cap(&env, cap);
+    /// Register the anti-whale admin (one-time). Only the admin can retune
+    /// limits, set the legacy cap or manage exemptions.
+    pub fn init_anti_whale_admin(env: Env, admin: Address) -> Result<(), AntiWhaleError> {
+        economics::anti_whale::init_admin(&env, &admin)
+    }
+
+    /// Set the legacy daily volume cap. Admin only.
+    pub fn set_anti_whale_cap(env: Env, admin: Address, cap: u64) -> Result<(), AntiWhaleError> {
+        economics::anti_whale::set_daily_cap(&env, &admin, cap)
     }
 
     pub fn get_anti_whale_cap(env: Env) -> u64 {
         economics::anti_whale::get_daily_cap(&env)
     }
 
-    pub fn set_anti_whale_exempt(env: Env, admin: Address, user: Address, exempt: bool) {
-        admin.require_auth();
-        economics::anti_whale::set_exempt(&env, &user, exempt);
+    /// Exempt (or un-exempt) an account from every anti-whale mechanism.
+    /// Admin only.
+    pub fn set_anti_whale_exempt(
+        env: Env,
+        admin: Address,
+        user: Address,
+        exempt: bool,
+    ) -> Result<(), AntiWhaleError> {
+        economics::anti_whale::set_exempt(&env, &admin, &user, exempt)
     }
 
     pub fn is_anti_whale_exempt(env: Env, user: Address) -> bool {
@@ -3552,6 +3563,62 @@ impl NebulaNomadContract {
 
     pub fn get_user_daily_volume(env: Env, user: Address) -> u64 {
         economics::anti_whale::get_user_daily_volume(&env, &user)
+    }
+
+    /// Replace the admin-set anti-whale limits. Admin only; governance
+    /// parameters (`aw_*`) still override individual fields.
+    pub fn set_anti_whale_config(
+        env: Env,
+        admin: Address,
+        config: AntiWhaleConfig,
+    ) -> Result<(), AntiWhaleError> {
+        economics::anti_whale::set_config(&env, &admin, config)
+    }
+
+    /// The anti-whale limits currently in force (admin config plus
+    /// governance overrides).
+    pub fn get_anti_whale_config(env: Env) -> AntiWhaleConfig {
+        economics::anti_whale::effective_config(&env)
+    }
+
+    /// Units gathered by `user` today before diminishing returns.
+    pub fn get_user_daily_gathered(env: Env, user: Address) -> u64 {
+        economics::anti_whale::get_user_daily_gathered(&env, &user)
+    }
+
+    /// Operations of `kind` performed by `user` today.
+    pub fn get_user_daily_ops(env: Env, user: Address, kind: OpKind) -> u32 {
+        economics::anti_whale::get_user_daily_ops(&env, &user, kind)
+    }
+
+    /// Trade volume of `user` today.
+    pub fn get_user_daily_trade_volume(env: Env, user: Address) -> u64 {
+        economics::anti_whale::get_user_daily_trade_volume(&env, &user)
+    }
+
+    /// Guild treasury contributions of `user` today.
+    pub fn get_daily_guild_contribution(env: Env, user: Address) -> i128 {
+        economics::anti_whale::get_user_daily_guild_contribution(&env, &user)
+    }
+
+    /// Lifetime activity points of `user`.
+    pub fn get_player_activity(env: Env, user: Address) -> u64 {
+        economics::anti_whale::get_player_activity(&env, &user)
+    }
+
+    /// Current power tier of `user` (casual / dedicated / hardcore).
+    pub fn get_player_tier(env: Env, user: Address) -> PlayerTier {
+        economics::anti_whale::get_player_tier(&env, &user)
+    }
+
+    /// Top `limit` rows of the leaderboard for one player tier.
+    pub fn get_tier_leaderboard(env: Env, tier: PlayerTier, limit: u32) -> Vec<TierEntry> {
+        economics::anti_whale::get_tier_leaderboard(&env, tier, limit)
+    }
+
+    /// Lifetime counters of how often each anti-whale mechanism fired.
+    pub fn get_anti_whale_impact(env: Env) -> ImpactStats {
+        economics::anti_whale::get_impact_stats(&env)
     }
 
     // ─── Trading System ───────────────────────────────────────────────────
@@ -3762,13 +3829,320 @@ impl NebulaNomadContract {
     pub fn claim_reputation_reward(env: Env, player: Address) -> Result<i128, ReputationError> {
         reputation::claim_reputation_reward(&env, &player)
     }
+
+    // ─── Ship level ladder (progression rebalance) ────────────────────────
+
+    /// Progression level of a ship (0 = never levelled).
+    pub fn get_ship_level(env: Env, ship_id: u64) -> u32 {
+        ship_upgrade::get_ship_level(&env, ship_id)
+    }
+
+    /// Active level cost curve (the rebalanced default unless overridden).
+    pub fn get_progression_curve(env: Env) -> ProgressionCurve {
+        ship_upgrade::get_progression_curve(&env)
+    }
+
+    /// Override the level cost curve. Upgrade-admin only.
+    pub fn set_progression_curve(
+        env: Env,
+        admin: Address,
+        curve: ProgressionCurve,
+    ) -> Result<(), ShipUpgradeError> {
+        ship_upgrade::set_progression_curve(&env, &admin, curve)
+    }
+
+    /// Price of a ship's next level. Pure view.
+    pub fn level_upgrade_cost(env: Env, ship_id: u64) -> Result<u64, ShipUpgradeError> {
+        ship_upgrade::level_upgrade_cost(&env, ship_id)
+    }
+
+    /// Price of reaching `level` under the active curve.
+    pub fn level_cost_at(env: Env, level: u32) -> u64 {
+        ship_upgrade::level_cost_at(&env, level)
+    }
+
+    /// Days-to-level for casual, regular and hardcore play under the active
+    /// curve.
+    pub fn simulate_progression(env: Env) -> ProgressionReport {
+        ship_upgrade::simulate_progression(&env)
+    }
+
+    /// Cumulative resource units burned by level upgrades.
+    pub fn get_total_level_spend(env: Env) -> u64 {
+        ship_upgrade::get_total_level_spend(&env)
+    }
+
+    /// Take a ship to its next level, burning the level cost in `asset_id`.
+    pub fn upgrade_ship_level(
+        env: Env,
+        player: Address,
+        ship_id: u64,
+        asset_id: Symbol,
+    ) -> Result<LevelUpgradeResult, ShipUpgradeError> {
+        ship_upgrade::upgrade_ship_level(&env, &player, ship_id, asset_id)
+    }
+
+    // ─── Staking: resources, ships, liquidity, guilds, governance ─────────
+
+    /// Lock `amount` of `asset_id` for a 7 / 30 / 90-day tier. Returns the
+    /// stake id.
+    pub fn stake_resource(
+        env: Env,
+        owner: Address,
+        asset_id: Symbol,
+        amount: u32,
+        tier: LockTier,
+    ) -> Result<u64, FarmError> {
+        yield_farming::stake_resource(&env, &owner, asset_id, amount, tier)
+    }
+
+    /// Pay out yield accrued on a resource stake.
+    pub fn claim_resource_yield(
+        env: Env,
+        owner: Address,
+        stake_id: u64,
+    ) -> Result<i128, FarmError> {
+        yield_farming::claim_resource_yield(&env, &owner, stake_id)
+    }
+
+    /// Return principal plus unclaimed yield after the lock.
+    pub fn unstake_resource(env: Env, owner: Address, stake_id: u64) -> Result<i128, FarmError> {
+        yield_farming::unstake_resource(&env, &owner, stake_id)
+    }
+
+    /// Leave a resource stake early: 50 % of principal and all yield are
+    /// forfeited to the yield reserve.
+    pub fn emergency_unstake_resource(
+        env: Env,
+        owner: Address,
+        stake_id: u64,
+    ) -> Result<EmergencyWithdrawal, FarmError> {
+        yield_farming::emergency_unstake_resource(&env, &owner, stake_id)
+    }
+
+    /// Read a resource stake.
+    pub fn get_resource_stake(env: Env, stake_id: u64) -> Option<ResourceStake> {
+        yield_farming::get_resource_stake(&env, stake_id)
+    }
+
+    /// Move `amount` of `asset_id` from the caller into the yield reserve.
+    pub fn fund_yield_reserve(
+        env: Env,
+        funder: Address,
+        asset_id: Symbol,
+        amount: u32,
+    ) -> Result<i128, FarmError> {
+        yield_farming::fund_yield_reserve(&env, &funder, asset_id, amount)
+    }
+
+    /// Units of `asset_id` available to pay yield.
+    pub fn get_yield_reserve(env: Env, asset_id: Symbol) -> i128 {
+        yield_farming::get_yield_reserve(&env, asset_id)
+    }
+
+    /// Units of `asset_id` locked in resource stakes.
+    pub fn get_staking_tvl(env: Env, asset_id: Symbol) -> i128 {
+        yield_farming::get_tvl(&env, asset_id)
+    }
+
+    /// Locked value across every staking product.
+    pub fn get_tvl_report(env: Env) -> TvlReport {
+        yield_farming::get_tvl_report(&env)
+    }
+
+    /// Set the per-asset TVL above which APYs are dampened. Staking-admin
+    /// only.
+    pub fn set_tvl_target(env: Env, admin: Address, target: i128) -> Result<(), FarmError> {
+        yield_farming::require_staking_admin(&env, &admin)?;
+        yield_farming::set_tvl_target(&env, target);
+        Ok(())
+    }
+
+    /// Set the asset staked ships pay out in. Staking-admin only.
+    pub fn set_nft_yield_asset(
+        env: Env,
+        admin: Address,
+        asset_id: Symbol,
+    ) -> Result<(), FarmError> {
+        yield_farming::require_staking_admin(&env, &admin)?;
+        yield_farming::set_nft_yield_asset(&env, asset_id);
+        Ok(())
+    }
+
+    /// Asset staked ships pay out in.
+    pub fn get_nft_yield_asset(env: Env) -> Symbol {
+        yield_farming::get_nft_yield_asset(&env)
+    }
+
+    /// Stake a ship; it cannot be transferred until unstaked.
+    pub fn stake_ship(env: Env, owner: Address, ship_id: u64) -> Result<NftStake, FarmError> {
+        yield_farming::stake_ship(&env, &owner, ship_id)
+    }
+
+    /// Pay out yield a staked ship has earned.
+    pub fn claim_ship_yield(env: Env, owner: Address, ship_id: u64) -> Result<i128, FarmError> {
+        yield_farming::claim_ship_yield(&env, &owner, ship_id)
+    }
+
+    /// Unstake a ship, paying unclaimed yield.
+    pub fn unstake_ship(env: Env, owner: Address, ship_id: u64) -> Result<i128, FarmError> {
+        yield_farming::unstake_ship(&env, &owner, ship_id)
+    }
+
+    /// Read a ship stake.
+    pub fn get_ship_stake(env: Env, ship_id: u64) -> Option<NftStake> {
+        yield_farming::get_ship_stake(&env, ship_id)
+    }
+
+    /// Stake AMM LP units to earn a share of funded rewards with
+    /// impermanent-loss protection.
+    pub fn stake_lp(
+        env: Env,
+        provider: Address,
+        pool_id: u64,
+        amount: i128,
+    ) -> Result<LpStake, FarmError> {
+        yield_farming::stake_lp(&env, &provider, pool_id, amount)
+    }
+
+    /// Deposit rewards for a pool's LP stakers (80 % pro rata, 20 % to the
+    /// impermanent-loss pot).
+    pub fn fund_lp_rewards(
+        env: Env,
+        funder: Address,
+        pool_id: u64,
+        amount: u32,
+    ) -> Result<(), FarmError> {
+        yield_farming::fund_lp_rewards(&env, &funder, pool_id, amount)
+    }
+
+    /// Pay out pending LP rewards.
+    pub fn claim_lp_rewards(env: Env, provider: Address, pool_id: u64) -> Result<i128, FarmError> {
+        yield_farming::claim_lp_rewards(&env, &provider, pool_id)
+    }
+
+    /// Withdraw LP units; returns `(rewards, il_compensation)`.
+    pub fn unstake_lp(
+        env: Env,
+        provider: Address,
+        pool_id: u64,
+        amount: i128,
+    ) -> Result<(i128, i128), FarmError> {
+        yield_farming::unstake_lp(&env, &provider, pool_id, amount)
+    }
+
+    /// Read an LP stake.
+    pub fn get_lp_stake(env: Env, pool_id: u64, provider: Address) -> Option<LpStake> {
+        yield_farming::get_lp_stake(&env, pool_id, &provider)
+    }
+
+    /// Read a pool's LP staking state.
+    pub fn get_lp_pool_state(env: Env, pool_id: u64) -> Option<LpPoolState> {
+        yield_farming::get_lp_pool_state(&env, pool_id)
+    }
+
+    /// Lock resources behind the caller's alliance for at least seven days.
+    pub fn stake_to_guild(
+        env: Env,
+        member: Address,
+        asset_id: Symbol,
+        amount: u32,
+    ) -> Result<GuildStake, StakingError> {
+        staking::stake_to_guild(&env, &member, asset_id, amount)
+    }
+
+    /// Deposit rewards split pro rata across a guild's stakers.
+    pub fn fund_guild_rewards(
+        env: Env,
+        funder: Address,
+        alliance_id: u64,
+        amount: u32,
+    ) -> Result<(), StakingError> {
+        staking::fund_guild_rewards(&env, &funder, alliance_id, amount)
+    }
+
+    /// Pay out the caller's share of guild rewards.
+    pub fn claim_guild_rewards(env: Env, member: Address) -> Result<i128, StakingError> {
+        staking::claim_guild_rewards(&env, &member)
+    }
+
+    /// Leave a guild stake after its lock; returns `(principal, rewards)`.
+    pub fn unstake_from_guild(env: Env, member: Address) -> Result<(i128, i128), StakingError> {
+        staking::unstake_from_guild(&env, &member)
+    }
+
+    /// Read a member's guild stake.
+    pub fn get_guild_stake(env: Env, member: Address) -> Option<GuildStake> {
+        staking::get_guild_stake(&env, &member)
+    }
+
+    /// Units staked into an alliance in total.
+    pub fn get_guild_stake_total(env: Env, alliance_id: u64) -> i128 {
+        staking::get_guild_stake_total(&env, alliance_id)
+    }
+
+    /// Initialise governance staking (admin, token, minimum stake, lock).
+    pub fn init_staking(
+        env: Env,
+        admin: Address,
+        token_address: Address,
+        min_stake: i128,
+        lock_duration_ledgers: u32,
+    ) -> Result<(), StakingError> {
+        staking::initialize(env, admin, token_address, min_stake, lock_duration_ledgers)
+    }
+
+    /// Stake for voting power under the default lock.
+    pub fn stake_for_voting(env: Env, staker: Address, amount: i128) -> Result<(), StakingError> {
+        staking::stake(env, staker, amount)
+    }
+
+    /// Stake for voting power under a named tier.
+    pub fn stake_with_tier(
+        env: Env,
+        staker: Address,
+        amount: i128,
+        tier: StakingTier,
+    ) -> Result<(), StakingError> {
+        staking::stake_with_tier(env, staker, amount, tier)
+    }
+
+    /// Withdraw a governance stake after its lock.
+    pub fn unstake_voting(env: Env, staker: Address) -> Result<i128, StakingError> {
+        staking::unstake(env, staker)
+    }
+
+    /// Voting power of an address (0 while delegated or within the first
+    /// ledger of the stake).
+    pub fn get_voting_power(env: Env, address: Address) -> i128 {
+        staking::get_voting_power(env, address)
+    }
+
+    /// Read a governance stake.
+    pub fn get_stake_v2(env: Env, address: Address) -> Option<StakeRecord> {
+        staking::get_stake_v2(env, address)
+    }
+
+    /// Slash part of a governance stake for malicious voting. Staking-admin
+    /// only.
+    pub fn slash_stake(
+        env: Env,
+        admin: Address,
+        staker: Address,
+        slash_bps: u32,
+    ) -> Result<i128, StakingError> {
+        staking::slash_stake(&env, &admin, &staker, slash_bps)
+    }
+
+    /// Lifetime units slashed from governance stakes.
+    pub fn get_total_slashed(env: Env) -> i128 {
+        staking::get_total_slashed(&env)
+    }
+
+    /// Aggregate governance staking statistics.
+    pub fn get_global_staking_stats(env: Env) -> GlobalStakingStats {
+        staking::get_global_staking_stats(&env)
+    }
 }
 
-// Game Systems Modules (Issues #528-531)
-pub mod seasons;
-pub mod event_scheduler;
 pub mod clan_wars;
-pub mod alliance_manager;
-pub mod privacy_stats;
-pub mod crafting;
-pub mod recipes;

@@ -117,7 +117,8 @@ pub fn unsubscribe_stream(env: &Env, subscriber: &Address) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Events as _};
+    use soroban_sdk::TryFromVal;
 
     /// Topic `index` of the first event published in `env`, as a symbol.
     fn first_event_topic(env: &Env, index: usize) -> soroban_sdk::Symbol {
@@ -146,13 +147,6 @@ mod tests {
         let address = Address::generate(&env);
         query_account_info(&env, &address);
 
-        assert_eq!(
-            first_event_topic(&env, 0),
-            soroban_sdk::symbol_short!("horizon")
-        );
-        assert_eq!(
-            first_event_topic(&env, 1),
-            soroban_sdk::symbol_short!("query")
         let topics =
             crate::test_helpers::event_topics(&env, 0).expect("expected at least one event");
         assert_eq!(
@@ -230,9 +224,6 @@ mod tests {
         };
         stream_events(&env, &subscriber, filter);
 
-        assert_eq!(
-            first_event_topic(&env, 1),
-            soroban_sdk::symbol_short!("stream")
         let topics = crate::test_helpers::event_topics(&env, 0).unwrap();
         assert_eq!(
             topics.get(1).map(std::string::String::as_str),
@@ -259,9 +250,6 @@ mod tests {
         let subscriber = Address::generate(&env);
         unsubscribe_stream(&env, &subscriber);
 
-        assert_eq!(
-            first_event_topic(&env, 1),
-            soroban_sdk::symbol_short!("unsub")
         let topics = crate::test_helpers::event_topics(&env, 0).unwrap();
         assert_eq!(
             topics.get(1).map(std::string::String::as_str),

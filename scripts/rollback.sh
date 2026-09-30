@@ -24,8 +24,8 @@ done
 ARTIFACTS_DIR="deployment/artifacts/${NETWORK}"
 DEPLOY_LOG=".deploy-${NETWORK}.log"
 
-command -v soroban >/dev/null 2>&1 || {
-    echo "soroban CLI not found."
+command -v stellar >/dev/null 2>&1 || {
+    echo "stellar CLI not found. Install with: cargo install --locked stellar-cli"
     exit 1
 }
 
@@ -52,12 +52,12 @@ WASM_FILE=$(find "$ARTIFACTS_DIR" -name "*.wasm" 2>/dev/null | head -1)
 if [ -z "$WASM_FILE" ]; then
     echo "No WASM artifact found in $ARTIFACTS_DIR."
     echo "Rebuilding from source at matching commit..."
-    cargo build --target wasm32-unknown-unknown --release
-    WASM_FILE="target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm"
+    stellar contract build
+    WASM_FILE="target/wasm32v1-none/release/stellar_nebula_nomad.wasm"
 fi
 
 echo "==> Deploying rollback WASM: $WASM_FILE"
-CONTRACT_ID=$(soroban contract deploy \
+CONTRACT_ID=$(stellar contract deploy \
     --wasm "$WASM_FILE" \
     --source-account "$IDENTITY" \
     --network "$NETWORK" 2>/dev/null)

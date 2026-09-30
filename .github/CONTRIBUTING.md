@@ -28,8 +28,8 @@ See [DEVELOPER_GUIDE.md](../docs/DEVELOPER_GUIDE.md) for detailed setup instruct
 Quick start:
 ```bash
 rustup update
-rustup target add wasm32-unknown-unknown
-cargo install --locked soroban-cli
+rustup target add wasm32v1-none
+cargo install --locked stellar-cli
 git clone https://github.com/YOUR_USERNAME/stellar-nebula-nomad.git
 cd stellar-nebula-nomad
 cargo check --locked

@@ -5,6 +5,7 @@
 //! Stop-loss orders are modelled as sell-side limit orders and executed
 //! by an off-chain keeper that calls `cancel_limit_order` + market sell.
 
+use crate::economics::anti_whale;
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 use crate::reentrancy_guard::{with_guard, ReentrancyError};
@@ -85,6 +86,8 @@ pub enum TradingError {
     InvalidQuantity = 6,
     /// A guarded section was re-entered (Issue #472).
     Reentrancy = 7,
+    /// Trader hit today's trade cap (anti-whale).
+    DailyTradeCapExceeded = 8,
 }
 
 impl crate::error_standard::StandardContractError for TradingError {
@@ -98,6 +101,7 @@ impl crate::error_standard::StandardContractError for TradingError {
             Self::NotOrderOwner => (ErrorKind::Authorization, false),
             Self::OrderCapReached => (ErrorKind::ResourceLimit, false),
             Self::Reentrancy => (ErrorKind::Conflict, false),
+            Self::DailyTradeCapExceeded => (ErrorKind::ResourceLimit, true),
         };
         crate::error_standard::ErrorDescriptor {
             module: "trading",
@@ -155,6 +159,8 @@ fn place_limit_order_unguarded(
     mut order: LimitOrder,
 ) -> Result<u64, TradingError> {
     trader.require_auth();
+    anti_whale::check_operation(env, trader, anti_whale::OpKind::Trade, 1)
+        .map_err(|_| TradingError::DailyTradeCapExceeded)?;
 
     if order.limit_price <= 0 {
         return Err(TradingError::InvalidPrice);
@@ -423,6 +429,8 @@ pub enum AmmError {
     ZeroLiquidity = 107,
     /// A guarded section was re-entered (Issue #238).
     Reentrancy = 108,
+    /// Trader hit today's trade cap (anti-whale).
+    DailyTradeCapExceeded = 109,
 }
 
 impl crate::error_standard::StandardContractError for AmmError {
@@ -437,6 +445,7 @@ impl crate::error_standard::StandardContractError for AmmError {
             Self::InvalidAmount | Self::InvalidRoute | Self::ZeroLiquidity => {
                 (ErrorKind::Validation, false)
             }
+            Self::DailyTradeCapExceeded => (ErrorKind::ResourceLimit, true),
         };
         crate::error_standard::ErrorDescriptor {
             module: "trading",
@@ -802,6 +811,8 @@ pub fn swap_exact_input(
     if route.is_empty() || route.len() > AMM_MAX_ROUTE_HOPS {
         return Err(AmmError::InvalidRoute);
     }
+    anti_whale::check_operation(env, trader, anti_whale::OpKind::Trade, 1)
+        .map_err(|_| AmmError::DailyTradeCapExceeded)?;
 
     with_guard(env, || {
         let mut current_amount = amount_in;
@@ -863,6 +874,41 @@ pub fn swap_exact_input(
                 .set(&AmmKey::Pool(pool_id), &updated_pool);
 
             current_amount = output;
+        }
+
+        // Progressive anti-whale fee on the output, left in the last pool so
+        // liquidity providers earn it.
+        let fee_units = anti_whale::charge_progressive_fee(
+            env,
+            trader,
+            u64::try_from(current_amount).unwrap_or(u64::MAX),
+        )
+        .map_err(|_| AmmError::InvalidAmount)?;
+        if fee_units > 0 {
+            let fee = i128::try_from(fee_units)
+                .unwrap_or(i128::MAX)
+                .min(current_amount);
+            let last_pool_id = route.get(route.len() - 1).ok_or(AmmError::InvalidRoute)?;
+            let mut last_pool: LiquidityPool = env
+                .storage()
+                .persistent()
+                .get(&AmmKey::Pool(last_pool_id))
+                .ok_or(AmmError::PoolNotFound)?;
+            if last_pool.resource_a == current_resource {
+                last_pool.reserve_a = last_pool
+                    .reserve_a
+                    .checked_add(fee)
+                    .ok_or(AmmError::InvalidAmount)?;
+            } else {
+                last_pool.reserve_b = last_pool
+                    .reserve_b
+                    .checked_add(fee)
+                    .ok_or(AmmError::InvalidAmount)?;
+            }
+            env.storage()
+                .persistent()
+                .set(&AmmKey::Pool(last_pool_id), &last_pool);
+            current_amount -= fee;
         }
 
         if current_amount < min_amount_out {

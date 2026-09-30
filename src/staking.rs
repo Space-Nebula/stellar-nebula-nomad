@@ -33,6 +33,18 @@ pub enum StakingError {
     EarlyWithdrawPenalty = 13,
     PenaltyBelowMinimum = 14,
     TierLocked = 15,
+    /// Caller is not in an alliance.
+    NotGuildMember = 16,
+    /// Guild stakes must all use the asset the guild started with.
+    AssetMismatch = 17,
+    /// No guild stake for this member.
+    NoGuildStake = 18,
+    /// The guild reward pool cannot cover the claim.
+    RewardReserveEmpty = 19,
+    /// Caller is not the staking admin.
+    Unauthorized = 20,
+    /// Slash rate must be 1..=10 000 bps.
+    InvalidSlash = 21,
 }
 
 // ─── Data Types ───────────────────────────────────────────────────────────
@@ -113,6 +125,16 @@ pub enum DataKey {
     StakeTier(Address),
     FlexibleStakes(Address),
     ClaimedRewards(Address),
+    /// Guild stake by member.
+    GuildStake(Address),
+    /// Units staked into a guild in total.
+    GuildStakeTotal(u64),
+    /// Asset a guild's stakes are denominated in.
+    GuildStakeAsset(u64),
+    /// Accumulated guild reward per staked unit, scaled by `REWARD_PRECISION`.
+    GuildAccReward(u64),
+    /// Lifetime units slashed from governance stakes.
+    TotalSlashed,
 }
 
 const BPS_DENOMINATOR: u32 = 10_000;
@@ -702,4 +724,331 @@ pub fn get_total_staked(env: Env) -> i128 {
         .persistent()
         .get(&DataKey::TotalStaked)
         .unwrap_or(0)
+}
+
+// ── Guild staking (Issue #504) ───────────────────────────────────────────────
+//
+// Members lock resource units behind their alliance for at least seven days.
+// The locked units are credited to the alliance treasury while staked (so
+// the guild can count on them) and debited again on exit. Rewards funded
+// into the guild are split pro rata across stakers with a MasterChef-style
+// accumulator, so a member's share is `staked / total` at every deposit.
+
+/// Minimum guild stake lock.
+pub const GUILD_STAKE_LOCK_SECS: u64 = 7 * 86_400;
+/// Fixed-point scale of the guild reward accumulator.
+pub const REWARD_PRECISION: i128 = 1_000_000_000_000;
+
+/// A member's guild stake.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GuildStake {
+    /// Alliance staked into.
+    pub alliance_id: u64,
+    /// Staking member.
+    pub member: Address,
+    /// Asset locked.
+    pub asset_id: soroban_sdk::Symbol,
+    /// Units locked.
+    pub amount: i128,
+    /// Deposit timestamp.
+    pub staked_at: u64,
+    /// Earliest exit timestamp.
+    pub unlock_at: u64,
+    /// MasterChef reward debt.
+    pub reward_debt: i128,
+}
+
+fn guild_total(env: &Env, alliance_id: u64) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::GuildStakeTotal(alliance_id))
+        .unwrap_or(0)
+}
+
+fn guild_acc(env: &Env, alliance_id: u64) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::GuildAccReward(alliance_id))
+        .unwrap_or(0)
+}
+
+fn guild_asset(env: &Env, alliance_id: u64) -> Option<soroban_sdk::Symbol> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::GuildStakeAsset(alliance_id))
+}
+
+fn adjust_treasury(env: &Env, alliance_id: u64, delta: i128) {
+    let key = crate::alliance_manager::AllianceKey::AllianceTreasury(alliance_id);
+    let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage()
+        .persistent()
+        .set(&key, &current.saturating_add(delta).max(0));
+}
+
+fn pending_guild_reward(stake: &GuildStake, acc: i128) -> i128 {
+    stake
+        .amount
+        .saturating_mul(acc)
+        .checked_div(REWARD_PRECISION)
+        .unwrap_or(0)
+        .saturating_sub(stake.reward_debt)
+        .max(0)
+}
+
+fn debit_units(
+    env: &Env,
+    owner: &Address,
+    asset: &soroban_sdk::Symbol,
+    amount: i128,
+) -> Result<(), StakingError> {
+    let units = u32::try_from(amount).map_err(|_| StakingError::InvalidAmount)?;
+    crate::resource_minter::debit_resource_balance(env, owner, asset, units)
+        .map(|_| ())
+        .map_err(|_| StakingError::InsufficientBalance)
+}
+
+fn credit_units(
+    env: &Env,
+    owner: &Address,
+    asset: &soroban_sdk::Symbol,
+    amount: i128,
+) -> Result<(), StakingError> {
+    if amount <= 0 {
+        return Ok(());
+    }
+    let units = u32::try_from(amount).map_err(|_| StakingError::InvalidAmount)?;
+    crate::resource_minter::credit_resource_balance(env, owner, asset, units)
+        .map(|_| ())
+        .map_err(|_| StakingError::InvalidAmount)
+}
+
+/// Read a member's guild stake.
+pub fn get_guild_stake(env: &Env, member: &Address) -> Option<GuildStake> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::GuildStake(member.clone()))
+}
+
+/// Units staked into `alliance_id` in total.
+pub fn get_guild_stake_total(env: &Env, alliance_id: u64) -> i128 {
+    guild_total(env, alliance_id)
+}
+
+/// Lock `amount` of `asset_id` behind the caller's alliance. Adding to an
+/// existing stake pays out pending rewards first and restarts the lock.
+pub fn stake_to_guild(
+    env: &Env,
+    member: &Address,
+    asset_id: soroban_sdk::Symbol,
+    amount: u32,
+) -> Result<GuildStake, StakingError> {
+    member.require_auth();
+    if amount == 0 {
+        return Err(StakingError::InvalidAmount);
+    }
+    let alliance_id = crate::alliance_manager::get_player_alliance(env, member.clone())
+        .ok_or(StakingError::NotGuildMember)?;
+    match guild_asset(env, alliance_id) {
+        Some(existing) if existing != asset_id => return Err(StakingError::AssetMismatch),
+        Some(_) => {}
+        None => env
+            .storage()
+            .persistent()
+            .set(&DataKey::GuildStakeAsset(alliance_id), &asset_id),
+    }
+    let amount_i = i128::from(amount);
+    debit_units(env, member, &asset_id, amount_i)?;
+
+    let acc = guild_acc(env, alliance_id);
+    let now = env.ledger().timestamp();
+    let stake = match get_guild_stake(env, member) {
+        Some(mut existing) => {
+            if existing.alliance_id != alliance_id {
+                return Err(StakingError::NotGuildMember);
+            }
+            let pending = pending_guild_reward(&existing, acc);
+            credit_units(env, member, &asset_id, pending)?;
+            existing.amount = existing
+                .amount
+                .checked_add(amount_i)
+                .ok_or(StakingError::InvalidAmount)?;
+            existing.staked_at = now;
+            existing.unlock_at = now.saturating_add(GUILD_STAKE_LOCK_SECS);
+            existing.reward_debt = existing.amount.saturating_mul(acc) / REWARD_PRECISION;
+            existing
+        }
+        None => GuildStake {
+            alliance_id,
+            member: member.clone(),
+            asset_id: asset_id.clone(),
+            amount: amount_i,
+            staked_at: now,
+            unlock_at: now.saturating_add(GUILD_STAKE_LOCK_SECS),
+            reward_debt: amount_i.saturating_mul(acc) / REWARD_PRECISION,
+        },
+    };
+    env.storage()
+        .persistent()
+        .set(&DataKey::GuildStake(member.clone()), &stake);
+    env.storage().persistent().set(
+        &DataKey::GuildStakeTotal(alliance_id),
+        &guild_total(env, alliance_id).saturating_add(amount_i),
+    );
+    adjust_treasury(env, alliance_id, amount_i);
+    env.events().publish(
+        (symbol_short!("stake"), symbol_short!("guild")),
+        (member.clone(), alliance_id, asset_id, amount),
+    );
+    Ok(stake)
+}
+
+/// Deposit `amount` of the guild's stake asset as rewards, split pro rata
+/// across current stakers. Refused when nobody is staked.
+pub fn fund_guild_rewards(
+    env: &Env,
+    funder: &Address,
+    alliance_id: u64,
+    amount: u32,
+) -> Result<(), StakingError> {
+    funder.require_auth();
+    if amount == 0 {
+        return Err(StakingError::InvalidAmount);
+    }
+    let asset = guild_asset(env, alliance_id).ok_or(StakingError::NoGuildStake)?;
+    let total = guild_total(env, alliance_id);
+    if total <= 0 {
+        return Err(StakingError::NoGuildStake);
+    }
+    let amount_i = i128::from(amount);
+    debit_units(env, funder, &asset, amount_i)?;
+    let acc = guild_acc(env, alliance_id)
+        .checked_add(
+            amount_i
+                .checked_mul(REWARD_PRECISION)
+                .ok_or(StakingError::InvalidAmount)?
+                / total,
+        )
+        .ok_or(StakingError::InvalidAmount)?;
+    env.storage()
+        .persistent()
+        .set(&DataKey::GuildAccReward(alliance_id), &acc);
+    env.events().publish(
+        (symbol_short!("stake"), symbol_short!("g_fund")),
+        (funder.clone(), alliance_id, amount),
+    );
+    Ok(())
+}
+
+/// Pay out a member's share of funded guild rewards.
+pub fn claim_guild_rewards(env: &Env, member: &Address) -> Result<i128, StakingError> {
+    member.require_auth();
+    let mut stake = get_guild_stake(env, member).ok_or(StakingError::NoGuildStake)?;
+    let acc = guild_acc(env, stake.alliance_id);
+    let pending = pending_guild_reward(&stake, acc);
+    if pending == 0 {
+        return Ok(0);
+    }
+    credit_units(env, member, &stake.asset_id, pending)?;
+    stake.reward_debt = stake.amount.saturating_mul(acc) / REWARD_PRECISION;
+    env.storage()
+        .persistent()
+        .set(&DataKey::GuildStake(member.clone()), &stake);
+    Ok(pending)
+}
+
+/// Leave the guild stake after the lock: pays pending rewards and returns
+/// the principal. Returns `(principal, rewards)`.
+pub fn unstake_from_guild(env: &Env, member: &Address) -> Result<(i128, i128), StakingError> {
+    member.require_auth();
+    let stake = get_guild_stake(env, member).ok_or(StakingError::NoGuildStake)?;
+    if env.ledger().timestamp() < stake.unlock_at {
+        return Err(StakingError::TimeLockActive);
+    }
+    let acc = guild_acc(env, stake.alliance_id);
+    let pending = pending_guild_reward(&stake, acc);
+    env.storage()
+        .persistent()
+        .remove(&DataKey::GuildStake(member.clone()));
+    env.storage().persistent().set(
+        &DataKey::GuildStakeTotal(stake.alliance_id),
+        &guild_total(env, stake.alliance_id)
+            .saturating_sub(stake.amount)
+            .max(0),
+    );
+    adjust_treasury(env, stake.alliance_id, -stake.amount);
+    credit_units(env, member, &stake.asset_id, stake.amount)?;
+    credit_units(env, member, &stake.asset_id, pending)?;
+    env.events().publish(
+        (symbol_short!("stake"), symbol_short!("g_out")),
+        (member.clone(), stake.alliance_id, stake.amount, pending),
+    );
+    Ok((stake.amount, pending))
+}
+
+// ── Governance slashing (Issue #504) ─────────────────────────────────────────
+
+/// Lifetime units slashed from governance stakes.
+pub fn get_total_slashed(env: &Env) -> i128 {
+    env.storage()
+        .persistent()
+        .get(&DataKey::TotalSlashed)
+        .unwrap_or(0)
+}
+
+/// Slash `slash_bps` of `staker`'s governance stake for malicious voting.
+/// Staking-admin only. Voting power is derived from the stake, so it drops
+/// with it; a stake slashed to zero is removed.
+pub fn slash_stake(
+    env: &Env,
+    admin: &Address,
+    staker: &Address,
+    slash_bps: u32,
+) -> Result<i128, StakingError> {
+    admin.require_auth();
+    let stored: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(StakingError::NotInitialized)?;
+    if stored != *admin {
+        return Err(StakingError::Unauthorized);
+    }
+    if slash_bps == 0 || slash_bps > BPS_DENOMINATOR {
+        return Err(StakingError::InvalidSlash);
+    }
+    let mut stake: StakeRecord = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Stake(staker.clone()))
+        .ok_or(StakingError::NoActiveStake)?;
+    let slashed = stake.amount.saturating_mul(i128::from(slash_bps)) / i128::from(BPS_DENOMINATOR);
+    stake.amount -= slashed;
+    if stake.amount == 0 {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Stake(staker.clone()));
+    } else {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Stake(staker.clone()), &stake);
+    }
+    let total: i128 = env
+        .storage()
+        .persistent()
+        .get(&DataKey::TotalStaked)
+        .unwrap_or(0);
+    env.storage()
+        .persistent()
+        .set(&DataKey::TotalStaked, &total.saturating_sub(slashed).max(0));
+    env.storage().persistent().set(
+        &DataKey::TotalSlashed,
+        &get_total_slashed(env).saturating_add(slashed),
+    );
+    env.events().publish(
+        (symbol_short!("stake"), symbol_short!("slash")),
+        (staker.clone(), slashed, slash_bps),
+    );
+    Ok(slashed)
 }

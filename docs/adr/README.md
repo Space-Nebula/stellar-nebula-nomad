@@ -14,3 +14,4 @@ This directory contains key Architecture Decision Records (ADRs) for the `stella
 8. [ADR 008: Multi-Tier Testing Strategy](008-testing-strategy.md)
 9. [ADR 009: Domain-Driven Module Organization](009-module-organization.md)
 10. [ADR 010: Standardized Error Handling Convention](010-error-handling.md)
+11. [ADR 011: Ship Progression Balance](011-ship-progression-balance.md)

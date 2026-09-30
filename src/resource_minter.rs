@@ -8,7 +8,9 @@
 //     at the top of mint_resource() before any state mutation.
 //   • RateLimitHit events are emitted inside check_rate_limit.
 
-use crate::economics::anti_whale::{process_anti_whale_action, AntiWhaleError};
+use crate::economics::anti_whale::{
+    apply_gathering, check_operation, process_anti_whale_action, AntiWhaleError, OpKind,
+};
 use crate::nebula_explorer::{CellType, NebulaLayout};
 use crate::nebula_gen::{NebulaError as NebulaGenError, NebulaGen};
 use crate::rate_limiter::{check_rate_limit, Operation, RateLimitError};
@@ -124,9 +126,14 @@ pub enum MinterError {
 impl From<AntiWhaleError> for MinterError {
     fn from(err: AntiWhaleError) -> Self {
         match err {
-            AntiWhaleError::DailyCapExceeded => MinterError::DailyCapExceeded,
+            AntiWhaleError::DailyCapExceeded
+            | AntiWhaleError::OperationCapExceeded
+            | AntiWhaleError::GuildContributionCapExceeded => MinterError::DailyCapExceeded,
             AntiWhaleError::ArithmeticOverflow => MinterError::ArithmeticOverflow,
-            AntiWhaleError::InvalidAmount => MinterError::InvalidAmount,
+            AntiWhaleError::InvalidAmount
+            | AntiWhaleError::InvalidConfig
+            | AntiWhaleError::Unauthorized
+            | AntiWhaleError::AlreadyInitialized => MinterError::InvalidAmount,
         }
     }
 }
@@ -204,7 +211,8 @@ impl ResourceMinterContract {
             _ => MinterError::NoLayoutForShip,
         })?;
 
-        // ── Anti-Whale check (Issue #455) ─────────────────────
+        // ── Anti-Whale checks (Issue #455 / #502) ──────────────
+        check_operation(env, &caller, OpKind::Mint, 1)?;
         let (effective_amount, _progressive_fee) = process_anti_whale_action(env, &caller, amount)?;
 
         // ── Update balances (checked: Issue #239) ──────────────
@@ -247,7 +255,6 @@ impl ResourceMinterContract {
         );
 
         Ok(record)
-
     }
 
     /// Query the balance of `owner` for `resource_type`.
@@ -297,7 +304,8 @@ fn mint_resource_unguarded(
         _ => MinterError::NoLayoutForShip,
     })?;
 
-    // ── Anti-Whale check (Issue #455) ─────────────────────
+    // ── Anti-Whale checks (Issue #455 / #502) ──────────────
+    check_operation(env, &caller, OpKind::Mint, 1)?;
     let (effective_amount, _progressive_fee) = process_anti_whale_action(env, &caller, amount)?;
 
     // ── Update balances (checked: Issue #239) ──────────────
@@ -689,6 +697,23 @@ pub fn credit_resource_balance(
     Ok(next)
 }
 
+/// Debit `amount` of `asset` from `owner`, failing with `InsufficientBalance`
+/// when the holder has less than `amount`.
+pub fn debit_resource_balance(
+    env: &Env,
+    owner: &Address,
+    asset: &Symbol,
+    amount: u32,
+) -> Result<u32, HarvestError> {
+    let key = ResourceKey::ResourceBalance(owner.clone(), asset.clone());
+    let current: u32 = env.storage().instance().get(&key).unwrap_or(0);
+    let next = current
+        .checked_sub(amount)
+        .ok_or(HarvestError::InsufficientBalance)?;
+    env.storage().instance().set(&key, &next);
+    Ok(next)
+}
+
 /// Harvest every resource-bearing cell in `layout` and credit the ship's owner.
 ///
 /// The ship is resolved from `ship_id` rather than trusted from the caller, so
@@ -725,9 +750,10 @@ pub(crate) fn harvest_resources_unguarded(
 ) -> Result<HarvestResult, HarvestError> {
     let ship = crate::ship_nft::get_ship(env, ship_id).map_err(|_| HarvestError::ShipNotFound)?;
 
-    let mut resources: Vec<HarvestedResource> = Vec::new(env);
-    let mut total_harvested: u32 = 0;
-
+    // Pass 1: collect the raw yield so diminishing returns are applied once
+    // per harvest (one storage round-trip) rather than once per cell.
+    let mut raw: Vec<HarvestedResource> = Vec::new(env);
+    let mut raw_total: u32 = 0;
     for i in 0..layout.cells.len() {
         let Some(cell) = layout.cells.get(i) else {
             continue;
@@ -738,16 +764,43 @@ pub(crate) fn harvest_resources_unguarded(
         if cell.energy == 0 {
             continue;
         }
-
-        resources.push_back(HarvestedResource {
-            asset_id: asset_id.clone(),
+        raw.push_back(HarvestedResource {
+            asset_id,
             amount: cell.energy,
         });
-        total_harvested = total_harvested
+        raw_total = raw_total
             .checked_add(cell.energy)
             .ok_or(HarvestError::PriceOverflow)?;
+    }
 
-        credit_resource_balance(env, &ship.owner, &asset_id, cell.energy)?;
+    if raw_total == 0 {
+        return Err(HarvestError::EmptyHarvest);
+    }
+
+    // Anti-whale diminishing returns on the owner's daily gathering; the
+    // effective total is spread across cells pro rata (floored).
+    let effective_total = apply_gathering(env, &ship.owner, u64::from(raw_total))
+        .map_err(|_| HarvestError::PriceOverflow)?;
+
+    let mut resources: Vec<HarvestedResource> = Vec::new(env);
+    let mut total_harvested: u32 = 0;
+    for i in 0..raw.len() {
+        let Some(entry) = raw.get(i) else {
+            continue;
+        };
+        let scaled = u64::from(entry.amount) * effective_total / u64::from(raw_total);
+        let amount = u32::try_from(scaled).unwrap_or(u32::MAX);
+        if amount == 0 {
+            continue;
+        }
+        resources.push_back(HarvestedResource {
+            asset_id: entry.asset_id.clone(),
+            amount,
+        });
+        total_harvested = total_harvested
+            .checked_add(amount)
+            .ok_or(HarvestError::PriceOverflow)?;
+        credit_resource_balance(env, &ship.owner, &entry.asset_id, amount)?;
     }
 
     if total_harvested == 0 {

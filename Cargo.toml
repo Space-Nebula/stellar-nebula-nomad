@@ -30,15 +30,6 @@ must_use_candidate = "allow"
 # churn for an already-documented, consistent error convention.
 missing_errors_doc = "allow"
 
-# Soroban contract code has many utility functions that are intentionally
-# kept available for API completeness and future use, not all of which
-# are called from every code path.
-dead_code = "allow"
-
-# Soroban contract functions commonly have unused variables; this is acceptable
-# when functions are kept for API completeness or future extensions.
-unused_variables = "allow"
-
 # Some doc comments have intentional empty lines for readability;
 # clippy flags these but they're acceptable in this codebase.
 empty_line_after_doc_comments = "allow"
@@ -60,19 +51,29 @@ similar_names = "allow"
 
 # Soroban contract code frequently passes values by value that aren't consumed
 # within the function body - this is acceptable in the Soroban contract model.
-passed_by_value = "allow"
+needless_pass_by_value = "allow"
 
 # Soroban contract code frequently has length comparisons to zero that are
 # intentional guard checks, not potential bugs.
-length_zero = "allow"
+len_zero = "allow"
 
 # Soroban contract code frequently has unnecessary return values that are
 # ignored by callers - this is acceptable for contract entrypoints.
-return_self_not_used = "allow"
+return_self_not_must_use = "allow"
 
 # Soroban contract code frequently casts between u32 and u64 infallibly;
 # using `From` would add unnecessary boilerplate.
-cast_possible_truncate = "allow"
+cast_possible_truncation = "allow"
+
+[lints.rust]
+# Soroban contract code has many utility functions that are intentionally
+# kept available for API completeness and future use, not all of which
+# are called from every code path.
+dead_code = "allow"
+
+# Soroban contract functions commonly have unused variables; this is acceptable
+# when functions are kept for API completeness or future extensions.
+unused_variables = "allow"
 
 [[bench]]
 name = "gas_benchmarks"
@@ -156,6 +157,22 @@ path = "tests/economy/test_fractional_resources.rs"
 [[test]]
 name = "test_gas_sponsor"
 path = "tests/economy/test_gas_sponsor.rs"
+
+[[test]]
+name = "staking_test"
+path = "tests/economy/staking_test.rs"
+
+[[test]]
+name = "progression_test"
+path = "tests/economy/progression_test.rs"
+
+[[test]]
+name = "anti_whale_test"
+path = "tests/economy/anti_whale_test.rs"
+
+[[test]]
+name = "traits_test"
+path = "tests/economy/traits_test.rs"
 
 [[test]]
 name = "test_staking"

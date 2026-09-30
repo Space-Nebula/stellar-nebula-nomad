@@ -1,235 +1,168 @@
-use soroban_sdk::{testutils::Address as _, Address, Env};
-use stellar_nebula_nomad::{
-    generate_nebula_layout, harvest_resources, mint_ship, scan_nebula, NebulaLayout, ShipNft,
-};
+//! Gas/CPU budgets for the most exercised public entrypoints, measured
+//! through the contract client so the numbers include host invocation cost.
+//!
+//! `harness = false`, so `main` runs every benchmark; `cargo test --benches`
+//! and `cargo bench --all` both execute it. Each benchmark prints its cost
+//! and asserts a ceiling. Ceilings are set at roughly 1.5x the value measured
+//! on soroban-sdk 28 so a genuine regression fails while host-version noise
+//! does not.
 
-/// Benchmark nebula generation gas usage
-// #[test]
-fn bench_nebula_generation() {
-    let env = Env::default();
-    let player = Address::generate(&env);
-    let seed = env
-        .crypto()
-        .sha256(&soroban_sdk::Bytes::from_slice(&env, &[1u8; 32]));
+use soroban_sdk::testutils::{Address as _, Ledger};
+use soroban_sdk::{symbol_short, Address, Bytes, BytesN, Env, Symbol};
+use stellar_nebula_nomad::{NebulaNomadContract, NebulaNomadContractClient};
 
-    env.budget().reset_unlimited();
-    let layout = generate_nebula_layout(env.clone(), seed.clone(), player.clone());
+const MAX_CPU_NEBULA_GEN: u64 = 4_600_000;
+const MAX_CPU_SCAN: u64 = 5_600_000;
+const MAX_CPU_HARVEST: u64 = 5_800_000;
+const MAX_CPU_BATCH_MINT: u64 = 900_000;
+const MAX_CPU_PER_PROFILE_UPDATE: u64 = 45_000;
+const MAX_MEM_BYTES: u64 = 1_800_000;
 
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-
-    println!("Nebula Generation:");
-    println!("  CPU instructions: {}", cpu_insns);
-    println!("  Memory bytes: {}", mem_bytes);
-
-    // Target: < 1M CPU instructions
-    assert!(
-        cpu_insns < 1_000_000,
-        "Nebula generation exceeds CPU target"
-    );
-}
-
-/// Benchmark scan operation gas usage
-// #[test]
-fn bench_scan_nebula() {
-    let env = Env::default();
-    let player = Address::generate(&env);
-    let seed = env
-        .crypto()
-        .sha256(&soroban_sdk::Bytes::from_slice(&env, &[1u8; 32]));
-
-    env.budget().reset_unlimited();
-    let _result = scan_nebula(env.clone(), seed, player);
-
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-
-    println!("Scan Nebula:");
-    println!("  CPU instructions: {}", cpu_insns);
-    println!("  Memory bytes: {}", mem_bytes);
-
-    // Target: < 2M CPU instructions
-    assert!(cpu_insns < 2_000_000, "Scan exceeds CPU target");
-}
-
-/// Benchmark harvest operation gas usage
-// #[test]
-fn bench_harvest_resources() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let player = Address::generate(&env);
-    let seed = env
-        .crypto()
-        .sha256(&soroban_sdk::Bytes::from_slice(&env, &[1u8; 32]));
-
-    // Setup: mint ship and generate layout
-    let ship = mint_ship(
-        env.clone(),
-        player.clone(),
-        soroban_sdk::symbol_short!("fighter"),
-        soroban_sdk::Bytes::new(&env),
-    )
-    .unwrap();
-
-    let layout = generate_nebula_layout(env.clone(), seed, player.clone());
-
-    env.budget().reset_unlimited();
-    let _result = harvest_resources(&env, ship.id, &layout);
-
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-
-    println!("Harvest Resources:");
-    println!("  CPU instructions: {}", cpu_insns);
-    println!("  Memory bytes: {}", mem_bytes);
-
-    // Target: < 1.5M CPU instructions
-    assert!(cpu_insns < 1_500_000, "Harvest exceeds CPU target");
-}
-
-/// Benchmark batch operations
-// #[test]
-fn bench_batch_mint_ships() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let player = Address::generate(&env);
-    let ship_types = soroban_sdk::vec![
-        &env,
-        soroban_sdk::symbol_short!("fighter"),
-        soroban_sdk::symbol_short!("miner"),
-        soroban_sdk::symbol_short!("scout"),
-    ];
-
-    env.budget().reset_unlimited();
-    let _result = stellar_nebula_nomad::batch_mint_ships(
-        env.clone(),
-        player,
-        ship_types,
-        soroban_sdk::Bytes::new(&env),
-    );
-
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-
-    println!("Batch Mint Ships (3):");
-    println!("  CPU instructions: {}", cpu_insns);
-    println!("  Memory bytes: {}", mem_bytes);
-    println!("  Per ship: {} CPU", cpu_insns / 3);
-
-    // Target: < 3M CPU instructions for 3 ships
-    assert!(cpu_insns < 3_000_000, "Batch mint exceeds CPU target");
-}
-
-/// Benchmark storage operations
-// #[test]
-fn bench_storage_operations() {
-    let env = Env::default();
-    env.budget().reset_unlimited();
-
-    let player = Address::generate(&env);
-
-    // Initialize profile
-    let profile_id = stellar_nebula_nomad::initialize_profile(env.clone(), player.clone()).unwrap();
-
-    env.budget().reset_unlimited();
-
-    // Update progress multiple times
-    for i in 0..5 {
-        stellar_nebula_nomad::update_progress(
-            env.clone(),
-            player.clone(),
-            profile_id,
-            i + 1,
-            (i as i128 + 1) * 100,
-        )
-        .unwrap();
-    }
-
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-
-    println!("Storage Operations (5 updates):");
-    println!("  CPU instructions: {}", cpu_insns);
-    println!("  Memory bytes: {}", mem_bytes);
-    println!("  Per update: {} CPU", cpu_insns / 5);
-
-    // Target: < 500K CPU per update
-    assert!(cpu_insns / 5 < 500_000, "Storage update exceeds CPU target");
-}
-
-fn measure_operation<F>(env: &Env, name: &str, cpu_limit: u64, memory_limit: u64, operation: F)
-where
-    F: FnOnce(),
-{
-    env.budget().reset_unlimited();
-    operation();
-    let cpu_insns = env.budget().cpu_instruction_cost();
-    let mem_bytes = env.budget().memory_bytes_cost();
-    println!("{name}: cpu={cpu_insns} memory={mem_bytes}");
-    assert!(
-        cpu_insns <= cpu_limit,
-        "{name} exceeded CPU budget: {cpu_insns} > {cpu_limit}"
-    );
-    assert!(
-        mem_bytes <= memory_limit,
-        "{name} exceeded memory budget: {mem_bytes} > {memory_limit}"
-    );
-}
-
-/// Comprehensive gas budget matrix for the most exercised public entrypoints.
-// #[test]
-fn bench_comprehensive_public_entrypoints() {
+fn setup() -> (Env, NebulaNomadContractClient<'static>, Address) {
     let env = Env::default();
     env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 100;
+        li.timestamp = 1_700_000_000;
+        li.min_temp_entry_ttl = 100;
+        li.min_persistent_entry_ttl = 1000;
+        li.max_entry_ttl = 10_000;
+    });
+    let id = env.register(NebulaNomadContract, ());
+    let client = NebulaNomadContractClient::new(&env, &id);
     let player = Address::generate(&env);
-    let seed = env
-        .crypto()
-        .sha256(&soroban_sdk::Bytes::from_slice(&env, &[9u8; 32]));
-    let metadata = soroban_sdk::Bytes::new(&env);
+    (env, client, player)
+}
 
-    measure_operation(&env, "generate_nebula_layout", 1_000_000, 250_000, || {
-        let _ = generate_nebula_layout(env.clone(), seed.clone(), player.clone());
+fn seed(env: &Env, byte: u8) -> BytesN<32> {
+    BytesN::from_array(env, &[byte; 32])
+}
+
+/// Run `op` with an unlimited budget and return `(cpu, memory)`.
+fn measure<F: FnOnce()>(env: &Env, op: F) -> (u64, u64) {
+    let mut budget = env.cost_estimate().budget();
+    budget.reset_unlimited();
+    op();
+    (budget.cpu_instruction_cost(), budget.memory_bytes_cost())
+}
+
+fn report(name: &str, cpu: u64, mem: u64, cpu_limit: u64, mem_limit: u64) {
+    println!("{name}: cpu={cpu} memory={mem} (limits cpu={cpu_limit} memory={mem_limit})");
+    assert!(
+        cpu <= cpu_limit,
+        "{name} exceeded CPU budget: {cpu} > {cpu_limit}"
+    );
+    assert!(
+        mem <= mem_limit,
+        "{name} exceeded memory budget: {mem} > {mem_limit}"
+    );
+}
+
+fn bench_nebula_generation() {
+    let (env, client, player) = setup();
+    let s = seed(&env, 1);
+    let (cpu, mem) = measure(&env, || {
+        let _ = client.generate_nebula_layout(&s, &player);
     });
+    report(
+        "generate_nebula_layout",
+        cpu,
+        mem,
+        MAX_CPU_NEBULA_GEN,
+        MAX_MEM_BYTES,
+    );
+}
 
-    measure_operation(&env, "scan_nebula", 2_000_000, 350_000, || {
-        let _ = scan_nebula(env.clone(), seed.clone(), player.clone());
+fn bench_scan_nebula() {
+    let (env, client, player) = setup();
+    let s = seed(&env, 2);
+    let (cpu, mem) = measure(&env, || {
+        let _ = client.scan_nebula(&s, &player);
     });
+    report("scan_nebula", cpu, mem, MAX_CPU_SCAN, MAX_MEM_BYTES);
+}
 
-    let ship = mint_ship(
-        env.clone(),
-        player.clone(),
-        soroban_sdk::symbol_short!("fighter"),
-        metadata.clone(),
-    )
-    .unwrap();
-
-    let layout = generate_nebula_layout(env.clone(), seed.clone(), player.clone());
-    measure_operation(&env, "harvest_resources", 1_500_000, 350_000, || {
-        let _ = harvest_resources(&env, ship.id, &layout);
+fn bench_harvest_resources() {
+    let (env, client, player) = setup();
+    let ship = client.mint_ship(&player, &symbol_short!("fighter"), &Bytes::new(&env));
+    let layout = client.generate_nebula_layout(&seed(&env, 3), &player);
+    let (cpu, mem) = measure(&env, || {
+        let _ = client.harvest_resources(&ship.id, &layout);
     });
+    report(
+        "harvest_resources",
+        cpu,
+        mem,
+        MAX_CPU_HARVEST,
+        MAX_MEM_BYTES,
+    );
+}
 
+fn bench_batch_mint_ships() {
+    let (env, client, player) = setup();
     let ship_types = soroban_sdk::vec![
         &env,
-        soroban_sdk::symbol_short!("fighter"),
-        soroban_sdk::symbol_short!("miner"),
-        soroban_sdk::symbol_short!("scout"),
+        symbol_short!("fighter"),
+        symbol_short!("explorer"),
+        symbol_short!("hauler"),
     ];
-    measure_operation(&env, "batch_mint_ships_3", 3_000_000, 500_000, || {
-        let _ = stellar_nebula_nomad::batch_mint_ships(
-            env.clone(),
-            player.clone(),
-            ship_types,
-            metadata.clone(),
-        );
+    let (cpu, mem) = measure(&env, || {
+        let _ = client.batch_mint_ships(&player, &ship_types, &Bytes::new(&env));
     });
+    println!("  per ship: {} CPU", cpu / 3);
+    report(
+        "batch_mint_ships_3",
+        cpu,
+        mem,
+        MAX_CPU_BATCH_MINT,
+        MAX_MEM_BYTES,
+    );
+}
 
-    measure_operation(&env, "initialize_profile", 750_000, 250_000, || {
-        let _ = stellar_nebula_nomad::initialize_profile(env.clone(), player.clone()).unwrap();
+fn bench_storage_operations() {
+    let (env, client, player) = setup();
+    let profile_id = client.initialize_profile(&player);
+    let (cpu, mem) = measure(&env, || {
+        for i in 0..5u32 {
+            client.update_progress(&player, &profile_id, &(i + 1), &(i128::from(i + 1) * 100));
+        }
     });
+    println!("  per update: {} CPU", cpu / 5);
+    report(
+        "profile_update_x5",
+        cpu,
+        mem,
+        MAX_CPU_PER_PROFILE_UPDATE * 5,
+        MAX_MEM_BYTES,
+    );
+}
 
-    measure_operation(&env, "calculate_difficulty", 500_000, 150_000, || {
-        let _ = stellar_nebula_nomad::calculate_difficulty(env.clone(), 50).unwrap();
+fn bench_difficulty() {
+    let (env, client, _) = setup();
+    let (cpu, mem) = measure(&env, || {
+        let _ = client.calculate_difficulty(&50);
     });
+    report("calculate_difficulty", cpu, mem, 30_000, MAX_MEM_BYTES);
+}
+
+fn bench_level_quote() {
+    let (env, client, player) = setup();
+    let ship = client.mint_ship(&player, &symbol_short!("fighter"), &Bytes::new(&env));
+    let asset: Symbol = symbol_short!("ore");
+    let (cpu, mem) = measure(&env, || {
+        let _ = client.level_upgrade_cost(&ship.id);
+        let _ = client.get_resource_balance(&player, &asset);
+    });
+    report("level_upgrade_cost", cpu, mem, 60_000, MAX_MEM_BYTES);
+}
+
+fn main() {
+    bench_nebula_generation();
+    bench_scan_nebula();
+    bench_harvest_resources();
+    bench_batch_mint_ships();
+    bench_storage_operations();
+    bench_difficulty();
+    bench_level_quote();
+    println!("gas_benchmarks: all within budget");
 }

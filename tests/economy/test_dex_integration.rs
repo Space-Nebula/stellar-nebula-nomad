@@ -136,7 +136,7 @@ fn test_burst_limit_enforced() {
         let layout = client.generate_nebula_layout(&seed, &player);
         // Should succeed (try_ returns Result)
         let result = client.try_harvest_and_list(&player, &ship.id, &layout, &resource, &10i128);
-        assert!(result.is_ok(), "Listing {} should succeed", i);
+        assert!(result.is_ok(), "Listing {i} should succeed");
 
         env.ledger().with_mut(|li| li.timestamp += 61);
     }
