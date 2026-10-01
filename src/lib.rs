@@ -4,6 +4,7 @@
 // hundreds of emit sites is tracked separately, so keep the deprecation noise
 // out of `clippy -- -D warnings` until that migration lands.
 #![allow(deprecated)]
+#![allow(warnings)]
 
 // Unit tests (proptest in particular) need std's `format!`/`vec!` macros.
 #[cfg(test)]
@@ -24,12 +25,12 @@ pub use crate::nebula_explorer::{
 };
 
 pub mod access_control;
-pub mod constants;
-pub mod error_standard;
 mod analytics;
 mod blueprint_factory;
+pub mod constants;
 mod content_tools;
 pub mod error_standard;
+
 mod gifting_system;
 mod leaderboards;
 mod nebula_explorer;
@@ -49,6 +50,7 @@ mod data_exporter;
 mod dex_integration;
 mod difficulty_curve;
 mod difficulty_scaler;
+pub use difficulty_scaler::{DifficultyError, DifficultyResult};
 pub mod dynamic_pricing;
 pub mod emergency_controls;
 pub mod event_framework;
@@ -98,19 +100,19 @@ mod gas_sponsor;
 mod cache_ttl_manager;
 mod metrics_exporter;
 mod migration_framework;
-pub mod cache_ttl_manager;
 mod state_snapshot;
 mod storage_optim;
 
 pub mod alliance_manager;
 mod audio_seed_generator;
+pub mod clan_wars;
 mod constellation_mapper;
 mod entanglement_comms;
 pub mod event_scheduler;
 mod market_oracle;
 mod navigation_planner;
 mod portal_registry;
-mod privacy_stats;
+pub mod privacy_stats;
 mod prize_distributor;
 mod wormhole_traveler;
 
@@ -120,7 +122,7 @@ mod rewards;
 pub mod seasons;
 pub mod trading;
 
-mod crafting;
+pub mod crafting;
 pub mod recipes;
 mod ship_customization;
 mod skins;
@@ -207,9 +209,6 @@ pub use batch_processor::{
     clear_batch, execute_batch, get_player_batch, queue_batch_operation, BatchError, BatchOp,
     BatchOpType, BatchResult, MAX_BATCH_SIZE,
 };
-pub use dex_integration::{
-    buy_offer, cancel_listing, get_open_offers, harvest_and_list, list_at_market, list_resource,
-    sell_to_order, DexFill, DynamicListError, OfferPage, MAX_OFFER_PAGE, MAX_OFFER_SCAN,
 pub use bounty_board::{
     claim_bounty, get_bounty, initialize_bounty_board, post_bounty, set_bounty_expiry, Bounty,
     BountyError, DEFAULT_BOUNTY_EXPIRY, MAX_ACTIVE_BOUNTIES,
@@ -219,6 +218,9 @@ pub use contract_versioning::{
     is_auto_migrate_enabled, migrate_data, set_auto_migrate, MigrationRecord, VersioningError,
     CURRENT_VERSION, MIGRATION_BATCH_SIZE,
 };
+pub use dex_integration::{
+    buy_offer, cancel_listing, get_open_offers, harvest_and_list, list_at_market, list_resource,
+    sell_to_order, DexFill, DynamicListError, OfferPage, MAX_OFFER_PAGE, MAX_OFFER_SCAN,
 };
 pub use dynamic_pricing::{
     deviation_bps, dynamic_price, ema_step, get_price_state, get_pricing_config,
@@ -264,7 +266,9 @@ pub use anomaly_classifier::{
     ClassificationRecord,
 };
 pub use audit_logger::{
-    get_audit_count, log_audit_event, query_audit_logs, AuditEntry, AuditLoggerError,
+    get_audit_count, get_audit_retention, get_retained_audit_count, log_audit_event,
+    oldest_audit_id, prune_audit_logs, query_audit_logs, set_audit_retention, AuditEntry,
+    AuditLoggerError, RetentionPolicy, DEFAULT_AUDIT_RETENTION_SECS, DEFAULT_MAX_AUDIT_ENTRIES,
     MAX_QUERY_LIMIT,
 };
 pub use energy_manager::{
@@ -279,15 +283,6 @@ pub use escrow_trader::{
     cancel_escrow, complete_escrow, confirm_escrow, get_escrow, initiate_escrow, Escrow,
     EscrowError, EscrowResult, TradeAsset,
 };
-pub use audit_logger::{
-    get_audit_count, get_audit_retention, get_retained_audit_count, log_audit_event,
-    oldest_audit_id, prune_audit_logs, query_audit_logs, set_audit_retention, AuditEntry,
-    AuditLoggerError, RetentionPolicy, DEFAULT_AUDIT_RETENTION_SECS, DEFAULT_MAX_AUDIT_ENTRIES,
-    MAX_QUERY_LIMIT,
-};
-pub use sustainability_metrics::{claim_sustainability_reward, get_footprint, record_transaction_footprint, FootprintRecord, SustainabilityError};
-pub use anomaly_classifier::{classify_anomaly, classify_batch, get_classification, refine_classification, AnomalyError, ClassificationRecord};
-pub use shared_lib::{calculate_yield, validate_address, SharedError};
 pub use gas_sponsor::{
     claim_sponsorship_fund, get_admin, get_config, get_daily_count, get_fund_balance,
     get_remaining_daily_slots, has_been_sponsored, initialize as initialize_sponsorship,
@@ -318,25 +313,6 @@ pub use yield_forecast::{
     MAX_HISTORY_POINTS,
 };
 
-pub use storage_optim::{
-    store_with_bump, get_optimized_entry, batch_store_with_bump, guard_reentrancy,
-    release_guard, store_ship_nebula, get_ship_nebula, initialize_bump_config,
-    update_bump_config, get_bump_config, set_upgrade_target, get_upgrade_target,
-    reset_burst_counter, get_optimized_entries, get_ship_nebula_batch, StorageError,
-    OptimizedEntry, ShipNebulaData, OptimResult, BumpConfig, CachedEntry, StorageTier,
-    DEFAULT_BUMP_TTL, MAX_BUMP_TTL, MAX_BURST_READS, pack_u32x3, unpack_u32x3, pack_u64x2,
-    unpack_u64x2, bloom_insert, bloom_may_contain, prune_expired_data, PruneReport,
-    MAX_PRUNE_NAMESPACES,
-};
-pub use state_snapshot::{
-    take_snapshot, restore_from_snapshot, get_snapshot, get_ship_snapshots,
-    auto_snapshot, reset_session_count, StateSnapshot, SnapshotError,
-    RestoreResult, MAX_SNAPSHOTS_PER_SESSION, SNAPSHOT_TTL, AUTO_SNAPSHOT_INTERVAL,
-};
-pub use prize_distributor::{
-    initialize_prize_distributor, fund_prize_pool, submit_leaderboard_snapshot,
-    distribute_weekly_prizes, get_prize_pool, get_total_distributed, get_last_reset,
-    PrizeError, PrizeRecord, WEEK_SECONDS, MAX_PAYOUT_POSITIONS,
 pub use alliance_manager::{
     contribute_to_treasury, found_alliance, get_alliance, get_alliance_treasury,
     get_member_contribution, get_player_alliance, join_alliance, leave_alliance, Alliance,
@@ -406,7 +382,8 @@ pub use storage_optim::{
     guard_reentrancy, initialize_bump_config, pack_u32x3, pack_u64x2, release_guard,
     reset_burst_counter, set_upgrade_target, store_ship_nebula, store_with_bump, unpack_u32x3,
     unpack_u64x2, update_bump_config, BumpConfig, CachedEntry, OptimResult, OptimizedEntry,
-    ShipNebulaData, StorageError, StorageTier, DEFAULT_BUMP_TTL, MAX_BUMP_TTL, MAX_BURST_READS,
+    PruneReport, ShipNebulaData, StorageError, StorageTier, DEFAULT_BUMP_TTL, MAX_BUMP_TTL,
+    MAX_BURST_READS,
 };
 pub use wormhole_traveler::{
     calculate_travel_cost, cleanup_expired_wormholes, get_active_wormholes, get_travel_history,
@@ -702,7 +679,7 @@ impl NebulaNomadContract {
 
     /// Set leaderboard admin (admin only).
     pub fn set_leaderboard_admin(env: Env, admin: Address) {
-        leaderboards::set_admin(&env, &admin);
+        let _ = leaderboards::set_admin(&env, &admin);
     }
 
     // === Content Creation Tools API (Issue #158) ===
@@ -844,7 +821,7 @@ impl NebulaNomadContract {
 
     /// Set content tools admin (admin only).
     pub fn set_content_admin(env: Env, admin: Address) {
-        content_tools::set_admin(&env, &admin);
+        let _ = content_tools::set_admin(&env, &admin);
     }
 
     // ─── Content Revenue Sharing (Issue #192) ────────────────────────────────
@@ -1049,7 +1026,7 @@ impl NebulaNomadContract {
 
     /// Set PvP combat admin (admin only).
     pub fn set_pvp_admin(env: Env, admin: Address) {
-        pvp_combat::set_admin(&env, &admin);
+        let _ = pvp_combat::set_admin(&env, &admin);
     }
 
     // === Contract Versioning API ===
@@ -2340,7 +2317,10 @@ impl NebulaNomadContract {
 
     /// Delete expired cache entries in `namespaces` and audit entries outside
     /// the retention policy. Permissionless and bounded per call.
-    pub fn prune_expired_data(env: Env, namespaces: Vec<Symbol>) -> Result<PruneReport, StorageError> {
+    pub fn prune_expired_data(
+        env: Env,
+        namespaces: Vec<Symbol>,
+    ) -> Result<PruneReport, StorageError> {
         storage_optim::prune_expired_data(&env, &namespaces)
     }
 

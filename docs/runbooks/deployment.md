@@ -37,11 +37,11 @@ git status --short          # expect: only intended changes
 git log --oneline -3
 
 # 2. Targets for the build
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32v1-none
 rustup target list --installed
 
 # 3. Build the release artifact
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 
 # 4. The suites that cover this release
 cargo test --lib ship_upgrade::
@@ -94,7 +94,7 @@ Keep that log — it is the record of what is live.
 
 The native target is required to link tests but **not** to build the WASM. A
 missing `link.exe` means the host toolchain (MSVC Build Tools on Windows) is
-absent; the release build itself needs only the `wasm32-unknown-unknown` target.
+absent; the release build itself needs only the `wasm32v1-none` target.
 
 ---
 

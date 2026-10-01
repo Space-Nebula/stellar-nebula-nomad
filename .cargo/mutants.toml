@@ -23,6 +23,7 @@ exclude_globs = [
     "src/error_standard.rs",
 ]
 
-# Baseline cargo test command
+# Use Cargo's standard test runner. The current cargo-mutants releases do not
+# support a `test_args` configuration key; test selection is controlled by the
+# command-line invocation in scripts/mutation-test.sh.
 test_tool = "cargo"
-test_args = ["test", "--lib"]

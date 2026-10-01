@@ -10,6 +10,10 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   # ─── Build ────────────────────────────────────────────────────────────────
   build:
@@ -21,7 +25,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
           components: rustfmt, clippy
 
       - name: Cache Cargo registry
@@ -37,14 +41,17 @@ jobs:
       - name: Build (native)
         run: cargo build --verbose
 
-      - name: Build (WASM release)
-        run: cargo build --target wasm32-unknown-unknown --release --verbose
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v28.1.0
+
+      - name: Build WASM
+        run: stellar contract build
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v7
         with:
           name: contract-wasm
-          path: target/wasm32-unknown-unknown/release/*.wasm
+          path: target/wasm32v1-none/release/*.wasm
           retention-days: 7
 
   # ─── Lint ─────────────────────────────────────────────────────────────────
@@ -129,6 +136,7 @@ jobs:
 
       - name: Post coverage summary to PR
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/github-script@v9
         with:
           script: |
@@ -176,7 +184,7 @@ jobs:
       - name: Optimize WASM
         run: |
           for f in wasm/*.wasm; do
-            soroban contract optimize --wasm "$f" --wasm-out "${f%.wasm}.optimized.wasm"
+            stellar contract optimize --wasm "$f" --wasm-out "${f%.wasm}.optimized.wasm"
           done
 
       - name: Check contract size (≤ 64 KB)
@@ -286,7 +294,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache Cargo registry
         uses: actions/cache@v4
@@ -297,11 +305,12 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-deploy-testnet-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build WASM
-        run: cargo build --target wasm32-unknown-unknown --release
-
       - name: Install Stellar CLI
-        run: cargo install --locked stellar-cli || cargo install --locked soroban-cli
+        uses: stellar/stellar-cli@v28.1.0
+
+      - name: Build WASM
+        run: stellar contract build
+
 
       - name: Deploy to Stellar testnet
         env:
@@ -326,7 +335,7 @@ jobs:
 
           echo "$DEPLOYER_SECRET_KEY" | $CLI keys add deployer --secret-key
 
-          WASM=$(ls target/wasm32-unknown-unknown/release/*.wasm | grep -v deps | head -1)
+          WASM=$(ls target/wasm32v1-none/release/*.wasm | grep -v deps | head -1)
           if $CLI contract optimize --wasm "$WASM" --wasm-out optimized.wasm 2>/dev/null; then
             DEPLOY_WASM=optimized.wasm
           else

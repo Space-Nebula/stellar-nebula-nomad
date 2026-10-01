@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-WASM_PATH="target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm"
+WASM_PATH="target/wasm32v1-none/release/stellar_nebula_nomad.wasm"
 DEPLOY_LOG=".deploy-${NETWORK}.log"
 ARTIFACTS_DIR="deployment/artifacts/${NETWORK}"
 
@@ -39,10 +39,10 @@ command -v soroban >/dev/null 2>&1 || {
 mkdir -p "$ARTIFACTS_DIR"
 
 echo "==> Building WASM for $NETWORK (identity: $IDENTITY)"
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 
 echo "==> Optimizing WASM"
-soroban contract optimize --wasm "$WASM_PATH"
+stellar contract optimize --wasm "$WASM_PATH"
 
 HASH=$(sha256sum "$WASM_PATH" | awk '{print $1}')
 echo "WASM SHA256: $HASH"

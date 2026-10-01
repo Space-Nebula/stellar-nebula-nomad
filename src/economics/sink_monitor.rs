@@ -18,16 +18,19 @@ pub struct EconomicSinkMetrics {
 
 pub fn get_sink_metrics(env: &Env) -> EconomicSinkMetrics {
     let key = symbol_short!("SINK_MET");
-    env.storage().instance().get(&key).unwrap_or(EconomicSinkMetrics {
-        total_created: 0,
-        total_destroyed: 0,
-        crafting_destroyed: 0,
-        repair_destroyed: 0,
-        recycling_destroyed: 0,
-        tournament_destroyed: 0,
-        guild_destroyed: 0,
-        equilibrium_index_bps: 10000,
-    })
+    env.storage()
+        .instance()
+        .get(&key)
+        .unwrap_or(EconomicSinkMetrics {
+            total_created: 0,
+            total_destroyed: 0,
+            crafting_destroyed: 0,
+            repair_destroyed: 0,
+            recycling_destroyed: 0,
+            tournament_destroyed: 0,
+            guild_destroyed: 0,
+            equilibrium_index_bps: 10000,
+        })
 }
 
 pub fn record_resource_creation(env: &Env, amount: u128) {
@@ -63,7 +66,8 @@ fn update_equilibrium(metrics: &mut EconomicSinkMetrics) {
     if metrics.total_created == 0 {
         metrics.equilibrium_index_bps = 10000;
     } else {
-        metrics.equilibrium_index_bps = ((metrics.total_destroyed * 10000) / metrics.total_created) as u32;
+        metrics.equilibrium_index_bps =
+            ((metrics.total_destroyed * 10000) / metrics.total_created) as u32;
     }
 }
 

@@ -1,7 +1,7 @@
 # Local development image: Rust toolchain + cargo-watch for hot reload.
-FROM rust:1.83-bookworm
+FROM rust:1.84-bookworm
 
-RUN rustup target add wasm32-unknown-unknown \
+RUN rustup target add wasm32v1-none \
     && rustup component add rustfmt clippy \
     && cargo install cargo-watch --locked
 

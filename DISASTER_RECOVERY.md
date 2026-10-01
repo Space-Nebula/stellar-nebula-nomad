@@ -25,7 +25,7 @@ RTO target: **< 1 hour**. RPO target: **< 24 hours** (last successful daily back
 
 ### Scenario 1 — Corrupt contract instance
 
-Redeploy WASM from the archive (or `cargo build --release --target wasm32-unknown-unknown`) and re-initialize from the Horizon snapshot metadata.
+Redeploy WASM from the archive (or `cargo build --release --target wasm32v1-none`) and re-initialize from the Horizon snapshot metadata.
 
 ### Scenario 2 — Lost operator keys
 

@@ -52,8 +52,8 @@ WASM_FILE=$(find "$ARTIFACTS_DIR" -name "*.wasm" 2>/dev/null | head -1)
 if [ -z "$WASM_FILE" ]; then
     echo "No WASM artifact found in $ARTIFACTS_DIR."
     echo "Rebuilding from source at matching commit..."
-    cargo build --target wasm32-unknown-unknown --release
-    WASM_FILE="target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm"
+    stellar contract build
+    WASM_FILE="target/wasm32v1-none/release/stellar_nebula_nomad.wasm"
 fi
 
 echo "==> Deploying rollback WASM: $WASM_FILE"

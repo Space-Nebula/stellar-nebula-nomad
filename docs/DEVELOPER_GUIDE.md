@@ -17,7 +17,7 @@ Ensure you have the following installed on your host system:
 
 2. **WebAssembly Compilation Target**:
    ```bash
-   rustup target add wasm32-unknown-unknown
+   rustup target add wasm32v1-none
    ```
 
 3. **Soroban CLI**:
@@ -130,12 +130,12 @@ cargo clippy --fix --allow-dirty
 
 - **Build Release WebAssembly Binary**:
   ```bash
-  cargo build --target wasm32-unknown-unknown --release
+  stellar contract build
   ```
 
 - **Optimize WASM Size**:
   ```bash
-  soroban contract optimize --wasm target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm
+  stellar contract optimize --wasm target/wasm32v1-none/release/stellar_nebula_nomad.wasm
   ```
 
 ### Test Suite Execution
@@ -185,7 +185,7 @@ cargo clippy --fix --allow-dirty
 3. **Deploy WASM Binary**:
    ```bash
    soroban contract deploy \
-     --wasm target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm \
+     --wasm target/wasm32v1-none/release/stellar_nebula_nomad.wasm \
      --source developer-identity \
      --network testnet
    ```
@@ -317,7 +317,7 @@ Closes #170
 
 | Problem | Cause | Solution |
 |---------|-------|----------|
-| "wasm32-unknown-unknown" target not found | Target not installed | `rustup target add wasm32-unknown-unknown` |
+| "wasm32v1-none" target not found | Target not installed | `rustup target add wasm32v1-none` |
 | Unexpected rate limiting errors | Rate limiter misconfigured | Check Rate Limiter configuration in tests |
 | Layout expires immediately | TTL set to zero | Verify ttl_seconds > 0 |
 | "All-zero seed" validation error | Seed bytes are all 0x00 | Use random seed with varied bytes |
@@ -415,7 +415,7 @@ fn test_contract_initialization() {
 
 | Issue / Error | Cause | Resolution |
 | :--- | :--- | :--- |
-| `error[E0463]: can't find crate for std` when building WASM | Missing `wasm32-unknown-unknown` target | Run `rustup target add wasm32-unknown-unknown`. |
+| `error[E0463]: can't find crate for std` when building WASM | Missing `wasm32v1-none` target | Run `rustup target add wasm32v1-none`. |
 | `soroban: command not found` | Cargo binary directory not in system `PATH` | Ensure `~/.cargo/bin` is added to your shell PATH variable. |
 | Dependency mismatch on `soroban-sdk` | Unlocked dependencies pulling breaking versions | Always build and test using `cargo check --locked` and `cargo test --locked`. |
 | `Error: Storage limit exceeded` during test execution | Soroban ledger storage footprint exceeded | Optimize storage keys using `symbol_short!` and cleanup unused persistent data. |

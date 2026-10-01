@@ -136,7 +136,7 @@ Daily Horizon backups: `./scripts/backup.sh` (see [infrastructure/backup/README.
 
 ```bash
 # Build the WASM contract
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 
 # Run integration tests
 ./scripts/test.sh
@@ -316,7 +316,7 @@ stellar-nebula-nomad/
 cargo build
 
 # Release build (optimized WASM)
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 
 # Check code
 cargo check
@@ -352,14 +352,14 @@ cargo tarpaulin --out Html
 
 ```bash
 # 1. Build the contract
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 
 # 2. Optimize WASM size
-soroban contract optimize --wasm target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm
+stellar contract optimize --wasm target/wasm32v1-none/release/stellar_nebula_nomad.wasm
 
 # 3. Deploy to network
 soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm \
+  --wasm target/wasm32v1-none/release/stellar_nebula_nomad.wasm \
   --source-account YOUR_ACCOUNT_NAME \
   --network futurenet
 
@@ -371,7 +371,7 @@ export CONTRACT_ID="CXXXXX..."
 
 ```bash
 # Inspect contract WASM binary
-soroban contract inspect --wasm target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm
+soroban contract inspect --wasm target/wasm32v1-none/release/stellar_nebula_nomad.wasm
 
 # View contract specification
 soroban contract inspect --id CONTRACT_ID --network futurenet

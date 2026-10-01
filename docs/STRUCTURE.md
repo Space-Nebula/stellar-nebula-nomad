@@ -96,7 +96,7 @@ These are automatically created and not committed to git:
 target/
 ├── debug/                             # Debug builds
 ├── release/                           # Release builds
-└── wasm32-unknown-unknown/            # WASM builds for Soroban
+└── wasm32v1-none/            # WASM builds for Soroban
     └── release/
         └── stellar_nebula_nomad.wasm  # Compiled contract binary
 

@@ -3,8 +3,8 @@
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Vec};
 
 use crate::alliance_manager::{
-    add_alliance_xp, credit_alliance_treasury, get_alliance,
-    get_alliance_treasury, get_player_alliance,
+    add_alliance_xp, credit_alliance_treasury, get_alliance, get_alliance_treasury,
+    get_player_alliance,
 };
 
 #[contracterror]
@@ -110,8 +110,8 @@ pub fn declare_war(
     territory_stake: u64,
 ) -> Result<u64, WarError> {
     declarer.require_auth();
-    let attacker_id = get_player_alliance(env, declarer.clone())
-        .ok_or(WarError::NotAllianceMember)?;
+    let attacker_id =
+        get_player_alliance(env, declarer.clone()).ok_or(WarError::NotAllianceMember)?;
 
     if attacker_id == defender_alliance {
         return Err(WarError::InvalidAlliance);
@@ -119,13 +119,23 @@ pub fn declare_war(
 
     let _ = get_alliance(env, defender_alliance).map_err(|_| WarError::InvalidAlliance)?;
 
-    if env.storage().persistent().has(&WarKey::AllianceAtWar(attacker_id))
-        || env.storage().persistent().has(&WarKey::AllianceAtWar(defender_alliance))
+    if env
+        .storage()
+        .persistent()
+        .has(&WarKey::AllianceAtWar(attacker_id))
+        || env
+            .storage()
+            .persistent()
+            .has(&WarKey::AllianceAtWar(defender_alliance))
     {
         return Err(WarError::AlreadyAtWar);
     }
 
-    if env.storage().persistent().has(&WarKey::CeasefireCooldown(defender_alliance)) {
+    if env
+        .storage()
+        .persistent()
+        .has(&WarKey::CeasefireCooldown(defender_alliance))
+    {
         return Err(WarError::CooldownActive);
     }
 
@@ -134,8 +144,12 @@ pub fn declare_war(
         return Err(WarError::NotEnoughVotes);
     }
 
-    let war_id: u64 = env.storage().persistent()
-        .get(&WarKey::WarCount).unwrap_or(0) + 1;
+    let war_id: u64 = env
+        .storage()
+        .persistent()
+        .get(&WarKey::WarCount)
+        .unwrap_or(0)
+        + 1;
     let now = env.ledger().timestamp();
 
     let war = WarDeclaration {
@@ -153,8 +167,12 @@ pub fn declare_war(
 
     env.storage().persistent().set(&WarKey::War(war_id), &war);
     env.storage().persistent().set(&WarKey::WarCount, &war_id);
-    env.storage().persistent().set(&WarKey::AllianceAtWar(attacker_id), &war_id);
-    env.storage().persistent().set(&WarKey::AllianceAtWar(defender_alliance), &war_id);
+    env.storage()
+        .persistent()
+        .set(&WarKey::AllianceAtWar(attacker_id), &war_id);
+    env.storage()
+        .persistent()
+        .set(&WarKey::AllianceAtWar(defender_alliance), &war_id);
 
     env.events().publish(
         (symbol_short!("war"), symbol_short!("declared")),
@@ -175,7 +193,9 @@ pub fn fight_battle(
     attacker.require_auth();
     defender.require_auth();
 
-    let mut war: WarDeclaration = env.storage().persistent()
+    let mut war: WarDeclaration = env
+        .storage()
+        .persistent()
         .get(&WarKey::War(war_id))
         .ok_or(WarError::WarNotFound)?;
 
@@ -190,20 +210,29 @@ pub fn fight_battle(
         return Err(WarError::WarNotActive);
     }
 
-    let attacker_alliance = get_player_alliance(env, attacker.clone())
-        .ok_or(WarError::NotAllianceMember)?;
-    let defender_alliance = get_player_alliance(env, defender.clone())
-        .ok_or(WarError::NotAllianceMember)?;
+    let attacker_alliance =
+        get_player_alliance(env, attacker.clone()).ok_or(WarError::NotAllianceMember)?;
+    let defender_alliance =
+        get_player_alliance(env, defender.clone()).ok_or(WarError::NotAllianceMember)?;
 
     if (attacker_alliance != war.attacker_alliance && attacker_alliance != war.defender_alliance)
-        || (defender_alliance != war.attacker_alliance && defender_alliance != war.defender_alliance)
+        || (defender_alliance != war.attacker_alliance
+            && defender_alliance != war.defender_alliance)
     {
         return Err(WarError::NotWarParticipant);
     }
 
-    let battle_id: u64 = env.storage().persistent()
-        .get(&WarKey::BattleCount).unwrap_or(0) + 1;
-    let result = if attacker_power > defender_power { 1u32 } else { 0u32 };
+    let battle_id: u64 = env
+        .storage()
+        .persistent()
+        .get(&WarKey::BattleCount)
+        .unwrap_or(0)
+        + 1;
+    let result = if attacker_power > defender_power {
+        1u32
+    } else {
+        0u32
+    };
     let points = if result == 1 { BATTLE_POINTS_WIN } else { 0 };
 
     if result == 1 {
@@ -241,8 +270,12 @@ pub fn fight_battle(
         fought_at: now,
     };
 
-    env.storage().persistent().set(&WarKey::Battle(battle_id), &battle);
-    env.storage().persistent().set(&WarKey::BattleCount, &battle_id);
+    env.storage()
+        .persistent()
+        .set(&WarKey::Battle(battle_id), &battle);
+    env.storage()
+        .persistent()
+        .set(&WarKey::BattleCount, &battle_id);
     env.storage().persistent().set(&WarKey::War(war_id), &war);
 
     env.events().publish(
@@ -266,7 +299,11 @@ fn settle_war_rewards(env: &Env, war: &WarDeclaration) -> WarRewards {
     let _ = credit_alliance_treasury(env, winner_id, essence_reward);
     let _ = add_alliance_xp(env, winner_id, xp_reward);
 
-    let captured = if !env.storage().persistent().has(&WarKey::Territory(war.territory_stake)) {
+    let captured = if !env
+        .storage()
+        .persistent()
+        .has(&WarKey::Territory(war.territory_stake))
+    {
         let territory = WarTerritory {
             territory_id: war.territory_stake,
             owner_alliance: winner_id,
@@ -274,16 +311,28 @@ fn settle_war_rewards(env: &Env, war: &WarDeclaration) -> WarRewards {
             defense_bonus: 50,
             resource_output: 100,
         };
-        env.storage().persistent().set(&WarKey::Territory(war.territory_stake), &territory);
-        env.storage().persistent().set(&WarKey::AllianceTerritories(winner_id), &war.territory_stake);
+        env.storage()
+            .persistent()
+            .set(&WarKey::Territory(war.territory_stake), &territory);
+        env.storage().persistent().set(
+            &WarKey::AllianceTerritories(winner_id),
+            &war.territory_stake,
+        );
         Some(war.territory_stake)
     } else {
         None
     };
 
-    env.storage().persistent().remove(&WarKey::AllianceAtWar(war.attacker_alliance));
-    env.storage().persistent().remove(&WarKey::AllianceAtWar(war.defender_alliance));
-    env.storage().persistent().set(&WarKey::CeasefireCooldown(loser_id), &env.ledger().timestamp());
+    env.storage()
+        .persistent()
+        .remove(&WarKey::AllianceAtWar(war.attacker_alliance));
+    env.storage()
+        .persistent()
+        .remove(&WarKey::AllianceAtWar(war.defender_alliance));
+    env.storage().persistent().set(
+        &WarKey::CeasefireCooldown(loser_id),
+        &env.ledger().timestamp(),
+    );
 
     WarRewards {
         winner_alliance: winner_id,
@@ -296,23 +345,40 @@ fn settle_war_rewards(env: &Env, war: &WarDeclaration) -> WarRewards {
 
 pub fn claim_ceasefire(env: &Env, caller: Address) -> Result<(), WarError> {
     caller.require_auth();
-    let alliance_id = get_player_alliance(env, caller.clone())
-        .ok_or(WarError::NotAllianceMember)?;
+    let alliance_id =
+        get_player_alliance(env, caller.clone()).ok_or(WarError::NotAllianceMember)?;
 
-    if !env.storage().persistent().has(&WarKey::AllianceAtWar(alliance_id)) {
+    if !env
+        .storage()
+        .persistent()
+        .has(&WarKey::AllianceAtWar(alliance_id))
+    {
         return Err(WarError::WarNotFound);
     }
 
-    let war_id: u64 = env.storage().persistent()
-        .get(&WarKey::AllianceAtWar(alliance_id)).unwrap();
-    let mut war: WarDeclaration = env.storage().persistent()
-        .get(&WarKey::War(war_id)).ok_or(WarError::WarNotFound)?;
+    let war_id: u64 = env
+        .storage()
+        .persistent()
+        .get(&WarKey::AllianceAtWar(alliance_id))
+        .unwrap();
+    let mut war: WarDeclaration = env
+        .storage()
+        .persistent()
+        .get(&WarKey::War(war_id))
+        .ok_or(WarError::WarNotFound)?;
 
     war.status = WarStatus::Ceasefire;
     env.storage().persistent().set(&WarKey::War(war_id), &war);
-    env.storage().persistent().remove(&WarKey::AllianceAtWar(war.attacker_alliance));
-    env.storage().persistent().remove(&WarKey::AllianceAtWar(war.defender_alliance));
-    env.storage().persistent().set(&WarKey::CeasefireCooldown(alliance_id), &env.ledger().timestamp());
+    env.storage()
+        .persistent()
+        .remove(&WarKey::AllianceAtWar(war.attacker_alliance));
+    env.storage()
+        .persistent()
+        .remove(&WarKey::AllianceAtWar(war.defender_alliance));
+    env.storage().persistent().set(
+        &WarKey::CeasefireCooldown(alliance_id),
+        &env.ledger().timestamp(),
+    );
 
     env.events().publish(
         (symbol_short!("war"), symbol_short!("ceasefire")),
@@ -326,15 +392,22 @@ pub fn get_war(env: &Env, war_id: u64) -> Option<WarDeclaration> {
 }
 
 pub fn get_alliance_active_war(env: &Env, alliance_id: u64) -> Option<u64> {
-    env.storage().persistent().get(&WarKey::AllianceAtWar(alliance_id))
+    env.storage()
+        .persistent()
+        .get(&WarKey::AllianceAtWar(alliance_id))
 }
 
 pub fn get_territory(env: &Env, territory_id: u64) -> Option<WarTerritory> {
-    env.storage().persistent().get(&WarKey::Territory(territory_id))
+    env.storage()
+        .persistent()
+        .get(&WarKey::Territory(territory_id))
 }
 
 pub fn get_alliance_territories(env: &Env, alliance_id: u64) -> Vec<u64> {
-    let t: Option<u64> = env.storage().persistent().get(&WarKey::AllianceTerritories(alliance_id));
+    let t: Option<u64> = env
+        .storage()
+        .persistent()
+        .get(&WarKey::AllianceTerritories(alliance_id));
     match t {
         Some(id) => {
             let mut v = Vec::new(env);
@@ -353,7 +426,11 @@ pub fn get_battle(env: &Env, battle_id: u64) -> Option<BattleRecord> {
 mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::{contract, contractimpl, testutils::{Address as _, Ledger, LedgerInfo}, BytesN, String};
+    use soroban_sdk::{
+        contract, contractimpl,
+        testutils::{Address as _, Ledger, LedgerInfo},
+        BytesN, String,
+    };
 
     #[contract]
     struct Stub;
@@ -384,7 +461,8 @@ mod tests {
     }
 
     fn create_test_alliance(env: &Env, founder: &Address, name: &str) -> u64 {
-        crate::alliance_manager::found_alliance(env, founder.clone(), String::from_str(env, name)).unwrap()
+        crate::alliance_manager::found_alliance(env, founder.clone(), String::from_str(env, name))
+            .unwrap()
     }
 
     struct TestCtx {
@@ -407,9 +485,26 @@ mod tests {
     #[test]
     fn test_declare_war_succeeds() {
         let (env, p1, p2) = setup_env();
-        let ctx = TestCtx { contract: env.register(Stub, ()), env };
-        let aid1 = ctx.run(|| crate::alliance_manager::found_alliance(&ctx.env, p1.clone(), String::from_str(&ctx.env, "Alpha")).unwrap());
-        let aid2 = ctx.run(|| crate::alliance_manager::found_alliance(&ctx.env, p2.clone(), String::from_str(&ctx.env, "Beta")).unwrap());
+        let ctx = TestCtx {
+            contract: env.register(Stub, ()),
+            env,
+        };
+        let aid1 = ctx.run(|| {
+            crate::alliance_manager::found_alliance(
+                &ctx.env,
+                p1.clone(),
+                String::from_str(&ctx.env, "Alpha"),
+            )
+            .unwrap()
+        });
+        let aid2 = ctx.run(|| {
+            crate::alliance_manager::found_alliance(
+                &ctx.env,
+                p2.clone(),
+                String::from_str(&ctx.env, "Beta"),
+            )
+            .unwrap()
+        });
         ctx.run(|| fund_treasury(&ctx, aid1, p1.clone()));
         ctx.run(|| fund_treasury(&ctx, aid2, p2.clone()));
 
@@ -423,14 +518,32 @@ mod tests {
     #[test]
     fn test_fight_battle_updates_score() {
         let (env, p1, p2) = setup_env();
-        let ctx = TestCtx { contract: env.register(Stub, ()), env };
-        let aid1 = ctx.run(|| crate::alliance_manager::found_alliance(&ctx.env, p1.clone(), String::from_str(&ctx.env, "Alpha")).unwrap());
-        let aid2 = ctx.run(|| crate::alliance_manager::found_alliance(&ctx.env, p2.clone(), String::from_str(&ctx.env, "Beta")).unwrap());
+        let ctx = TestCtx {
+            contract: env.register(Stub, ()),
+            env,
+        };
+        let aid1 = ctx.run(|| {
+            crate::alliance_manager::found_alliance(
+                &ctx.env,
+                p1.clone(),
+                String::from_str(&ctx.env, "Alpha"),
+            )
+            .unwrap()
+        });
+        let aid2 = ctx.run(|| {
+            crate::alliance_manager::found_alliance(
+                &ctx.env,
+                p2.clone(),
+                String::from_str(&ctx.env, "Beta"),
+            )
+            .unwrap()
+        });
         ctx.run(|| fund_treasury(&ctx, aid1, p1.clone()));
         ctx.run(|| fund_treasury(&ctx, aid2, p2.clone()));
 
         let war_id = ctx.run(|| declare_war(&ctx.env, p1.clone(), aid2, 1).unwrap());
-        let battle = ctx.run(|| fight_battle(&ctx.env, p1.clone(), p2.clone(), war_id, 100, 50).unwrap());
+        let battle =
+            ctx.run(|| fight_battle(&ctx.env, p1.clone(), p2.clone(), war_id, 100, 50).unwrap());
         assert_eq!(battle.result, 1);
 
         let war = ctx.run(|| get_war(&ctx.env, war_id).unwrap());
@@ -440,9 +553,26 @@ mod tests {
     #[test]
     fn test_war_settles_on_victory() {
         let (env, p1, p2) = setup_env();
-        let ctx = TestCtx { contract: env.register(Stub, ()), env };
-        let aid1 = ctx.run(|| crate::alliance_manager::found_alliance(&ctx.env, p1.clone(), String::from_str(&ctx.env, "Alpha")).unwrap());
-        let aid2 = ctx.run(|| crate::alliance_manager::found_alliance(&ctx.env, p2.clone(), String::from_str(&ctx.env, "Beta")).unwrap());
+        let ctx = TestCtx {
+            contract: env.register(Stub, ()),
+            env,
+        };
+        let aid1 = ctx.run(|| {
+            crate::alliance_manager::found_alliance(
+                &ctx.env,
+                p1.clone(),
+                String::from_str(&ctx.env, "Alpha"),
+            )
+            .unwrap()
+        });
+        let aid2 = ctx.run(|| {
+            crate::alliance_manager::found_alliance(
+                &ctx.env,
+                p2.clone(),
+                String::from_str(&ctx.env, "Beta"),
+            )
+            .unwrap()
+        });
         ctx.run(|| fund_treasury(&ctx, aid1, p1.clone()));
         ctx.run(|| fund_treasury(&ctx, aid2, p2.clone()));
 
@@ -462,9 +592,26 @@ mod tests {
     #[test]
     fn test_ceasefire_cooldown() {
         let (env, p1, p2) = setup_env();
-        let ctx = TestCtx { contract: env.register(Stub, ()), env };
-        let aid1 = ctx.run(|| crate::alliance_manager::found_alliance(&ctx.env, p1.clone(), String::from_str(&ctx.env, "Alpha")).unwrap());
-        let aid2 = ctx.run(|| crate::alliance_manager::found_alliance(&ctx.env, p2.clone(), String::from_str(&ctx.env, "Beta")).unwrap());
+        let ctx = TestCtx {
+            contract: env.register(Stub, ()),
+            env,
+        };
+        let aid1 = ctx.run(|| {
+            crate::alliance_manager::found_alliance(
+                &ctx.env,
+                p1.clone(),
+                String::from_str(&ctx.env, "Alpha"),
+            )
+            .unwrap()
+        });
+        let aid2 = ctx.run(|| {
+            crate::alliance_manager::found_alliance(
+                &ctx.env,
+                p2.clone(),
+                String::from_str(&ctx.env, "Beta"),
+            )
+            .unwrap()
+        });
         ctx.run(|| fund_treasury(&ctx, aid1, p1.clone()));
         ctx.run(|| fund_treasury(&ctx, aid2, p2.clone()));
 
@@ -472,7 +619,9 @@ mod tests {
         ctx.run(|| claim_ceasefire(&ctx.env, p1.clone()).unwrap());
 
         let cooldown = ctx.run(|| {
-            ctx.env.storage().persistent()
+            ctx.env
+                .storage()
+                .persistent()
                 .get::<_, u64>(&WarKey::CeasefireCooldown(aid1))
         });
         assert!(cooldown.is_some());

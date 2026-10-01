@@ -497,8 +497,14 @@ mod tests {
         assert_eq!(check_percentage(0), Ok(()));
         assert_eq!(check_percentage(50), Ok(()));
         assert_eq!(check_percentage(100), Ok(()));
-        assert_eq!(check_percentage(101), Err(ValidationError::InvalidPercentage));
-        assert_eq!(check_percentage(u32::MAX), Err(ValidationError::InvalidPercentage));
+        assert_eq!(
+            check_percentage(101),
+            Err(ValidationError::InvalidPercentage)
+        );
+        assert_eq!(
+            check_percentage(u32::MAX),
+            Err(ValidationError::InvalidPercentage)
+        );
     }
 
     #[test]
@@ -528,7 +534,10 @@ mod tests {
             arr[0] = 1;
             BytesN::from_array(&env, &arr)
         };
-        assert_eq!(check_not_zero(&zero_addr), Err(ValidationError::ZeroAddress));
+        assert_eq!(
+            check_not_zero(&zero_addr),
+            Err(ValidationError::ZeroAddress)
+        );
         assert_eq!(check_not_zero(&nonzero_addr), Ok(()));
     }
 
@@ -544,8 +553,14 @@ mod tests {
         };
         assert_eq!(check_array_size(&vec, 0, 10), Ok(()));
         assert_eq!(check_array_size(&vec, 3, 3), Ok(()));
-        assert_eq!(check_array_size(&vec, 4, 10), Err(ValidationError::ArrayTooLarge));
-        assert_eq!(check_array_size(&vec, 0, 2), Err(ValidationError::ArrayTooLarge));
+        assert_eq!(
+            check_array_size(&vec, 4, 10),
+            Err(ValidationError::ArrayTooLarge)
+        );
+        assert_eq!(
+            check_array_size(&vec, 0, 2),
+            Err(ValidationError::ArrayTooLarge)
+        );
     }
 
     #[test]
@@ -566,6 +581,9 @@ mod tests {
             v
         };
         assert_eq!(check_unique_elements(&unique), Ok(()));
-        assert_eq!(check_unique_elements(&duplicate), Err(ValidationError::DuplicateElements));
+        assert_eq!(
+            check_unique_elements(&duplicate),
+            Err(ValidationError::DuplicateElements)
+        );
     }
 }

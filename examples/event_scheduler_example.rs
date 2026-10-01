@@ -1,9 +1,12 @@
 #![cfg(test)]
 
-//! Event Scheduler Usage Examples
-//!
-//! This file demonstrates various ways to use the event scheduler
-//! for community engagement and automated event management.
+#[cfg(not(test))]
+fn main() {}
+
+// Event Scheduler Usage Examples
+//
+// This file demonstrates various ways to use the event scheduler
+// for community engagement and automated event management.
 
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 use stellar_nebula_nomad::{EventError, WEEKLY_FESTIVAL_INTERVAL};

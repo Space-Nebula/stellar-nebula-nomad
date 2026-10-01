@@ -341,7 +341,7 @@ ls -lt backups/
 
 ```bash
 # 1. Deploy new contract
-stellar contract deploy --wasm target/wasm32-unknown-unknown/release/nebula_nomad.wasm
+stellar contract deploy --wasm target/wasm32v1-none/release/nebula_nomad.wasm
 
 # 2. Restore from backup
 ./scripts/restore.sh --backup <backup-file> --contract $NEW_CONTRACT_ID

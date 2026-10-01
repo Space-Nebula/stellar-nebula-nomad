@@ -29,7 +29,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache Cargo registry
         uses: actions/cache@v4
@@ -40,8 +40,11 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-deploy-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v28.1.0
+
       - name: Build WASM
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: stellar contract build
 
       - name: Install Soroban CLI
         run: cargo install soroban-cli --locked
@@ -49,8 +52,8 @@ jobs:
       - name: Optimize WASM
         id: find-wasm
         run: |
-          WASM=$(ls target/wasm32-unknown-unknown/release/*.wasm | grep -v deps | head -1)
-          soroban contract optimize --wasm "$WASM" --wasm-out optimized.wasm
+          WASM=$(ls target/wasm32v1-none/release/*.wasm | grep -v deps | head -1)
+          stellar contract optimize --wasm "$WASM" --wasm-out optimized.wasm
           echo "name=$(basename $WASM)" >> "$GITHUB_OUTPUT"
           echo "Optimized size: $(stat -c%s optimized.wasm) bytes"
 

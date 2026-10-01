@@ -468,11 +468,7 @@ impl NebulaGen {
     /// - `NebulaError::InvalidShipId` - ship_id is zero
     /// - `NebulaError::LayoutNotFound` - No active layout for this ship
     /// - `NebulaError::AnomalyOutOfBounds` - index >= layout.anomalies.len()
-    pub fn query_anomaly(
-        env:     Env,
-        ship_id: u64,
-        index:   u32,
-    ) -> Result<Anomaly, NebulaError> {
+    pub fn query_anomaly(env: Env, ship_id: u64, index: u32) -> Result<Anomaly, NebulaError> {
         if ship_id < MIN_SHIP_ID {
             return Err(NebulaError::InvalidShipId);
         }
@@ -509,11 +505,7 @@ impl NebulaGen {
     /// - `NebulaError::InvalidShipId` - ship_id is zero
     /// - `NebulaError::LayoutNotFound` - No active layout for this ship
     /// - `NebulaError::AnomalyOutOfBounds` - index >= layout.size
-    pub fn has_anomaly(
-        env:           Env,
-        ship_id:       u64,
-        anomaly_index: u32,
-    ) -> Result<bool, NebulaError> {
+    pub fn has_anomaly(env: Env, ship_id: u64, anomaly_index: u32) -> Result<bool, NebulaError> {
         if ship_id < MIN_SHIP_ID {
             return Err(NebulaError::InvalidShipId);
         }
@@ -567,7 +559,11 @@ impl NebulaGen {
         let key = DataKey::ActiveLayout(ship_id);
         let store = env.storage().persistent();
         if let Some(layout) = store.get::<_, NebulaLayout>(&key) {
-            if is_expired(env.ledger().timestamp(), layout.generated_at, config.layout_ttl) {
+            if is_expired(
+                env.ledger().timestamp(),
+                layout.generated_at,
+                config.layout_ttl,
+            ) {
                 store.remove(&key);
                 return Ok(true);
             }
