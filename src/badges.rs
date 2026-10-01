@@ -35,7 +35,7 @@
 /// Badges follow the SEP-0041 token interface pattern on Stellar.  Each badge
 /// has a unique `badge_id` (u64 auto-increment) and is tracked in persistent
 /// storage.
-use soroban_sdk::{contracttype, contracterror, symbol_short, Address, Bytes, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Bytes, Env, String, Vec};
 
 use crate::achievement_engine::{AchievementBadge, AchievementKey};
 
@@ -68,10 +68,10 @@ pub enum BadgeKey {
 #[contracttype]
 #[repr(u32)]
 pub enum RarityTier {
-    Common    = 0,
-    Uncommon  = 1,
-    Rare      = 2,
-    Epic      = 3,
+    Common = 0,
+    Uncommon = 1,
+    Rare = 2,
+    Epic = 3,
     Legendary = 4,
 }
 
@@ -285,14 +285,22 @@ pub fn transfer_badge(
 
 fn append_owner_badge(env: &Env, owner: &Address, badge_id: u64) {
     let key = BadgeKey::OwnerBadges(owner.clone());
-    let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env));
+    let mut ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
     ids.push_back(badge_id);
     env.storage().persistent().set(&key, &ids);
 }
 
 fn remove_owner_badge(env: &Env, owner: &Address, badge_id: u64) {
     let key = BadgeKey::OwnerBadges(owner.clone());
-    let ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env));
+    let ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
     let mut updated: Vec<u64> = Vec::new(env);
     let mut i = 0u32;
     while i < ids.len() {
@@ -308,14 +316,27 @@ fn remove_owner_badge(env: &Env, owner: &Address, badge_id: u64) {
 
 /// Derive a [`RarityTier`] from an achievement ID.
 ///
-/// | Tier      | Achievement IDs                     |
-/// |-----------|-------------------------------------|
-/// | Legendary | 20 (Legend)                         |
-/// | Epic      | 18 (Armada), 19 (Trailblazer)       |
-/// | Rare      | 13 (FleetTen), 16 (CosmicReach), 17 |
-/// | Uncommon  | 5, 9, 12, 14, 15                    |
-/// | Common    | everything else                     |
+/// Maps achievement tiers to badge rarity:
+/// - Platinum achievements → Legendary badges
+/// - Gold achievements → Epic badges  
+/// - Silver achievements → Rare badges
+/// - Bronze achievements → Uncommon badges
+/// - Everything else → Common badges
 fn rarity_for_achievement(id: u64) -> RarityTier {
+    use crate::achievements::{get_achievement_def, AchievementTier};
+
+    // Try to get the achievement definition from the new system
+    let env_temp = Env::default();
+    if let Ok(def) = get_achievement_def(&env_temp, id) {
+        return match def.tier {
+            AchievementTier::Platinum => RarityTier::Legendary,
+            AchievementTier::Gold => RarityTier::Epic,
+            AchievementTier::Silver => RarityTier::Rare,
+            AchievementTier::Bronze => RarityTier::Uncommon,
+        };
+    }
+
+    // Fallback for legacy achievements
     match id {
         20 => RarityTier::Legendary,
         18 | 19 => RarityTier::Epic,

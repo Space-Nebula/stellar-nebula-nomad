@@ -35,20 +35,19 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-wasm-size-
 
       - name: Install Stellar CLI
-        uses: stellar/stellar-cli@v28.1.0
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Build WASM
+      - name: Build WASM (release)
         run: stellar contract build
-
-      - name: Install soroban-cli
-        run: cargo install soroban-cli --locked
 
       - name: Optimize WASM
         run: |
           mkdir -p wasm
           for f in target/wasm32v1-none/release/*.wasm; do
             out="wasm/$(basename ${f%.wasm}.optimized.wasm)"
-            soroban contract optimize --wasm "$f" --wasm-out "$out" 2>/dev/null || cp "$f" "$out"
+            stellar contract optimize --wasm "$f" --wasm-out "$out" 2>/dev/null || cp "$f" "$out"
           done
 
       - name: Measure WASM sizes

@@ -31,8 +31,8 @@ WASM_PATH="target/wasm32v1-none/release/stellar_nebula_nomad.wasm"
 DEPLOY_LOG=".deploy-${NETWORK}.log"
 ARTIFACTS_DIR="deployment/artifacts/${NETWORK}"
 
-command -v soroban >/dev/null 2>&1 || {
-    echo "soroban CLI not found. Install with: cargo install soroban-cli --locked"
+command -v stellar >/dev/null 2>&1 || {
+    echo "stellar CLI not found. Install with: cargo install --locked stellar-cli"
     exit 1
 }
 
@@ -48,14 +48,14 @@ HASH=$(sha256sum "$WASM_PATH" | awk '{print $1}')
 echo "WASM SHA256: $HASH"
 
 echo "==> Deploying to network: $NETWORK"
-CONTRACT_ID=$(soroban contract deploy \
+CONTRACT_ID=$(stellar contract deploy \
     --wasm "$WASM_PATH" \
     --source-account "$IDENTITY" \
     --network "$NETWORK" \
     --output json 2>/dev/null | jq -r '.contract_id // .')
 
 if [ -z "$CONTRACT_ID" ]; then
-    CONTRACT_ID=$(soroban contract deploy \
+    CONTRACT_ID=$(stellar contract deploy \
         --wasm "$WASM_PATH" \
         --source-account "$IDENTITY" \
         --network "$NETWORK" 2>/dev/null)
@@ -109,6 +109,6 @@ echo "  Contract:   $CONTRACT_ID"
 echo "  WASM hash:  $HASH"
 echo ""
 echo "Post-deploy smoke test (manual):"
-echo "  soroban contract invoke --id $CONTRACT_ID --source-account $IDENTITY --network $NETWORK --fn get_contract_version"
+echo "  stellar contract invoke --id $CONTRACT_ID --source-account $IDENTITY --network $NETWORK --fn get_contract_version"
 echo ""
 echo "To rollback: ./scripts/rollback.sh $NETWORK $IDENTITY"

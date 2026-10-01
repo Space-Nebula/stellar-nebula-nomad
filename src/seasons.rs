@@ -486,7 +486,7 @@ pub fn get_participant_stats(
 /// per rollover; the `new_title` argument names the incoming season.
 ///
 /// ### Reward formula
-/// ```
+/// ```text
 /// reward = scans * REWARD_PER_SCAN
 ///        + essence_collected * ESSENCE_REWARD_BPS / 10_000
 ///        + (all 3 chapters active ? CHAPTER_COMPLETION_BONUS : 0)

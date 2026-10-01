@@ -1,10 +1,15 @@
 //! Security bounty approval and payout accounting.
 //!
 use soroban_sdk::{
-    contracterror, contracttype, symbol_short, Address, Env, Map, String, Symbol, Vec,
+    contracterror, contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol, Vec,
 };
 
 const MAX_BURST_REPORTS: u32 = 10;
+pub const DISCLOSURE_EMBARGO_SECONDS: u64 = 90 * 24 * 60 * 60;
+pub const LOW_REWARD: i128 = 100;
+pub const MEDIUM_REWARD: i128 = 500;
+pub const HIGH_REWARD: i128 = 2_000;
+pub const CRITICAL_REWARD: i128 = 5_000;
 
 #[derive(Clone)]
 #[contracttype]
@@ -22,10 +27,24 @@ pub struct BugReport {
     pub reporter: Address,
     pub description: String,
     pub severity: Symbol,
+    pub fingerprint: BytesN<32>,
     pub submitted_at: u64,
+    pub disclosure_at: u64,
     pub default_reward: i128,
+    pub status: ReviewStatus,
     pub paid: bool,
     pub payout_amount: i128,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[repr(u32)]
+#[contracttype]
+pub enum ReviewStatus {
+    Submitted = 0,
+    Duplicate = 1,
+    Accepted = 2,
+    Rejected = 3,
+    Paid = 4,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -43,6 +62,7 @@ pub enum BountyError {
     EmergencyPaused = 9,
     ApprovalThresholdInvalid = 10,
     TooManyReports = 11,
+    DuplicateReport = 12,
 }
 
 fn cfg_key() -> Symbol {
@@ -93,16 +113,20 @@ fn balance_key(addr: &Address) -> (Symbol, Address) {
     (symbol_short!("b_bal"), addr.clone())
 }
 
+fn fingerprint_key(fingerprint: &BytesN<32>) -> (Symbol, BytesN<32>) {
+    (symbol_short!("b_dup"), fingerprint.clone())
+}
+
 fn get_tiers(env: &Env) -> Map<Symbol, i128> {
     env.storage()
         .persistent()
         .get(&tiers_key())
         .unwrap_or_else(|| {
             let mut tiers = Map::new(env);
-            tiers.set(symbol_short!("low"), 100);
-            tiers.set(symbol_short!("medium"), 500);
-            tiers.set(symbol_short!("high"), 2_000);
-            tiers.set(symbol_short!("critical"), 10_000);
+            tiers.set(symbol_short!("low"), LOW_REWARD);
+            tiers.set(symbol_short!("medium"), MEDIUM_REWARD);
+            tiers.set(symbol_short!("high"), HIGH_REWARD);
+            tiers.set(symbol_short!("critical"), CRITICAL_REWARD);
             tiers
         })
 }
@@ -194,12 +218,39 @@ pub fn submit_bug_report(
     description: String,
     severity: Symbol,
 ) -> Result<u64, BountyError> {
+    let fingerprint = BytesN::from_array(env, &[0; 32]);
+    submit_bug_report_internal(env, reporter, description, severity, fingerprint, false)
+}
+
+pub fn submit_bug_report_with_fingerprint(
+    env: &Env,
+    reporter: &Address,
+    description: String,
+    severity: Symbol,
+    fingerprint: BytesN<32>,
+) -> Result<u64, BountyError> {
+    submit_bug_report_internal(env, reporter, description, severity, fingerprint, true)
+}
+
+fn submit_bug_report_internal(
+    env: &Env,
+    reporter: &Address,
+    description: String,
+    severity: Symbol,
+    fingerprint: BytesN<32>,
+    reject_duplicate: bool,
+) -> Result<u64, BountyError> {
     reporter.require_auth();
 
     let tiers = get_tiers(env);
     let default_reward = tiers
         .get(severity.clone())
         .ok_or(BountyError::InvalidSeverity)?;
+
+    let duplicate_key = fingerprint_key(&fingerprint);
+    if reject_duplicate && env.storage().persistent().has(&duplicate_key) {
+        return Err(BountyError::DuplicateReport);
+    }
 
     let next_id = env
         .storage()
@@ -214,8 +265,11 @@ pub fn submit_bug_report(
         reporter: reporter.clone(),
         description,
         severity,
+        fingerprint: fingerprint.clone(),
         submitted_at: env.ledger().timestamp(),
+        disclosure_at: env.ledger().timestamp() + DISCLOSURE_EMBARGO_SECONDS,
         default_reward,
+        status: ReviewStatus::Submitted,
         paid: false,
         payout_amount: 0,
     };
@@ -223,6 +277,9 @@ pub fn submit_bug_report(
     env.storage()
         .persistent()
         .set(&report_key(next_id), &report);
+    if reject_duplicate {
+        env.storage().persistent().set(&duplicate_key, &next_id);
+    }
     Ok(next_id)
 }
 
@@ -331,6 +388,7 @@ pub fn approve_and_pay_bounty(
 
     report.paid = true;
     report.payout_amount = amount;
+    report.status = ReviewStatus::Paid;
     env.storage()
         .persistent()
         .set(&report_key(report_id), &report);
@@ -423,4 +481,87 @@ pub fn get_bounty_pool(env: &Env) -> i128 {
         .persistent()
         .get::<_, i128>(&pool_key())
         .unwrap_or(0)
+}
+
+pub fn severity_reward(env: &Env, severity: Symbol) -> Result<i128, BountyError> {
+    get_tiers(env)
+        .get(severity)
+        .ok_or(BountyError::InvalidSeverity)
+}
+
+pub fn public_disclosure_ready(env: &Env, report_id: u64) -> Result<bool, BountyError> {
+    let report = get_report(env, report_id).ok_or(BountyError::ReportNotFound)?;
+    Ok(env.ledger().timestamp() >= report.disclosure_at)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::{Address as _, Ledger, LedgerInfo};
+
+    fn env_at(timestamp: u64) -> Env {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 1,
+            timestamp,
+            network_id: [0; 32],
+            base_reserve: 10,
+            min_temp_entry_ttl: 100,
+            min_persistent_entry_ttl: 1_000,
+            max_entry_ttl: 10_000,
+        });
+        env
+    }
+
+    #[test]
+    fn default_severity_rewards_match_public_program() {
+        let env = Env::default();
+        assert_eq!(
+            severity_reward(&env, symbol_short!("low")).unwrap(),
+            LOW_REWARD
+        );
+        assert_eq!(
+            severity_reward(&env, symbol_short!("medium")).unwrap(),
+            MEDIUM_REWARD
+        );
+        assert_eq!(
+            severity_reward(&env, symbol_short!("high")).unwrap(),
+            HIGH_REWARD
+        );
+        assert_eq!(
+            severity_reward(&env, symbol_short!("critical")).unwrap(),
+            CRITICAL_REWARD
+        );
+    }
+
+    #[test]
+    fn duplicate_fingerprints_are_rejected_and_embargo_is_tracked() {
+        let env = env_at(1_700_000_000);
+        let admin = Address::generate(&env);
+        let reporter = Address::generate(&env);
+        let approvers = Vec::new(&env);
+        init_bounty_engine(&env, &admin, approvers, 1, 5_000, 60).unwrap();
+
+        let fingerprint = BytesN::from_array(&env, &[7; 32]);
+        let id = submit_bug_report_with_fingerprint(
+            &env,
+            &reporter,
+            String::from_str(&env, "overflow in payout accounting"),
+            symbol_short!("high"),
+            fingerprint.clone(),
+        )
+        .unwrap();
+
+        let duplicate = submit_bug_report_with_fingerprint(
+            &env,
+            &reporter,
+            String::from_str(&env, "same issue with different wording"),
+            symbol_short!("high"),
+            fingerprint,
+        );
+        assert!(matches!(duplicate, Err(BountyError::DuplicateReport)));
+        assert!(!public_disclosure_ready(&env, id).unwrap());
+    }
 }

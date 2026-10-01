@@ -51,6 +51,23 @@ pub enum VoteDirection {
     Against,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProposalType {
+    ParameterChange,
+    FeatureToggle,
+    TreasurySpend,
+    ContractUpgrade,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExecutionMode {
+    Automatic,
+    Manual,
+    Multisig,
+}
+
 // ─── Data Types ───────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -85,6 +102,32 @@ pub struct DaoConfig {
     pub proposal_threshold: i128,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GovernancePolicy {
+    pub quorum_basis_points: u32,
+    pub timelock_seconds: u64,
+    pub large_spend_threshold: i128,
+    pub multisig_threshold: u32,
+    pub multisig_signers: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GovernanceMetrics {
+    pub proposals_created: u64,
+    pub proposals_passed: u64,
+    pub votes_cast: u64,
+    pub delegated_votes: u64,
+    pub participation_basis_points: u32,
+}
+
+pub const DEFAULT_QUORUM_BPS: u32 = 2_000;
+pub const DEFAULT_TIMELOCK_SECONDS: u64 = 48 * 60 * 60;
+pub const DEFAULT_LARGE_SPEND_THRESHOLD: i128 = 50_000;
+pub const DEFAULT_MULTISIG_THRESHOLD: u32 = 3;
+pub const DEFAULT_MULTISIG_SIGNERS: u32 = 5;
+
 // ─── Storage Keys ─────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -101,6 +144,63 @@ pub enum DataKey {
     /// One vote record, keyed by (proposal_id, voter_address)
     Vote(u64, Address),
     TreasuryToken,
+    Delegate(Address),
+    Metrics,
+}
+
+pub fn default_governance_policy() -> GovernancePolicy {
+    GovernancePolicy {
+        quorum_basis_points: DEFAULT_QUORUM_BPS,
+        timelock_seconds: DEFAULT_TIMELOCK_SECONDS,
+        large_spend_threshold: DEFAULT_LARGE_SPEND_THRESHOLD,
+        multisig_threshold: DEFAULT_MULTISIG_THRESHOLD,
+        multisig_signers: DEFAULT_MULTISIG_SIGNERS,
+    }
+}
+
+pub fn validate_proposal_type(proposal_type: ProposalType) -> ExecutionMode {
+    match proposal_type {
+        ProposalType::ParameterChange | ProposalType::FeatureToggle => ExecutionMode::Automatic,
+        ProposalType::TreasurySpend => ExecutionMode::Multisig,
+        ProposalType::ContractUpgrade => ExecutionMode::Manual,
+    }
+}
+
+pub fn quorum_met(total_votes: i128, total_supply: i128, quorum_basis_points: u32) -> bool {
+    if total_votes <= 0 || total_supply <= 0 {
+        return false;
+    }
+    let required = total_supply
+        .saturating_mul(quorum_basis_points as i128)
+        .saturating_div(10_000);
+    total_votes >= required
+}
+
+pub fn participation_bps(total_votes: i128, total_supply: i128) -> u32 {
+    if total_votes <= 0 || total_supply <= 0 {
+        return 0;
+    }
+    let bps = total_votes
+        .saturating_mul(10_000)
+        .saturating_div(total_supply);
+    bps.min(10_000) as u32
+}
+
+pub fn delegation_weight(base_power: i128, delegated_power: i128) -> Result<i128, DaoError> {
+    if base_power < 0 || delegated_power < 0 {
+        return Err(DaoError::InvalidAmount);
+    }
+    base_power
+        .checked_add(delegated_power)
+        .ok_or(DaoError::Overflow)
+}
+
+pub fn multisig_approved(signatures: u32, policy: &GovernancePolicy) -> bool {
+    signatures >= policy.multisig_threshold && policy.multisig_threshold <= policy.multisig_signers
+}
+
+pub fn large_treasury_spend(amount: i128, policy: &GovernancePolicy) -> bool {
+    amount >= policy.large_spend_threshold
 }
 
 // ─── Public Functions ─────────────────────────────────────────────────────
@@ -142,21 +242,15 @@ pub fn initialize(
         },
     );
 
-    env.events().publish(
-        (symbol_short!("dao"), symbol_short!("init")),
-        (admin,),
-    );
+    env.events()
+        .publish((symbol_short!("dao"), symbol_short!("init")), (admin,));
 
     Ok(())
 }
 
 /// Create a new proposal. Caller must have sufficient voting power.
 /// Returns the proposal ID.
-pub fn create_proposal(
-    env: Env,
-    proposer: Address,
-    description: String,
-) -> Result<u64, DaoError> {
+pub fn create_proposal(env: Env, proposer: Address, description: String) -> Result<u64, DaoError> {
     proposer.require_auth();
 
     let config: DaoConfig = env
@@ -278,9 +372,7 @@ pub fn vote(
         direction: direction.clone(),
         power,
     };
-    env.storage()
-        .persistent()
-        .set(&vote_key, &vote_record);
+    env.storage().persistent().set(&vote_key, &vote_record);
 
     // Update proposal with new tallies.
     env.storage()
@@ -360,11 +452,7 @@ pub fn execute_proposal(env: Env, proposal_id: u64) -> Result<(), DaoError> {
 }
 
 /// Cancel a proposal. Only the proposer or admin can cancel.
-pub fn cancel_proposal(
-    env: Env,
-    caller: Address,
-    proposal_id: u64,
-) -> Result<(), DaoError> {
+pub fn cancel_proposal(env: Env, caller: Address, proposal_id: u64) -> Result<(), DaoError> {
     caller.require_auth();
 
     let mut proposal: Proposal = env
@@ -411,18 +499,12 @@ pub fn get_proposal(env: Env, proposal_id: u64) -> Result<Proposal, DaoError> {
 
 /// Get a vote record for a voter and proposal.
 pub fn get_vote(env: Env, voter: Address, proposal_id: u64) -> Option<VoteRecord> {
-    env.storage()
-        .persistent()
-        .get(&(proposal_id, voter))
+    env.storage().persistent().get(&(proposal_id, voter))
 }
 
 /// Transfer DAO treasury funds to a recipient.
 /// This function may ONLY be called by the DAO contract itself (via proposal execution).
-pub fn treasury_transfer(
-    env: Env,
-    recipient: Address,
-    amount: i128,
-) -> Result<(), DaoError> {
+pub fn treasury_transfer(env: Env, recipient: Address, amount: i128) -> Result<(), DaoError> {
     // Security: Check caller is the DAO contract itself.
     // This MUST be checked first, before any state read or computation.
     let dao_address: Address = env
@@ -447,4 +529,46 @@ pub fn treasury_transfer(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proposal_types_map_to_expected_execution_modes() {
+        assert_eq!(
+            validate_proposal_type(ProposalType::ParameterChange),
+            ExecutionMode::Automatic
+        );
+        assert_eq!(
+            validate_proposal_type(ProposalType::FeatureToggle),
+            ExecutionMode::Automatic
+        );
+        assert_eq!(
+            validate_proposal_type(ProposalType::TreasurySpend),
+            ExecutionMode::Multisig
+        );
+        assert_eq!(
+            validate_proposal_type(ProposalType::ContractUpgrade),
+            ExecutionMode::Manual
+        );
+    }
+
+    #[test]
+    fn quorum_and_participation_are_basis_point_based() {
+        assert!(quorum_met(200, 1_000, DEFAULT_QUORUM_BPS));
+        assert!(!quorum_met(199, 1_000, DEFAULT_QUORUM_BPS));
+        assert_eq!(participation_bps(250, 1_000), 2_500);
+        assert_eq!(participation_bps(2_000, 1_000), 10_000);
+    }
+
+    #[test]
+    fn delegation_and_multisig_guards_large_spends() {
+        let policy = default_governance_policy();
+        assert_eq!(delegation_weight(10, 25).unwrap(), 35);
+        assert!(large_treasury_spend(50_000, &policy));
+        assert!(multisig_approved(3, &policy));
+        assert!(!multisig_approved(2, &policy));
+    }
 }

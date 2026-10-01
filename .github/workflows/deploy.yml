@@ -41,13 +41,12 @@ jobs:
           key: ${{ runner.os }}-cargo-deploy-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install Stellar CLI
-        uses: stellar/stellar-cli@v28.1.0
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build WASM
         run: stellar contract build
-
-      - name: Install Soroban CLI
-        run: cargo install soroban-cli --locked
 
       - name: Optimize WASM
         id: find-wasm
@@ -75,9 +74,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Soroban CLI
-        run: cargo install soroban-cli --locked
-
       - name: Download optimized WASM
         uses: actions/download-artifact@v8
         with:
@@ -86,12 +82,12 @@ jobs:
       - name: Configure Soroban network
         run: |
           if [ "$SOROBAN_NETWORK" = "futurenet" ]; then
-            soroban network add \
+            stellar network add \
               --rpc-url https://rpc-futurenet.stellar.org \
               --network-passphrase "Test SDF Future Network ; October 2024" \
               futurenet
           else
-            soroban network add \
+            stellar network add \
               --rpc-url https://soroban-testnet.stellar.org \
               --network-passphrase "Test SDF Network ; September 2015" \
               testnet
@@ -100,12 +96,12 @@ jobs:
       - name: Import deployer identity
         run: |
           echo "${{ secrets.DEPLOYER_SECRET_KEY }}" | \
-            soroban keys add deployer --secret-key
+            stellar keys add deployer --secret-key
 
       - name: Deploy contract
         id: deploy
         run: |
-          CONTRACT_ID=$(soroban contract deploy \
+          CONTRACT_ID=$(stellar contract deploy \
             --wasm optimized.wasm \
             --source deployer \
             --network "$SOROBAN_NETWORK")
@@ -114,7 +110,7 @@ jobs:
 
       - name: Initialize contract
         run: |
-          soroban contract invoke \
+          stellar contract invoke \
             --id "${{ steps.deploy.outputs.contract-id }}" \
             --source deployer \
             --network "$SOROBAN_NETWORK" \
@@ -122,7 +118,7 @@ jobs:
 
       - name: Smoke test — scan_nebula
         run: |
-          RESULT=$(soroban contract invoke \
+          RESULT=$(stellar contract invoke \
             --id "${{ steps.deploy.outputs.contract-id }}" \
             --source deployer \
             --network "$SOROBAN_NETWORK" \

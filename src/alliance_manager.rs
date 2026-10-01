@@ -51,6 +51,8 @@ pub enum AllianceError {
     Unauthorized = 5,
     InvalidName = 6,
     InsufficientVotes = 7,
+    /// Member hit today's guild contribution cap (anti-whale).
+    ContributionCapExceeded = 8,
 }
 
 impl crate::error_standard::StandardContractError for AllianceError {
@@ -62,6 +64,7 @@ impl crate::error_standard::StandardContractError for AllianceError {
             Self::AlreadyInAlliance => (ErrorKind::Conflict, false),
             Self::NotMember | Self::Unauthorized => (ErrorKind::Authorization, false),
             Self::InvalidName => (ErrorKind::Validation, false),
+            Self::ContributionCapExceeded => (ErrorKind::ResourceLimit, true),
         };
         crate::error_standard::ErrorDescriptor {
             module: "alliance_manager",
@@ -292,6 +295,10 @@ pub fn contribute_to_treasury(
     if amount <= 0 {
         return Err(AllianceError::Unauthorized);
     }
+
+    // Per-member daily cap so one whale cannot own the treasury.
+    crate::economics::anti_whale::check_guild_contribution(env, &player, amount)
+        .map_err(|_| AllianceError::ContributionCapExceeded)?;
 
     // Get player's alliance
     let alliance_id = env

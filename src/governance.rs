@@ -64,7 +64,7 @@ const VOTING_PERIOD: u64 = 86400 * 3; // 3 days
 
 #[derive(Clone)]
 #[contracttype]
-enum GovernanceDataKey {
+pub enum GovernanceDataKey {
     Admin,
     DaoContract,
     GameParameter(Symbol),

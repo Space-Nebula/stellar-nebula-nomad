@@ -17,10 +17,13 @@ echo "Building native test binaries..."
 cargo test --no-run --message-format=json | grep -E '"executable":".+"' | jq -r '.executable' | while read -r binary; do
     if [ -n "$binary" ] && [ -x "$binary" ]; then
         echo "Running Valgrind on $binary..."
+        # Report every leak kind, but only fail on genuine leaks. Rust's test
+        # harness keeps thread-locals and channel contexts "still reachable"
+        # at exit by design, and treating those as errors fails every binary.
         valgrind \
             --leak-check=full \
             --show-leak-kinds=all \
-            --errors-for-leak-kinds=all \
+            --errors-for-leak-kinds=definite,indirect \
             --error-exitcode=1 \
             "$binary"
     fi
