@@ -3,7 +3,7 @@ use soroban_sdk::{
 };
 
 #[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum GovError {
     VotingClosed = 1,

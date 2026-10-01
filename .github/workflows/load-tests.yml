@@ -46,6 +46,7 @@ jobs:
           path: tests/load/load-*
       - name: Comment results on PR
         if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: k6-load-tests

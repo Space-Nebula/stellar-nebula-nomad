@@ -112,13 +112,14 @@ mod storage_optim;
 
 pub mod alliance_manager;
 mod audio_seed_generator;
+pub mod clan_wars;
 mod constellation_mapper;
 mod entanglement_comms;
 pub mod event_scheduler;
 mod market_oracle;
 mod navigation_planner;
 mod portal_registry;
-mod privacy_stats;
+pub mod privacy_stats;
 mod prize_distributor;
 mod wormhole_traveler;
 
@@ -128,7 +129,7 @@ mod rewards;
 pub mod seasons;
 pub mod trading;
 
-mod crafting;
+pub mod crafting;
 pub mod recipes;
 mod ship_customization;
 mod skins;

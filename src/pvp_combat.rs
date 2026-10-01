@@ -937,7 +937,6 @@ pub fn leave_matchmaking(env: &Env, player: &Address) -> Result<(), PvPError> {
         .persistent()
         .get(&key)
         .unwrap_or_else(|| Vec::new(env));
-
     let mut found = false;
     let mut new_queue = Vec::new(env);
     for i in 0..queue.len() {

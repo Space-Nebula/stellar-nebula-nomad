@@ -1032,8 +1032,6 @@ pub fn approve_proposal(
         .persistent()
         .get(&AccessControlKey::MultiSigConfig)
         .ok_or(AccessControlError::MultiSigNotConfigured)?;
-
-    // Verify approver is a signer
     let signers: Vec<Address> = env
         .storage()
         .persistent()

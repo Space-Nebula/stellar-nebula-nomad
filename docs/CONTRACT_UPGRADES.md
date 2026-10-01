@@ -20,9 +20,9 @@ Contracts in `stellar-nebula-nomad` use Soroban's native contract upgrading mech
 Before initiating any production upgrade, complete the following mandatory verification steps:
 
 - [ ] **Contract Compilation & Verification**
-  - [ ] Build release WASM binary: `cargo build --target wasm32-unknown-unknown --release`
-  - [ ] Optimize WASM size using `soroban contract optimize --wasm target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm`
-  - [ ] Calculate new WASM SHA-256 hash: `sha256sum target/wasm32-unknown-unknown/release/stellar_nebula_nomad.optimized.wasm`
+  - [ ] Build release WASM binary: `stellar contract build`
+  - [ ] Optimize WASM size using `stellar contract optimize --wasm target/wasm32v1-none/release/stellar_nebula_nomad.wasm`
+  - [ ] Calculate new WASM SHA-256 hash: `sha256sum target/wasm32v1-none/release/stellar_nebula_nomad.optimized.wasm`
 - [ ] **Dry-Run & Validation**
   - [ ] Execute `dry_run_migration()` with sample state payloads to verify gas usage and data schema compatibility.
   - [ ] Verify `is_backward_compatible()` returns `true` for target version transitions.
@@ -41,7 +41,7 @@ Before initiating any production upgrade, complete the following mandatory verif
 Upload the optimized WASM byte code to the Soroban network:
 ```bash
 soroban contract install \
-  --wasm target/wasm32-unknown-unknown/release/stellar_nebula_nomad.optimized.wasm \
+  --wasm target/wasm32v1-none/release/stellar_nebula_nomad.optimized.wasm \
   --source admin-identity \
   --network mainnet
 ```

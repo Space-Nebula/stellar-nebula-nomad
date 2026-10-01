@@ -89,12 +89,12 @@ Before upgrading, complete **all** of the following:
 ### 1. Build the new contract Wasm
 
 ```sh
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 ```
 
 The output will be at:
 ```
-target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm
+target/wasm32v1-none/release/stellar_nebula_nomad.wasm
 ```
 
 ### 2. Upload the new Wasm to Stellar
@@ -103,7 +103,7 @@ target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm
 stellar contract upload \
   --source-account $ADMIN_SECRET \
   --network testnet \
-  --wasm target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm
+  --wasm target/wasm32v1-none/release/stellar_nebula_nomad.wasm
 ```
 
 Note the **Wasm hash** printed by this command (64-character hex string).
@@ -284,7 +284,7 @@ tested.  Compute it locally:
 
 ```sh
 stellar contract upload \
-  --wasm target/wasm32-unknown-unknown/release/stellar_nebula_nomad.wasm \
+  --wasm target/wasm32v1-none/release/stellar_nebula_nomad.wasm \
   --network testnet \
   --dry-run 2>&1 | grep hash
 ```

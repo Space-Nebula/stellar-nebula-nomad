@@ -217,10 +217,10 @@ The host toolchain is missing. On Windows install Visual Studio Build Tools
 with the MSVC v143 toolset and the Windows SDK. The release WASM build does not
 need it; only the native test binaries do.
 
-### 5.3 `wasm32-unknown-unknown` target missing
+### 5.3 `wasm32v1-none` target missing
 
 ```bash
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32v1-none
 rustup target list --installed
 ```
 

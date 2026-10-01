@@ -54,8 +54,8 @@ soroban --version
 
 **Solution**:
 ```bash
-rustup target add wasm32-unknown-unknown
-cargo build --target wasm32-unknown-unknown --release
+rustup target add wasm32v1-none
+stellar contract build
 ```
 
 ### "error: failed to verify the checksum for `soroban-sdk`"
@@ -216,7 +216,7 @@ for i in 0..layout.anomalies.len() {
 **Cause**: Contract binary too large or storage footprint too high.
 
 **Solution**:
-1. Optimize WASM: `soroban contract optimize --wasm contract.wasm`
+1. Optimize WASM: `stellar contract optimize --wasm contract.wasm`
 2. Remove unused dependencies from Cargo.toml
 3. Use inline functions for hot paths
 4. Reduce string/binary constants

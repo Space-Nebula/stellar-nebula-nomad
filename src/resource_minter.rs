@@ -102,7 +102,7 @@ pub enum MinterKey {
 
 // ── Error ─────────────────────────────────────────────────────
 #[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum MinterError {
     /// Amount must be > 0.

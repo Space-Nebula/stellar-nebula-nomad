@@ -15,8 +15,9 @@ fi
 OUTPUT_DIR="mutants.out"
 mkdir -p "$OUTPUT_DIR"
 
-# Run cargo mutants with json report output
-cargo mutants --json --output "$OUTPUT_DIR" || true
+# Run cargo mutants with the stable report format supported by the installed
+# cargo-mutants release.
+cargo mutants --output "$OUTPUT_DIR" || true
 
 OUT_FILE="$OUTPUT_DIR/mutants.json"
 
