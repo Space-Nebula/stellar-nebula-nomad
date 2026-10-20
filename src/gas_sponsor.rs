@@ -256,7 +256,10 @@ pub fn sponsor_first_scan(env: &Env, player: &Address) -> Result<i128, SponsorEr
 
     // Emit SponsorshipGranted event
     env.events().publish(
-        (symbol_short!("sponsor"), symbol_short!("granted")),
+        (
+            symbol_short!("sponsor"),
+            Symbol::new(env, "SponsorshipGranted"),
+        ),
         (player.clone(), config.sponsor_amount, current_count + 1),
     );
 
@@ -369,25 +372,17 @@ pub fn get_user_daily_count(env: &Env, player: &Address) -> u32 {
 
 // ─── Internal Helpers ─────────────────────────────────────────────────────
 
-/// Check if a player has a verified profile by checking if they have any profile data.
-/// This integrates with the player_profile module.
+/// Check if a player has a verified profile.
+///
+/// Profiles are marked verified by `mark_profile_verified` when they are
+/// created. Anyone without that flag is rejected, so sponsorship is limited
+/// to new profiles (Issue #81).
 fn is_profile_verified(env: &Env, player: &Address) -> bool {
-    // Check if player profile exists by attempting to get their profile ID
-    // Profile IDs are sequential, so we check common range
-    // In a real implementation, we'd have a direct lookup mapping
-    // For now, we assume verification passes if player has interacted with profile system
-
-    // Check if player has been marked as having a profile via a direct storage lookup
-    // This is a simplified check - the actual player_profile module would need
-    // to expose a has_profile function
-
-    // For integration purposes, we'll check a special flag that could be set
-    // when a profile is initialized
     let profile_key = (Symbol::new(env, "ProfileExists"), player.clone());
     env.storage()
         .instance()
         .get::<(Symbol, Address), bool>(&profile_key)
-        .unwrap_or(true) // Default to true for testing; in production, stricter check
+        .unwrap_or(false)
 }
 
 /// Reset the daily counter if 24 hours have passed.

@@ -25,6 +25,8 @@ pub enum DataKey {
     Resource(Symbol),
     /// Original resource that was fractionalized (resource_id -> owner).
     OriginalResourceOwner(u64),
+    /// Active `FractionalConfig` (minimum share size and per-tx limit).
+    Config,
 }
 
 // ─── Error Handling ───────────────────────────────────────────────────────
@@ -138,9 +140,7 @@ pub fn initialize(env: &Env, admin: &Address) -> Result<(), FractionalError> {
         min_share_size: MIN_SHARE_SIZE,
         max_fractions_per_tx: MAX_FRACTIONS_PER_TX,
     };
-    env.storage()
-        .instance()
-        .set(&DataKey::Resource(Symbol::new(env, "config")), &config);
+    env.storage().instance().set(&DataKey::Config, &config);
 
     env.events().publish(
         (symbol_short!("frac"), symbol_short!("init")),
@@ -176,14 +176,19 @@ pub fn fractionalize_resource(
 ) -> Result<Vec<u64>, FractionalError> {
     owner.require_auth();
 
+    let (min_share_size, max_fractions) = active_limits(env);
+
     // Validate share count
-    if shares == 0 || shares > MAX_FRACTIONS_PER_TX {
+    if shares == 0 {
         return Err(FractionalError::InvalidShareCount);
+    }
+    if shares > max_fractions {
+        return Err(FractionalError::MaxFractionsExceeded);
     }
 
     // Calculate share amount
     let share_amount = total_amount / shares;
-    if share_amount < MIN_SHARE_SIZE {
+    if share_amount < min_share_size {
         return Err(FractionalError::ShareTooSmall);
     }
 
@@ -191,6 +196,17 @@ pub fn fractionalize_resource(
     let remainder = total_amount % shares;
     if remainder != 0 {
         return Err(FractionalError::InvalidShareCount);
+    }
+
+    // A resource can only be split while it is whole
+    if let Some(existing) = env
+        .storage()
+        .persistent()
+        .get::<DataKey, OriginalResource>(&DataKey::Resource(resource_type.clone()))
+    {
+        if existing.is_fractionalized {
+            return Err(FractionalError::AlreadyFractionalized);
+        }
     }
 
     // Create original resource record
@@ -237,7 +253,10 @@ pub fn fractionalize_resource(
 
     // Emit event
     env.events().publish(
-        (symbol_short!("frac"), symbol_short!("fraczd")),
+        (
+            symbol_short!("frac"),
+            Symbol::new(env, "ResourceFractionalized"),
+        ),
         (owner.clone(), resource_type, total_amount, shares),
     );
 
@@ -269,7 +288,22 @@ pub fn merge_fractions(
         return Err(FractionalError::InvalidShareCount);
     }
 
+    let (_, max_fractions) = active_limits(env);
+    if share_ids.len() > max_fractions {
+        return Err(FractionalError::MaxFractionsExceeded);
+    }
+
+    // A repeated ID would be counted twice, so reject it up front
+    for i in 0..share_ids.len() {
+        for j in (i + 1)..share_ids.len() {
+            if share_ids.get(i) == share_ids.get(j) {
+                return Err(FractionalError::InvalidShareCount);
+            }
+        }
+    }
+
     let mut total_amount: u32 = 0;
+    let mut required_shares: u32 = 0;
     let mut expected_type: Option<Symbol> = None;
     let mut expected_original_id: Option<u64> = None;
 
@@ -305,7 +339,15 @@ pub fn merge_fractions(
             _ => {}
         }
 
+        if i == 0 {
+            required_shares = share.total_shares;
+        }
         total_amount += share.amount;
+    }
+
+    // The resource is only whole again once every one of its shares is merged
+    if share_ids.len() != required_shares {
+        return Err(FractionalError::InsufficientShares);
     }
 
     // Burn shares (delete from storage)
@@ -420,6 +462,22 @@ pub fn is_share_owner(env: &Env, owner: &Address, share_id: u64) -> bool {
 
 // ─── Internal Helpers ─────────────────────────────────────────────────────
 
+/// Minimum share size and per-tx fraction limit in effect. Falls back to the
+/// defaults if the module has not been initialized.
+fn active_limits(env: &Env) -> (u32, u32) {
+    match env
+        .storage()
+        .instance()
+        .get::<DataKey, FractionalConfig>(&DataKey::Config)
+    {
+        Some(config) => (
+            config.min_share_size,
+            config.max_fractions_per_tx.min(MAX_FRACTIONS_PER_TX),
+        ),
+        None => (MIN_SHARE_SIZE, MAX_FRACTIONS_PER_TX),
+    }
+}
+
 fn next_share_id(env: &Env) -> u64 {
     let key = DataKey::ShareCounter;
     let current: u64 = env.storage().instance().get(&key).unwrap_or(0);
@@ -492,9 +550,7 @@ pub fn update_config(
         max_fractions_per_tx: max_fractions,
     };
 
-    env.storage()
-        .persistent()
-        .set(&DataKey::Resource(Symbol::new(env, "config")), &config);
+    env.storage().instance().set(&DataKey::Config, &config);
 
     Ok(config)
 }

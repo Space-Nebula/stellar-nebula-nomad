@@ -279,6 +279,7 @@ pub use audit_logger::{
     AuditLoggerError, RetentionPolicy, DEFAULT_AUDIT_RETENTION_SECS, DEFAULT_MAX_AUDIT_ENTRIES,
     MAX_QUERY_LIMIT,
 };
+pub use composability_examples::{validate_composable_response, ComposabilityError};
 pub use energy_manager::{
     apply_passive_regen, consume_energy, get_energy_balance, get_regen_rate, recharge_energy,
     set_regen_rate, EnergyBalance, EnergyError, PassiveRegenResult, RechargeResult,
@@ -1567,8 +1568,36 @@ impl NebulaNomadContract {
     // ─── Player Profile ───────────────────────────────────────────────────
 
     /// Create a new on-chain player profile.
+    ///
+    /// The new profile is marked verified so its owner can claim the
+    /// first-scan gas sponsorship (Issue #81).
     pub fn initialize_profile(env: Env, owner: Address) -> Result<u64, ProfileError> {
-        player_profile::initialize_profile(&env, owner)
+        let profile_id = player_profile::initialize_profile(&env, owner.clone())?;
+        gas_sponsor::mark_profile_verified(&env, &owner);
+        Ok(profile_id)
+    }
+
+    /// Initialize the gas sponsorship pool with an admin and an initial fund.
+    pub fn initialize_sponsorship(
+        env: Env,
+        admin: Address,
+        initial_fund: i128,
+    ) -> Result<(), SponsorError> {
+        gas_sponsor::initialize(&env, &admin, initial_fund)
+    }
+
+    /// Cover gas for a verified new player's first nebula scan (once per address).
+    pub fn sponsor_first_scan(env: Env, player: Address) -> Result<i128, SponsorError> {
+        gas_sponsor::sponsor_first_scan(&env, &player)
+    }
+
+    /// Admin-only: top up the gas sponsorship fund.
+    pub fn claim_sponsorship_fund(
+        env: Env,
+        admin: Address,
+        amount: i128,
+    ) -> Result<i128, SponsorError> {
+        gas_sponsor::claim_sponsorship_fund(&env, &admin, amount)
     }
 
     /// Update scan count and essence earned after a harvest.

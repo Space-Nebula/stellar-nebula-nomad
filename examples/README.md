@@ -25,6 +25,7 @@ cargo run --example <name>
 | [`pvp_combat`](pvp_combat.rs) | `pvp_combat` | Challenge, accept, turn-based moves, ELO and combat history |
 | [`access_control`](access_control.rs) | `access_control` | RBAC bootstrap, roles with expiry, permissions, revoke, admin transfer |
 | [`gas_sponsorship`](gas_sponsorship.rs) | `gas_sponsor` | Funding the pool, caps, sponsoring a first scan, one-time enforcement |
+| [`composability_example`](composability_example.rs) | `composability_examples` | Validating cross-contract return data: non-empty accepted, all-zero rejected |
 | [`storage_optimization`](storage_optimization.rs) | `storage_optim` | TTL-bumped writes, batch reads/writes, composite keys, `CachedEntry` (with CPU costs) |
 | [`error_handling`](error_handling.rs) | `nebula_gen`, `ship_nft` | `try_*` results, per-module codes, recover-and-retry policy |
 | [`event_scheduler_example`](event_scheduler_example.rs) | `event_scheduler` | Scheduling and running timed community events |

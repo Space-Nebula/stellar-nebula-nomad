@@ -186,6 +186,10 @@ path = "tests/economy/test_treasure_vault.rs"
 name = "test_yield_forecast"
 path = "tests/economy/test_yield_forecast.rs"
 
+[[test]]
+name = "test_composability_examples"
+path = "tests/economy/test_composability_examples.rs"
+
 # DAO, RBAC, emergency controls
 [[test]]
 name = "test_dao"

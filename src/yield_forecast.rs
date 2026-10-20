@@ -231,7 +231,10 @@ pub fn generate_yield_forecast(
 
     // Emit event
     env.events().publish(
-        (symbol_short!("forecast"), symbol_short!("gen")),
+        (
+            symbol_short!("forecast"),
+            Symbol::new(env, "ForecastGenerated"),
+        ),
         (player.clone(), days, predicted_yield, confidence_score),
     );
 
@@ -251,6 +254,10 @@ pub fn update_forecast_model(
     player: &Address,
     data_point: YieldDataPoint,
 ) -> Result<ModelParams, ForecastError> {
+    // Only the player can add data to their own history, so a third party
+    // cannot skew another player's forecast
+    player.require_auth();
+
     // Get or create player history
     let mut history: Vec<YieldDataPoint> = env
         .storage()
