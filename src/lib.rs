@@ -395,8 +395,8 @@ pub use audio_seed_generator::{
 };
 pub use constellation_mapper::{
     get_constellation, get_constellation_count, match_constellation, match_constellations_batch,
-    record_constellation, Constellation, ConstellationError, MatchResult, MAX_MATCH_BURST,
-    MIN_STARS,
+    record_constellation, Constellation, ConstellationError,
+    MatchResult as ConstellationMatchResult, MAX_MATCH_BURST, MIN_STARS,
 };
 pub use entanglement_comms::{
     create_entanglement_pair, dissolve_pair, get_entanglement_pair, get_message_count,
@@ -2792,7 +2792,7 @@ impl NebulaNomadContract {
     pub fn match_constellation(
         env: Env,
         observed: Vec<BytesN<32>>,
-    ) -> Result<MatchResult, ConstellationError> {
+    ) -> Result<constellation_mapper::MatchResult, ConstellationError> {
         constellation_mapper::match_constellation(&env, &observed)
     }
 
