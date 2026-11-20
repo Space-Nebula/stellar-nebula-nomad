@@ -3,6 +3,18 @@ groups:
     interval: 30s
     rules:
 
+      # Contract health gauge (0 = unhealthy, 1 = healthy) from the exporter
+      - alert: ContractUnhealthy
+        expr: nebula_contract_health_status == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: contract
+        annotations:
+          summary: "Contract health check failing"
+          description: "nebula_contract_health_status has been 0 for more than 2 minutes."
+          runbook: "https://github.com/yourorg/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#monitoring--alerts"
+
       # Contract invocation error rate > 5%
       - alert: HighContractErrorRate
         expr: |
@@ -140,10 +152,12 @@ groups:
           summary: "Stale data in yield forecasts"
           description: "Stale forecast entries detected - immediate invalidation required."
 
-      # Migration in progress but incomplete
+      # Migration in progress but incomplete.
+      # migration_status is a numeric gauge exported by contract_exporter.py:
+      # 1 = in_progress, 0 = idle/complete.
       - alert: MigrationTimeout
         expr: |
-          (time() - migration_started_timestamp) > 3600 AND migration_status == "in_progress"
+          (time() - migration_started_timestamp) > 3600 and migration_status == 1
         for: 1m
         labels:
           severity: critical
@@ -151,24 +165,9 @@ groups:
           summary: "Migration timeout - exceeded 1 hour"
           description: "Data migration has been running for over 1 hour."
 
-      # Backup pipeline
-      - alert: BackupFailed
-        expr: backup_success == 0
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Backup operation failed"
-          description: "Last contract-state backup attempt failed."
-
-      - alert: NoRecentBackup
-        expr: (time() - backup_last_success_timestamp) > 172800
-        for: 10m
-        labels:
-          severity: critical
-        annotations:
-          summary: "No successful backup in 48 hours"
-          description: "Last successful backup was more than 48 hours ago."
+      # Contract unhealthy (health gauge published by contract_exporter.py).
+      # Backup alerts (BackupFailed / NoRecentBackup, plus the rest of the
+      # backup/recovery catalog) live in ../backup-monitoring.yml ONLY.
 
       # Active user count anomaly
       - alert: ActiveUserCountAnomalous

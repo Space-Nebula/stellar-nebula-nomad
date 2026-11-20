@@ -20,6 +20,9 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      # prometheus.yml references ../backup-monitoring.yml, which resolves to
+      # /etc/backup-monitoring.yml relative to the mounted config file.
+      - ./backup-monitoring.yml:/etc/backup-monitoring.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'

@@ -46,6 +46,18 @@ pub enum FleetError {
     AlreadyInitialized = 7,
 }
 
+impl crate::error_standard::StandardContractError for FleetError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "fleet_manager",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 fn template_key(id: u32) -> (soroban_sdk::Symbol, u32) {
     (symbol_short!("flt_tpl"), id)
 }

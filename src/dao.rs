@@ -32,6 +32,18 @@ pub enum DaoError {
     Overflow = 14,
 }
 
+impl crate::error_standard::StandardContractError for DaoError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "dao",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ─── Enums ────────────────────────────────────────────────────────────────
 
 #[contracttype]

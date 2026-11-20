@@ -92,6 +92,10 @@ harness = false
 name = "nebula_storage_benchmarks"
 harness = false
 
+[[bench]]
+name = "performance_metrics"
+harness = false
+
 # ─── Integration tests, grouped by module under tests/<group>/ ────────────
 # Explicit paths so binary names (and existing `cargo test --test <name>`
 # invocations in CI/docs) are unaffected by the directory grouping.
@@ -116,6 +120,11 @@ path = "tests/chaos/byzantine_attacks.rs"
 [[test]]
 name = "chaos_state_corruption"
 path = "tests/chaos/state_corruption.rs"
+
+# Reentrancy attack scenarios against the global guard (Issue #472)
+[[test]]
+name = "reentrancy_attack_tests"
+path = "tests/security/reentrancy_attack_tests.rs"
 
 [[test]]
 name = "fuzz"
@@ -185,6 +194,10 @@ path = "tests/economy/test_treasure_vault.rs"
 [[test]]
 name = "test_yield_forecast"
 path = "tests/economy/test_yield_forecast.rs"
+
+[[test]]
+name = "test_economy_systems"
+path = "tests/economy/test_economy_systems.rs"
 
 # DAO, RBAC, emergency controls
 [[test]]
@@ -436,3 +449,24 @@ path = "tests/security/input_validation_tests.rs"
 [[test]]
 name = "security_access_control"
 path = "tests/security/access_control_tests.rs"
+
+[[test]]
+name = "security_penetration_tests"
+path = "tests/security/penetration_tests.rs"
+
+# ─── Contract upgrade test suites (Issues #681) ───────────────────────────────
+[[test]]
+name = "upgrade_migration"
+path = "tests/upgrades/upgrade_migration.rs"
+
+[[test]]
+name = "upgrade_state_preservation"
+path = "tests/upgrades/upgrade_state_preservation.rs"
+
+[[test]]
+name = "upgrade_backward_compatibility"
+path = "tests/upgrades/upgrade_backward_compatibility.rs"
+
+[[test]]
+name = "upgrade_rollback"
+path = "tests/upgrades/upgrade_rollback.rs"

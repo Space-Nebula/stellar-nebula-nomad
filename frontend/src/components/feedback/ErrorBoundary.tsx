@@ -1,4 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { colors } from '../../a11y';
+import { i18n } from '../../i18n';
 
 export interface ErrorBoundaryProps {
   children: ReactNode;
@@ -35,28 +37,33 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
         return this.props.fallback;
       }
 
+      // Class components cannot use hooks; read the shared i18n instance.
+      const t = i18n.t.bind(i18n);
       return (
         <div
           role="alert"
           style={{
             padding: '24px',
-            backgroundColor: '#1E293B',
-            border: '1px solid #EF4444',
+            backgroundColor: colors.bgRaised,
+            border: `1px solid ${colors.danger}`,
             borderRadius: '8px',
-            color: '#F8FAFC',
+            color: colors.textPrimary,
             textAlign: 'center',
             margin: '16px 0',
           }}
         >
-          <h3 style={{ color: '#EF4444', marginTop: 0 }}>Something went wrong</h3>
-          <p style={{ color: '#94A3B8', fontSize: '0.875rem' }}>
-            {this.state.error?.message || 'An unexpected error occurred.'}
+          <h2 style={{ color: colors.danger, marginTop: 0, fontSize: '1.1rem' }}>
+            {t('errors.title')}
+          </h2>
+          <p style={{ color: colors.textMuted, fontSize: '0.875rem' }}>
+            {this.state.error?.message || t('errors.unexpected')}
           </p>
           <button
+            type="button"
             onClick={this.reset}
             style={{
-              backgroundColor: '#3B82F6',
-              color: '#FFFFFF',
+              backgroundColor: colors.primaryFill,
+              color: colors.textOnAccent,
               border: 'none',
               padding: '8px 16px',
               borderRadius: '6px',
@@ -64,7 +71,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
               fontWeight: 600,
             }}
           >
-            Try Again
+            {t('common.tryAgain')}
           </button>
         </div>
       );

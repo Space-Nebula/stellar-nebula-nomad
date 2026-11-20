@@ -124,23 +124,50 @@ pub fn compose_with_external_contract(
     // attempts to call back into this function the nested invocation observes
     // the lock and is rejected with `ComposabilityError::Reentrancy`.
     with_guard(env, || {
-        // Record pre-call gas (simulated via ledger sequence)
-        let gas_start = env.ledger().sequence() as u64;
+        compose_with_external_contract_unguarded(env, target, method, args)
+    })
+}
 
-        // Note: In a real implementation, this would perform an actual cross-contract call
-        // For this example library, we simulate the composition pattern
-        // The actual cross-contract invocation would use env.invoke_contract()
+/// Body of [`compose_with_external_contract`]. Must only be called while the
+/// global reentrancy lock is held — composite callers use this to avoid
+/// self-blocking when they already own the guard.
+fn compose_with_external_contract_unguarded(
+    env: &Env,
+    target: &Address,
+    method: Symbol,
+    args: &Bytes,
+) -> Result<ComposableResponse, ComposabilityError> {
+    // Record pre-call gas (simulated via ledger sequence)
+    let gas_start = env.ledger().sequence() as u64;
 
-        let gas_end = env.ledger().sequence() as u64;
-        let gas_used = gas_end.saturating_sub(gas_start);
+    // Note: In a real implementation, this would perform an actual
+    // cross-contract call (env.invoke_contract / try_invoke). The guard is
+    // deliberately held across that call so a malicious callee cannot re-enter
+    // this function while the caller's state is only half-updated.
+    let gas_end = env.ledger().sequence() as u64;
+    let gas_used = gas_end.saturating_sub(gas_start);
 
-        // Simulate successful call with empty response data
-        let response_data = Bytes::new(env);
+    // Simulate successful call with empty response data
+    let response_data = Bytes::new(env);
 
-        // Emit trace event if enabled
-        emit_composition_trace(env, target, &method, true, gas_used);
+    // Emit trace event if enabled
+    emit_composition_trace(env, target, &method, true, gas_used);
 
-        Ok(ComposableResponse::new(env, true, response_data, gas_used))
+    Ok(ComposableResponse::new(env, true, response_data, gas_used))
+}
+
+/// Attack scenario helper: simulates a malicious callee that, while an outer
+/// composition is in progress, tries to start a second composition. Because
+/// the outer call holds the global lock this must always fail with
+/// `ComposabilityError::Reentrancy`.
+pub fn malicious_callback_attempt(
+    env: &Env,
+    target: &Address,
+    method: Symbol,
+    args: &Bytes,
+) -> Result<ComposableResponse, ComposabilityError> {
+    with_guard(env, || {
+        compose_with_external_contract_unguarded(env, target, method, args)
     })
 }
 
@@ -361,10 +388,19 @@ pub fn get_last_composition_gas(env: &Env) -> u64 {
 }
 
 /// Record gas used for analytics.
-pub fn record_composition_gas(env: &Env, gas_used: u64) {
-    env.storage()
-        .instance()
-        .set(&symbol_short!("last_gas"), &gas_used);
+///
+/// State writes are guarded too: a malicious callback must not be able to
+/// overwrite the composition telemetry of an in-flight call.
+pub fn record_composition_gas(
+    env: &Env,
+    gas_used: u64,
+) -> Result<(), ComposabilityError> {
+    with_guard(env, || {
+        env.storage()
+            .instance()
+            .set(&symbol_short!("last_gas"), &gas_used);
+        Ok(())
+    })
 }
 
 // ─── Standard Interface Definitions ──────────────────────────────────────
@@ -410,5 +446,90 @@ impl ShipRegistryInterface {
         let method = symbol_short!("get_ship");
         let args = Bytes::from_slice(env, &ship_id.to_be_bytes());
         compose_with_external_contract(env, &self.address, method, &args)
+    }
+}
+
+// ─── Reentrancy attack tests (Issue #472) ───────────────────────────────────
+
+#[cfg(test)]
+mod reentrancy_tests {
+    use super::*;
+    use crate::reentrancy_guard::{acquire, is_locked, release};
+    use soroban_sdk::{contract, contractimpl, testutils::Address as _};
+
+    #[contract]
+    struct ComposeStub;
+
+    #[contractimpl]
+    impl ComposeStub {}
+
+    fn make_env() -> (Env, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(ComposeStub, ());
+        (env, contract_id)
+    }
+
+    /// A malicious callee re-enters the composition while the outer call still
+    /// holds the lock. The nested call must be rejected, not allowed to observe
+    /// half-updated state.
+    #[test]
+    fn malicious_callback_cannot_reenter_composition() {
+        let (env, contract_id) = make_env();
+        let target = Address::generate(&env);
+        let method = symbol_short!("ping");
+        let args = Bytes::new(&env);
+
+        env.as_contract(&contract_id, || {
+            acquire(&env).expect("outer call should acquire the lock");
+            let nested = malicious_callback_attempt(&env, &target, method, &args);
+            assert_eq!(nested, Err(ComposabilityError::Reentrancy));
+            assert!(is_locked(&env), "outer call still owns the lock");
+            release(&env);
+        });
+    }
+
+    /// A normal composition succeeds and always leaves the lock released, so a
+    /// subsequent call is not blocked.
+    #[test]
+    fn sequential_compositions_release_the_lock() {
+        let (env, contract_id) = make_env();
+        let target = Address::generate(&env);
+        let method = symbol_short!("ping");
+        let args = Bytes::new(&env);
+
+        env.as_contract(&contract_id, || {
+            let first = compose_with_external_contract(&env, &target, method.clone(), &args)
+                .expect("first composition succeeds");
+            assert!(first.success);
+            assert!(!is_locked(&env));
+
+            let second = compose_with_external_contract(&env, &target, method, &args)
+                .expect("second composition succeeds");
+            assert!(second.success);
+
+            record_composition_gas(&env, 7).expect("telemetry write succeeds");
+            assert_eq!(get_last_composition_gas(&env), 7);
+            assert!(!is_locked(&env));
+        });
+    }
+
+    /// The guard is released even when the composed call fails.
+    #[test]
+    fn failed_composition_does_not_leave_contract_locked() {
+        let (env, contract_id) = make_env();
+        let target = Address::generate(&env);
+        let self_method = symbol_short!("ping");
+        let args = Bytes::new(&env);
+
+        env.as_contract(&contract_id, || {
+            // A self-call is rejected as an invalid target before the call, and
+            // the guard must still be free afterwards.
+            let result =
+                compose_with_external_contract(&env, &contract_id, self_method, &args);
+            assert_eq!(result, Err(ComposabilityError::InvalidTarget));
+            assert!(!is_locked(&env));
+            let _ = target;
+        });
     }
 }

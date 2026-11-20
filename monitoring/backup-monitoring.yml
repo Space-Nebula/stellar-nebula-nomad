@@ -1,5 +1,15 @@
-# Backup Monitoring Configuration
-# Add to Prometheus alert rules
+# Backup & Recovery Monitoring Configuration
+# Loaded by monitoring/prometheus/prometheus.yml via rule_files:
+#   - '../backup-monitoring.yml'
+#
+# BackupFailed and NoRecentBackup intentionally live HERE (the richer versions
+# with component labels + runbook links). They were removed from
+# prometheus/alert-rules.yml so no alert name is defined twice across the
+# files Prometheus loads.
+#
+# All metrics referenced below are published by monitoring/exporters/contract_exporter.py.
+# The backup workflow publishes them by writing a JSON status file to the path
+# named by BACKUP_STATUS_FILE (see docs/MONITORING_SETUP.md).
 
 groups:
   - name: backup_alerts
@@ -15,11 +25,11 @@ groups:
         annotations:
           summary: "Backup operation failed"
           description: "Last backup attempt failed. Check backup logs immediately."
-          runbook: "https://github.com/yourorg/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#backup-issues"
+          runbook: "https://github.com/Mikey-222/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#backup-strategy"
 
       # Critical: No recent backup
       - alert: NoRecentBackup
-        expr: (time() - backup_last_success_timestamp) > 172800
+        expr: (time() - backup_last_success_timestamp) > 90000
         for: 10m
         labels:
           severity: critical
@@ -27,7 +37,7 @@ groups:
         annotations:
           summary: "No successful backup in 48 hours"
           description: "Last successful backup was more than 48 hours ago. Immediate action required."
-          runbook: "https://github.com/yourorg/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#troubleshooting"
+          runbook: "https://github.com/Mikey-222/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#monitoring--alerts"
 
       # Warning: Backup duration high
       - alert: BackupDurationHigh
@@ -86,7 +96,7 @@ groups:
         annotations:
           summary: "Disaster recovery failed"
           description: "Recovery operation failed. Escalate immediately."
-          runbook: "https://github.com/yourorg/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#recovery-procedures"
+          runbook: "https://github.com/Mikey-222/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#recovery-procedures"
 
       # Warning: Recovery time exceeded RTO
       - alert: RecoveryTimeExceededRTO
@@ -110,15 +120,22 @@ groups:
           summary: "Monthly disaster recovery drill due"
           description: "It's been more than 30 days since last DR drill. Schedule a drill."
 
-# Backup metrics to expose
-# These should be exported by your backup monitoring system
-
-# backup_success: 1 if last backup succeeded, 0 if failed
-# backup_last_success_timestamp: Unix timestamp of last successful backup
-# backup_duration_seconds: Duration of last backup in seconds
-# backup_size_bytes: Size of last backup in bytes
-# backup_storage_available_bytes: Available storage space
-# backup_storage_total_bytes: Total storage space
-# recovery_success: 1 if last recovery succeeded, 0 if failed
-# recovery_duration_seconds: Duration of last recovery in seconds
-# last_drill_timestamp: Unix timestamp of last DR drill
+# ---------------------------------------------------------------------------
+# Backup metrics to expose — all published by contract_exporter.py.
+#
+# backup_success                   1 if last backup succeeded, 0 if failed
+# backup_last_success_timestamp    Unix timestamp of last successful backup
+# backup_duration_seconds          Duration of last backup in seconds
+# backup_size_bytes                Size of last backup in bytes
+# backup_storage_available_bytes   Available storage space for backups
+# backup_storage_total_bytes       Total storage space for backups
+# recovery_success                 1 if last recovery succeeded, 0 if failed
+# recovery_duration_seconds        Duration of last recovery in seconds
+# last_drill_timestamp             Unix timestamp of last DR drill
+#
+# Publish values by writing JSON to the file named by BACKUP_STATUS_FILE, e.g.:
+#   {"backup_success": 1, "backup_last_success_timestamp": 1710000000,
+#    "backup_duration_seconds": 92.5, "backup_size_bytes": 1048576,
+#    "backup_storage_available_bytes": 900000000,
+#    "backup_storage_total_bytes": 1000000000}
+# ---------------------------------------------------------------------------

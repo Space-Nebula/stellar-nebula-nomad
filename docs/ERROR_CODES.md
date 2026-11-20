@@ -334,7 +334,7 @@ a runnable version.
 | [`event_scheduler`](#event-scheduler-eventerror) | `EventError` | 24 | 1–24 | ✅ | ✅ |
 | [`exploration_heatmap`](#exploration-heatmap-heatmaperror) | `HeatmapError` | 1 | 1–1 | ✅ | ✅ |
 | [`fleet_manager`](#fleet-manager-fleeterror) | `FleetError` | 7 | 1–7 | ⚠️ not built |  |
-| [`fractional_resources`](#fractional-resources-fractionalerror) | `FractionalError` | 10 | 1–10 | ✅ | ✅ |
+| [`fractional_resources`](#fractional-resources-fractionalerror) | `FractionalError` | 12 | 1–12 | ✅ | ✅ |
 | [`fraud_detection`](#fraud-detection-frauderror) | `FraudError` | 1 | 1–1 | ✅ | ✅ |
 | [`gas_recovery`](#gas-recovery-refunderror) | `RefundError` | 5 | 1–5 | ✅ | ✅ |
 | [`gas_sponsor`](#gas-sponsor-sponsorerror) | `SponsorError` | 12 | 1–12 | ✅ | ✅ |
@@ -1082,6 +1082,8 @@ Source: [`src/fractional_resources.rs`](../src/fractional_resources.rs) · Imple
 | 8 | `Unauthorized` | Unauthorized caller. | Authorization | Sign with the account that holds the required role or ownership; check role grants. |
 | 9 | `AlreadyFractionalized` | Resource already fractionalized. | Conflict | The action already happened. Treat it as idempotent: re-query state instead of retrying. |
 | 10 | `MaxFractionsExceeded` | Maximum fractions per transaction exceeded. | ResourceLimit | Reduce the amount or batch size, top up balances or pools, or wait for the limit window to reset. |
+| 11 | `InvalidPrice` | Listing price must be positive. | Validation | Fix the arguments: check ranges, non-zero values, lengths and IDs before sending. |
+| 12 | `NotListed` | The share is not listed for sale. | NotFound | Check the ID/key. Create or register the entity first, or refresh cached client state. |
 
 <a id="fraud-detection-frauderror"></a>
 ### `fraud_detection` — `FraudError`
@@ -1171,6 +1173,8 @@ Source: [`src/guild_economy.rs`](../src/guild_economy.rs) · Codes 19–34 were 
 | 6 | `ProposalAlreadyExecuted` | Proposal already executed | Conflict | The action already happened. Treat it as idempotent: re-query state instead of retrying. |
 | 7 | `NotAllianceMember` | Not alliance member | Authorization | The caller does not hold the required relationship, opt-in or eligibility. Sign with the right account or complete the prerequisite (opt in, verify profile, solve the CAPTCHA, buy premium). |
 | 8 | `ThresholdNotMet` | Threshold not met | State | The operation is not allowed in the current state or time window. Read the entity's state, wait for the delay or approval, or complete the prerequisite step. |
+| 13 | `InvalidTax` | Tax rate above `MAX_GUILD_TAX_BPS`, or a non-positive tribute | Validation | Fix the arguments: check ranges, non-zero values, lengths and IDs before sending. |
+| 14 | `NotFounder` | Only the alliance founder can change the tax rate | Authorization | Sign with the account that holds the required role or ownership; check role grants. |
 
 <a id="guild-quests-guildquesterror"></a>
 ### `guild_quests` — `GuildQuestError`

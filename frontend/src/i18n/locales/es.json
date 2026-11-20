@@ -1,0 +1,145 @@
+{
+  "common": {
+    "language": "Idioma",
+    "close": "Cerrar",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar",
+    "loading": "Cargando...",
+    "tryAgain": "Reintentar",
+    "skipToContent": "Saltar al contenido principal",
+    "you": "(tú)",
+    "none": "Ninguno"
+  },
+  "layout": {
+    "primaryNavigation": "Navegación principal"
+  },
+  "errors": {
+    "title": "Algo salió mal",
+    "unexpected": "Se produjo un error inesperado."
+  },
+  "toast": {
+    "dismiss": "Descartar notificación"
+  },
+  "address": {
+    "label": "Dirección de cuenta Stellar",
+    "invalid": "Formato de clave pública Stellar no válido (debe tener 56 caracteres y empezar por G)"
+  },
+  "duration": {
+    "label": "Duración de la expedición",
+    "hours_one": "{{count}} hora",
+    "hours_other": "{{count}} horas",
+    "hours_many": "{{count}} horas",
+    "days_one": "{{count}} día",
+    "days_other": "{{count}} días",
+    "days_many": "{{count}} días"
+  },
+  "rarity": {
+    "label": "Filtrar por rareza",
+    "All": "Todas",
+    "Common": "Común",
+    "Rare": "Rara",
+    "Epic": "Épica",
+    "Legendary": "Legendaria"
+  },
+  "amount": {
+    "label": "Cantidad ({{resource}})",
+    "max": "MÁX"
+  },
+  "actions": {
+    "mint": "Acuñar nave ({{cost}} XLM)",
+    "minting": "Acuñando en Soroban...",
+    "buy": "Comprar ahora ({{price}} {{currency}})",
+    "list": "Publicar artículo ({{price}} {{currency}})",
+    "processingBuy": "Procesando compra...",
+    "processingSell": "Procesando publicación...",
+    "upgrade": "Mejorar a nivel {{level}} ({{cost}})",
+    "upgradeDefaultCost": "100 de combustible + 50 de mineral",
+    "upgrading": "Mejorando...",
+    "bond": "Vincular {{amount}} con {{guild}}",
+    "bonding": "Vinculando participación..."
+  },
+  "achievement": {
+    "label": "Logro {{title}}: {{status}}",
+    "unlocked": "Desbloqueado",
+    "locked": "Bloqueado",
+    "unlockedOn": "Desbloqueado el {{date}}"
+  },
+  "leaderboard": {
+    "label": "Clasificación",
+    "rank": "Puesto",
+    "explorer": "Explorador",
+    "guild": "Gremio",
+    "score": "Puntuación"
+  },
+  "nebula": {
+    "label": "Sector de nebulosa: {{sector}}, densidad {{density}}",
+    "anomalyLabel": "anomalía detectada",
+    "anomaly": "ANOMALÍA",
+    "density": "Densidad de la nebulosa: {{density}}"
+  },
+  "resource": {
+    "label": "Recurso {{name}}",
+    "capacity": "Capacidad de {{name}} usada"
+  },
+  "ship": {
+    "label": "Nave: {{name}}, {{shipClass}} {{rarity}}",
+    "select": "Seleccionar {{name}}",
+    "level": "Nivel {{level}}",
+    "speed": "Velocidad",
+    "hull": "Casco",
+    "scan": "Escáner",
+    "class": {
+      "Scout": "Explorador",
+      "Frigate": "Fragata",
+      "Cruiser": "Crucero",
+      "Dreadnought": "Acorazado"
+    }
+  },
+  "oracle": {
+    "title": "Oráculo de mercado",
+    "description": "Precios de consenso agregados de fuentes de oráculo independientes.",
+    "pricesLabel": "Precios de recursos",
+    "consensus": "Precio de consenso",
+    "sources_one": "{{count}} fuente coincidente",
+    "sources_other": "{{count}} fuentes coincidentes",
+    "sources_many": "{{count}} fuentes coincidentes",
+    "updated": "Actualizado {{time}}",
+    "status": {
+      "fresh": "Validado",
+      "stale": "Obsoleto",
+      "rejected": "Rechazado"
+    },
+    "rejectedReason": "Las fuentes no coincidieron; se sigue usando el último precio validado.",
+    "empty": "Aún no se han publicado precios.",
+    "resource": "Recurso",
+    "sourcesHeader": "Fuentes",
+    "updatedHeader": "Actualizado",
+    "statusHeader": "Estado"
+  },
+  "vault": {
+    "title": "Bóveda del tesoro",
+    "description": "Descubre bóvedas desbloqueadas y usa llaves para reclamar su botín.",
+    "vaultsLabel": "Tus bóvedas",
+    "vault": "Bóveda n.º {{id}}",
+    "keys_one": "{{count}} llave de bóveda",
+    "keys_other": "{{count}} llaves de bóveda",
+    "keys_many": "{{count}} llaves de bóveda",
+    "lockedUntil": "Bloqueada hasta {{time}}",
+    "loot": "Botín: {{amount}}",
+    "discover": "Descubrir bóveda",
+    "discoverVault": "Descubrir la bóveda n.º {{id}}",
+    "claim": "Reclamar botín",
+    "claimVault": "Reclamar el botín de la bóveda n.º {{id}}",
+    "needKey": "Necesitas una llave de bóveda para reclamar este botín.",
+    "claimed": "Botín reclamado",
+    "locked": "Bloqueada",
+    "undiscovered": "Sin descubrir",
+    "special": {
+      "None": "",
+      "StarChart": "Recompensa especial: Carta estelar",
+      "AncientRelic": "Recompensa especial: Reliquia antigua + llave extra"
+    },
+    "empty": "Aún no tienes bóvedas.",
+    "principal": "Depósito: {{amount}}"
+  }
+}

@@ -1291,6 +1291,107 @@ pub fn unstake_lp(
     Ok((pending, compensation))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum StakingTier {
+    Bronze,
+    Silver,
+    Gold,
+    Platinum,
+}
+
+/// Determine staking tier from staked amount.
+pub fn staking_tier_for(amount: i128) -> StakingTier {
+    if amount >= 100_000 {
+        StakingTier::Platinum
+    } else if amount >= 25_000 {
+        StakingTier::Gold
+    } else if amount >= 5_000 {
+        StakingTier::Silver
+    } else {
+        StakingTier::Bronze
+    }
+}
+
+/// Reward multiplier in basis points (10_000 = 1.0x) for each staking tier.
+pub fn tier_multiplier_bps(tier: StakingTier) -> u32 {
+    match tier {
+        StakingTier::Bronze => 10_000,
+        StakingTier::Silver => 11_000,
+        StakingTier::Gold => 12_500,
+        StakingTier::Platinum => 15_000,
+    }
+}
+
+/// Time-weighted multiplier in basis points: 10_000 bps base plus up to
+/// 5_000 bps (1.5x total) scaling linearly with lock commitment progress.
+pub fn time_weight_bps(elapsed_secs: u64, lock_secs: u64) -> u32 {
+    if lock_secs == 0 {
+        return 10_000;
+    }
+    let clamped = elapsed_secs.min(lock_secs);
+    let bonus = ((clamped as u128).saturating_mul(5_000u128) / (lock_secs as u128)) as u32;
+    10_000u32.saturating_add(bonus)
+}
+
+/// Compound APY in basis points from nominal APR (`apr_bps`) and compounding
+/// frequency (`compounds_per_year`), computed with integer fixed-point math.
+pub fn calculate_apy_bps(apr_bps: u32, compounds_per_year: u32) -> u32 {
+    if apr_bps == 0 {
+        return 0;
+    }
+    if compounds_per_year <= 1 {
+        return apr_bps;
+    }
+    const SCALE: u128 = 1_000_000_000;
+    let rate_per_period = ((apr_bps as u128) * (SCALE / 10_000)) / (compounds_per_year as u128);
+    let mut factor = SCALE;
+    let base = SCALE + rate_per_period;
+    let mut exp = compounds_per_year;
+    let mut b = base;
+    while exp > 0 {
+        if exp & 1 == 1 {
+            factor = factor.saturating_mul(b) / SCALE;
+        }
+        exp >>= 1;
+        if exp > 0 {
+            b = b.saturating_mul(b) / SCALE;
+        }
+    }
+    let apy_scaled = factor.saturating_sub(SCALE);
+    (apy_scaled / (SCALE / 10_000)) as u32
+}
+
+/// Checked integer compound interest reward for `principal` over `elapsed_secs`
+/// split into `periods` compounding intervals.
+pub fn compound_reward(
+    principal: i128,
+    apr_bps: u32,
+    elapsed_secs: u64,
+    periods: u32,
+) -> Option<i128> {
+    if principal <= 0 || apr_bps == 0 || elapsed_secs == 0 {
+        return Some(0);
+    }
+    let n = periods.max(1);
+    let period_secs = elapsed_secs / (n as u64);
+    let apr = i128::from(apr_bps);
+    if period_secs == 0 {
+        return calculate_farm_reward(principal, elapsed_secs, apr);
+    }
+    let mut balance = principal;
+    for _ in 0..n {
+        let delta = calculate_farm_reward(balance, period_secs, apr)?;
+        balance = balance.checked_add(delta)?;
+    }
+    let remainder = elapsed_secs % (n as u64);
+    if remainder > 0 {
+        let delta = calculate_farm_reward(balance, remainder, apr)?;
+        balance = balance.checked_add(delta)?;
+    }
+    balance.checked_sub(principal)
+}
+
 // ── Tests (Issue #239: arithmetic safety) ───────────────────────────────────
 
 #[cfg(test)]
@@ -1360,5 +1461,30 @@ mod tests {
         let id = deposit_to_pool(env.clone(), owner.clone(), 100, 1_000).unwrap();
         let result = withdraw_from_pool(env.clone(), owner, id);
         assert_eq!(result, Err(FarmError::LockNotMet));
+    }
+
+    #[test]
+    fn test_staking_tiers_time_weight_and_compound_apy() {
+        assert_eq!(staking_tier_for(1_000), StakingTier::Bronze);
+        assert_eq!(staking_tier_for(5_000), StakingTier::Silver);
+        assert_eq!(staking_tier_for(25_000), StakingTier::Gold);
+        assert_eq!(staking_tier_for(100_000), StakingTier::Platinum);
+        assert_eq!(tier_multiplier_bps(StakingTier::Platinum), 15_000);
+
+        assert_eq!(time_weight_bps(0, 1_000), 10_000);
+        assert_eq!(time_weight_bps(500, 1_000), 12_500);
+        assert_eq!(time_weight_bps(2_000, 1_000), 15_000);
+
+        // 12% nominal APR compounded monthly (~12.68% APY -> ~1268 bps)
+        let apy = calculate_apy_bps(1_200, 12);
+        assert!((1_265..=1_270).contains(&apy), "unexpected APY bps: {apy}");
+
+        // Compounded reward exceeds simple reward over 1 year
+        let simple = calculate_farm_reward(10_000, SECONDS_IN_YEAR, 1_200).unwrap();
+        let compounded = compound_reward(10_000, 1_200, SECONDS_IN_YEAR, 12).unwrap();
+        assert!(
+            compounded > simple,
+            "compounded {compounded} <= simple {simple}"
+        );
     }
 }

@@ -31,6 +31,8 @@ pub enum ContentToolsError {
     ContentRejected = 9,
     /// Admin has already been set; set_admin is a one-time initializer (Issue #237).
     AlreadyInitialized = 10,
+    /// A checked arithmetic operation overflowed during revenue splitting.
+    ArithmeticOverflow = 11,
 }
 
 impl crate::error_standard::StandardContractError for ContentToolsError {
@@ -44,7 +46,9 @@ impl crate::error_standard::StandardContractError for ContentToolsError {
             | Self::AlreadyInitialized => (ErrorKind::Conflict, false),
             Self::ContentNotFound => (ErrorKind::NotFound, false),
             Self::Unauthorized => (ErrorKind::Authorization, false),
-            Self::InvalidContent | Self::InvalidRating => (ErrorKind::Validation, false),
+            Self::InvalidContent | Self::InvalidRating | Self::ArithmeticOverflow => {
+                (ErrorKind::Validation, false)
+            }
             Self::ContentLimitReached => (ErrorKind::ResourceLimit, false),
         };
         crate::error_standard::ErrorDescriptor {
@@ -89,6 +93,10 @@ pub enum ContentDataKey {
     PlatformRevenue,
     /// Revenue split configuration (creator_bps, platform_bps).
     RevenueSplitConfig,
+    /// Marketplace listing IDs owned by a seller.
+    SellerListings(Address),
+    /// Active marketplace listing for a content item.
+    ContentMarketplaceListing(u64),
 }
 
 // ── Data Types ────────────────────────────────────────────────────────────────
@@ -277,6 +285,72 @@ pub fn create_content(
     );
 
     Ok(content_id)
+}
+
+/// Create a nebula definition. Thin typed wrapper over [`create_content`].
+pub fn create_nebula(
+    env: &Env,
+    creator: &Address,
+    name: String,
+    description: String,
+    data: Bytes,
+    is_public: bool,
+    tags: Vec<Symbol>,
+) -> Result<u64, ContentToolsError> {
+    create_content(
+        env,
+        creator,
+        name,
+        description,
+        Symbol::new(env, CONTENT_TYPE_NEBULA),
+        data,
+        is_public,
+        tags,
+    )
+}
+
+/// Create a mission definition. Thin typed wrapper over [`create_content`].
+pub fn create_mission(
+    env: &Env,
+    creator: &Address,
+    name: String,
+    description: String,
+    data: Bytes,
+    is_public: bool,
+    tags: Vec<Symbol>,
+) -> Result<u64, ContentToolsError> {
+    create_content(
+        env,
+        creator,
+        name,
+        description,
+        Symbol::new(env, CONTENT_TYPE_MISSION),
+        data,
+        is_public,
+        tags,
+    )
+}
+
+/// Create a community event definition. Thin typed wrapper over [`create_content`].
+pub fn create_event(
+    env: &Env,
+    creator: &Address,
+    name: String,
+    description: String,
+    data: Bytes,
+    is_public: bool,
+    tags: Vec<Symbol>,
+) -> Result<u64, ContentToolsError> {
+    create_content(
+        env,
+        creator,
+        name,
+        description,
+        Symbol::new(env, CONTENT_TYPE_EVENT),
+        data,
+        is_public,
+        tags,
+    )
 }
 
 pub fn update_content(
@@ -601,6 +675,25 @@ pub fn list_on_marketplace(
         return Err(ContentToolsError::UnderReview);
     }
 
+    // One active listing per content item, and a per-seller cap.
+    if env
+        .storage()
+        .persistent()
+        .has(&ContentDataKey::ContentMarketplaceListing(content_id))
+    {
+        return Err(ContentToolsError::ContentAlreadyExists);
+    }
+
+    let seller_key = ContentDataKey::SellerListings(seller.clone());
+    let seller_listings: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&seller_key)
+        .unwrap_or_else(|| Vec::new(env));
+    if seller_listings.len() >= MAX_MARKETPLACE_LISTINGS {
+        return Err(ContentToolsError::ContentLimitReached);
+    }
+
     // Generate listing ID
     let listing_counter: u64 = env
         .storage()
@@ -624,6 +717,15 @@ pub fn list_on_marketplace(
     env.storage()
         .persistent()
         .set(&ContentDataKey::MarketplaceListing(listing_id), &listing);
+    env.storage().persistent().set(
+        &ContentDataKey::ContentMarketplaceListing(content_id),
+        &listing_id,
+    );
+    let mut updated_seller_listings = seller_listings;
+    updated_seller_listings.push_back(listing_id);
+    env.storage()
+        .persistent()
+        .set(&seller_key, &updated_seller_listings);
 
     env.events().publish(
         (symbol_short!("mp"), symbol_short!("listed")),
@@ -653,6 +755,25 @@ pub fn unlist_from_marketplace(
 
     listing.is_active = false;
     env.storage().persistent().set(&key, &listing);
+    env.storage()
+        .persistent()
+        .remove(&ContentDataKey::ContentMarketplaceListing(
+            listing.content_id,
+        ));
+
+    let seller_key = ContentDataKey::SellerListings(seller.clone());
+    let ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&seller_key)
+        .unwrap_or_else(|| Vec::new(env));
+    let mut remaining = Vec::new(env);
+    for id in ids.iter() {
+        if id != listing_id {
+            remaining.push_back(id);
+        }
+    }
+    env.storage().persistent().set(&seller_key, &remaining);
 
     Ok(())
 }
@@ -666,6 +787,51 @@ pub fn get_marketplace_listing(
         .persistent()
         .get(&key)
         .ok_or(ContentToolsError::ContentNotFound)
+}
+
+/// Browse every currently active marketplace listing.
+pub fn get_active_marketplace_listings(env: &Env) -> Vec<MarketplaceListing> {
+    let counter: u64 = env
+        .storage()
+        .persistent()
+        .get(&ContentDataKey::MarketplaceCounter)
+        .unwrap_or(0);
+
+    let mut listings = Vec::new(env);
+    for id in 1..=counter {
+        if let Some(listing) = env
+            .storage()
+            .persistent()
+            .get::<ContentDataKey, MarketplaceListing>(
+                &ContentDataKey::MarketplaceListing(id),
+            )
+        {
+            if listing.is_active {
+                listings.push_back(listing);
+            }
+        }
+    }
+    listings
+}
+
+/// Search active marketplace listings by maximum price.
+pub fn search_marketplace(env: &Env, max_price: i128) -> Vec<MarketplaceListing> {
+    let all = get_active_marketplace_listings(env);
+    let mut matches = Vec::new(env);
+    for listing in all.iter() {
+        if listing.price <= max_price {
+            matches.push_back(listing);
+        }
+    }
+    matches
+}
+
+/// List all marketplace listing IDs created by a seller.
+pub fn get_seller_marketplace_listings(env: &Env, seller: &Address) -> Vec<u64> {
+    env.storage()
+        .persistent()
+        .get(&ContentDataKey::SellerListings(seller.clone()))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 // ── Revenue Sharing (Issue #192) ─────────────────────────────────────────────
@@ -775,14 +941,30 @@ pub fn purchase_content(
 
     // Calculate revenue split
     let config = get_revenue_split_config(env);
-    let creator_share = content.price * (config.creator_share_bps as i128) / 10000;
-    let platform_share = content.price * (config.platform_share_bps as i128) / 10000;
+    // Basis-point multiplication is checked: a hostile price or misconfigured
+    // share must fail with a contract error rather than trap in release WASM.
+    let creator_share = crate::safe_math::checked_mul_div_i128(
+        content.price,
+        i128::from(config.creator_share_bps),
+        10_000,
+    )
+    .ok_or(ContentToolsError::ArithmeticOverflow)?;
+    let platform_share = crate::safe_math::checked_mul_div_i128(
+        content.price,
+        i128::from(config.platform_share_bps),
+        10_000,
+    )
+    .ok_or(ContentToolsError::ArithmeticOverflow)?;
 
-    // Verify total matches (handle rounding)
-    debug_assert!(
-        creator_share + platform_share <= content.price,
-        "revenue split exceeds price"
-    );
+    // Enforce the invariant at runtime (a `debug_assert!` is compiled out of
+    // release WASM and therefore provided no protection at all).
+    if creator_share
+        .checked_add(platform_share)
+        .ok_or(ContentToolsError::ArithmeticOverflow)?
+        > content.price
+    {
+        return Err(ContentToolsError::ArithmeticOverflow);
+    }
 
     // Credit creator revenue
     let creator_rev_key = ContentDataKey::CreatorRevenue(content.creator.clone());

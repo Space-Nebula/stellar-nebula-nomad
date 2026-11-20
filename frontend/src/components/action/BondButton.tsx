@@ -1,4 +1,7 @@
 import React from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
+import { actionButtonStyle } from './actionButtonStyle';
 
 export interface BondButtonProps {
   onBond: () => void | Promise<void>;
@@ -15,33 +18,20 @@ export const BondButton: React.FC<BondButtonProps> = ({
   isLoading = false,
   disabled = false,
 }) => {
+  const { t } = useI18n();
   return (
     <button
       type="button"
       onClick={onBond}
       disabled={disabled || isLoading}
       aria-busy={isLoading}
-      style={{
-        backgroundColor: '#EC4899',
-        color: '#FFFFFF',
-        border: 'none',
-        borderRadius: '8px',
-        padding: '10px 18px',
-        fontSize: '0.9rem',
-        fontWeight: 700,
-        cursor: disabled || isLoading ? 'not-allowed' : 'pointer',
-        opacity: disabled || isLoading ? 0.6 : 1,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '6px',
-      }}
+      style={actionButtonStyle(colors.bondFill, colors.textOnAccent, disabled || isLoading)}
     >
-      {isLoading ? (
-        <span>Bonding Stake...</span>
-      ) : (
-        <span>Bond {stakeAmount} with {guildName}</span>
-      )}
+      <span aria-live="polite">
+        {isLoading
+          ? t('actions.bonding')
+          : t('actions.bond', { amount: stakeAmount, guild: guildName })}
+      </span>
     </button>
   );
 };

@@ -1,0 +1,141 @@
+{
+  "common": {
+    "language": "Language",
+    "close": "Close",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "tryAgain": "Try Again",
+    "skipToContent": "Skip to main content",
+    "you": "(you)",
+    "none": "None"
+  },
+  "layout": {
+    "primaryNavigation": "Primary navigation"
+  },
+  "errors": {
+    "title": "Something went wrong",
+    "unexpected": "An unexpected error occurred."
+  },
+  "toast": {
+    "dismiss": "Dismiss notification"
+  },
+  "address": {
+    "label": "Stellar Account Address",
+    "invalid": "Invalid Stellar public key format (must be 56 characters starting with G)"
+  },
+  "duration": {
+    "label": "Expedition Duration",
+    "hours_one": "{{count}} hour",
+    "hours_other": "{{count}} hours",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days"
+  },
+  "rarity": {
+    "label": "Filter by Rarity",
+    "All": "All",
+    "Common": "Common",
+    "Rare": "Rare",
+    "Epic": "Epic",
+    "Legendary": "Legendary"
+  },
+  "amount": {
+    "label": "Amount ({{resource}})",
+    "max": "MAX"
+  },
+  "actions": {
+    "mint": "Mint Ship ({{cost}} XLM)",
+    "minting": "Minting on Soroban...",
+    "buy": "Buy Now ({{price}} {{currency}})",
+    "list": "List Item ({{price}} {{currency}})",
+    "processingBuy": "Processing purchase...",
+    "processingSell": "Processing listing...",
+    "upgrade": "Upgrade to Lvl {{level}} ({{cost}})",
+    "upgradeDefaultCost": "100 Fuel + 50 Ore",
+    "upgrading": "Upgrading...",
+    "bond": "Bond {{amount}} with {{guild}}",
+    "bonding": "Bonding Stake..."
+  },
+  "achievement": {
+    "label": "{{title}} achievement: {{status}}",
+    "unlocked": "Unlocked",
+    "locked": "Locked",
+    "unlockedOn": "Unlocked on {{date}}"
+  },
+  "leaderboard": {
+    "label": "Leaderboard Rankings",
+    "rank": "Rank",
+    "explorer": "Explorer",
+    "guild": "Guild",
+    "score": "Score"
+  },
+  "nebula": {
+    "label": "Nebula sector: {{sector}}, density {{density}}",
+    "anomalyLabel": "anomaly detected",
+    "anomaly": "ANOMALY",
+    "density": "Nebula Density: {{density}}"
+  },
+  "resource": {
+    "label": "{{name}} resource",
+    "capacity": "{{name}} capacity used"
+  },
+  "ship": {
+    "label": "Ship: {{name}}, {{rarity}} {{shipClass}}",
+    "select": "Select {{name}}",
+    "level": "Level {{level}}",
+    "speed": "Speed",
+    "hull": "Hull",
+    "scan": "Scan",
+    "class": {
+      "Scout": "Scout",
+      "Frigate": "Frigate",
+      "Cruiser": "Cruiser",
+      "Dreadnought": "Dreadnought"
+    }
+  },
+  "oracle": {
+    "title": "Market Oracle",
+    "description": "Consensus prices aggregated from independent oracle sources.",
+    "pricesLabel": "Resource prices",
+    "consensus": "Consensus price",
+    "sources_one": "{{count}} agreeing source",
+    "sources_other": "{{count}} agreeing sources",
+    "updated": "Updated {{time}}",
+    "status": {
+      "fresh": "Validated",
+      "stale": "Stale",
+      "rejected": "Rejected"
+    },
+    "rejectedReason": "Sources disagreed; the last validated price is still in use.",
+    "empty": "No prices published yet.",
+    "resource": "Resource",
+    "sourcesHeader": "Sources",
+    "updatedHeader": "Updated",
+    "statusHeader": "Status"
+  },
+  "vault": {
+    "title": "Treasure Vault",
+    "description": "Discover unlocked vaults and spend keys to claim their loot.",
+    "vaultsLabel": "Your vaults",
+    "vault": "Vault #{{id}}",
+    "keys_one": "{{count}} vault key",
+    "keys_other": "{{count}} vault keys",
+    "lockedUntil": "Locked until {{time}}",
+    "loot": "Loot: {{amount}}",
+    "discover": "Discover vault",
+    "discoverVault": "Discover vault #{{id}}",
+    "claim": "Claim loot",
+    "claimVault": "Claim loot from vault #{{id}}",
+    "needKey": "You need a vault key to claim this loot.",
+    "claimed": "Loot claimed",
+    "locked": "Locked",
+    "undiscovered": "Undiscovered",
+    "special": {
+      "None": "",
+      "StarChart": "Special reward: Star Chart",
+      "AncientRelic": "Special reward: Ancient Relic + bonus key"
+    },
+    "empty": "You have no vaults yet.",
+    "principal": "Deposit: {{amount}}"
+  }
+}

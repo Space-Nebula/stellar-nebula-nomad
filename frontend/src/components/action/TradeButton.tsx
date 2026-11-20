@@ -1,4 +1,7 @@
 import React from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
+import { actionButtonStyle } from './actionButtonStyle';
 
 export interface TradeButtonProps {
   onTrade: () => void | Promise<void>;
@@ -17,7 +20,12 @@ export const TradeButton: React.FC<TradeButtonProps> = ({
   isLoading = false,
   disabled = false,
 }) => {
+  const { t } = useI18n();
   const isBuy = tradeType === 'buy';
+
+  let label: string;
+  if (isLoading) label = t(isBuy ? 'actions.processingBuy' : 'actions.processingSell');
+  else label = t(isBuy ? 'actions.buy' : 'actions.list', { price, currency });
 
   return (
     <button
@@ -25,29 +33,13 @@ export const TradeButton: React.FC<TradeButtonProps> = ({
       onClick={onTrade}
       disabled={disabled || isLoading}
       aria-busy={isLoading}
-      style={{
-        backgroundColor: isBuy ? '#3B82F6' : '#8B5CF6',
-        color: '#FFFFFF',
-        border: 'none',
-        borderRadius: '8px',
-        padding: '10px 18px',
-        fontSize: '0.9rem',
-        fontWeight: 700,
-        cursor: disabled || isLoading ? 'not-allowed' : 'pointer',
-        opacity: disabled || isLoading ? 0.6 : 1,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '6px',
-      }}
-    >
-      {isLoading ? (
-        <span>Processing {tradeType}...</span>
-      ) : (
-        <span>
-          {isBuy ? 'Buy Now' : 'List Item'} ({price} {currency})
-        </span>
+      style={actionButtonStyle(
+        isBuy ? colors.primaryFill : colors.secondaryFill,
+        colors.textOnAccent,
+        disabled || isLoading
       )}
+    >
+      <span aria-live="polite">{label}</span>
     </button>
   );
 };

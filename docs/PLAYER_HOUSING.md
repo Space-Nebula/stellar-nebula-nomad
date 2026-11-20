@@ -55,3 +55,30 @@ Issues: #532 (initial), #629 (completion). Module: `src/player_housing.rs`. UI: 
 ## Compatibility
 
 Furniture placed before this change stays placed. Removing it now returns it to storage, so the owner can place it again.
+
+## Contract-style Housing UI and compatibility API (PR #636)
+
+In addition to the showcase UI above, this branch preserves the contract-style
+housing client from PR #636:
+
+- `frontend/src/views/Housing.tsx` exports a `Housing` component with six tabs
+  (Overview, Furniture, Achievements, Guild Banner, Storage, Visitors). Its tests
+  live in `frontend/src/tests/housing-legacy.test.tsx`.
+- `docs/CONTRACT_SIZE_MONITORING.md`, `docs/BACKUP_VERIFICATION.md` and the
+  Prometheus/Grafana monitoring assets accompany this housing work.
+
+The following compatibility functions are exported by `src/player_housing.rs`
+and wired through `NebulaNomadContract` so existing PR #636 callers keep working.
+They delegate to the canonical upstream data model described above:
+
+| Compatibility function | Canonical equivalent |
+|---|---|
+| `install_achievement_display(owner, achievement_id, slot)` | `display_achievement` |
+| `remove_achievement_display(owner, display_id)` | `clear_achievement_display` |
+| `set_guild_banner(owner, motto)` | `display_guild_banner` (+ separate motto) |
+| `clear_guild_banner(owner)` | `remove_guild_banner` |
+| `get_house_storage(owner)` / `get_storage_capacity(owner)` | `get_storage` |
+
+Because the canonical upstream storage model is used, display and banner IDs
+from the earlier in-progress implementation are not persisted; slots and
+alliance identity are authoritative instead.

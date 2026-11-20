@@ -79,6 +79,8 @@ pub enum PricingError {
     CooldownActive = 6,
     /// Pricing arithmetic overflowed.
     ArithmeticOverflow = 7,
+    /// The market oracle has no fresh consensus price for the resource.
+    OracleUnavailable = 8,
 }
 
 impl crate::error_standard::StandardContractError for PricingError {
@@ -89,6 +91,7 @@ impl crate::error_standard::StandardContractError for PricingError {
             Self::InvalidPrice | Self::InvalidConfig => (ErrorKind::Validation, false),
             Self::CooldownActive => (ErrorKind::Conflict, false),
             Self::ResourceNotFound => (ErrorKind::NotFound, false),
+            Self::OracleUnavailable => (ErrorKind::NotFound, true),
             Self::ArithmeticOverflow => (ErrorKind::ResourceLimit, false),
         };
         crate::error_standard::ErrorDescriptor {
@@ -401,6 +404,31 @@ pub fn observe_price(
     if *source != stored {
         return Err(PricingError::Unauthorized);
     }
+    record_observation(env, resource, raw_price)
+}
+
+/// Feed the market oracle's current consensus price into the engine
+/// (Issue #654: oracle ↔ pricing integration).
+///
+/// Permissionless keeper call: the input is not caller-supplied but the
+/// oracle's published, validated, non-stale price, so no admin signature is
+/// needed. The print still passes the cooldown and deviation guards below.
+pub fn observe_oracle_price(env: &Env, resource: Symbol) -> Result<PriceState, PricingError> {
+    if !env.storage().instance().has(&PricingKey::PricingAdmin) {
+        return Err(PricingError::NotInitialized);
+    }
+    let raw_price = crate::market_oracle::get_current_market_rate(env, resource.clone())
+        .map_err(|_| PricingError::OracleUnavailable)?;
+    record_observation(env, resource, raw_price)
+}
+
+/// Shared body of [`observe_price`] and [`observe_oracle_price`]; the caller
+/// has already established that `raw_price` comes from a trusted source.
+fn record_observation(
+    env: &Env,
+    resource: Symbol,
+    raw_price: i128,
+) -> Result<PriceState, PricingError> {
     if raw_price <= 0 {
         return Err(PricingError::InvalidPrice);
     }
@@ -896,6 +924,57 @@ mod tests {
     }
 
     // ── Observations ───────────────────────────────────────────────────────
+
+    #[test]
+    fn oracle_consensus_feeds_the_pricing_engine() {
+        // Issue #654: the oracle's consensus price flows into the EMA engine
+        // without an admin signature.
+        let (env, id, admin, resource) = setup();
+        seed_admin(&env, &id, &admin, PricingConfig::default_issue_452());
+
+        // No oracle price yet.
+        in_contract(&env, &id, || {
+            assert_eq!(
+                observe_oracle_price(&env, resource.clone()),
+                Err(PricingError::OracleUnavailable)
+            );
+        });
+
+        let a = Address::generate(&env);
+        let b = Address::generate(&env);
+        let mut sources = Vec::new(&env);
+        sources.push_back(a.clone());
+        sources.push_back(b.clone());
+        in_contract(&env, &id, || {
+            crate::market_oracle::initialize_oracle(&env, admin.clone(), sources).unwrap();
+        });
+        in_contract(&env, &id, || {
+            crate::market_oracle::submit_source_price(&env, a, resource.clone(), 200).unwrap();
+        });
+        in_contract(&env, &id, || {
+            crate::market_oracle::submit_source_price(&env, b, resource.clone(), 210).unwrap();
+        });
+        in_contract(&env, &id, || {
+            crate::market_oracle::aggregate_resource_price(&env, resource.clone()).unwrap();
+        });
+
+        let state = in_contract(&env, &id, || {
+            observe_oracle_price(&env, resource.clone()).unwrap()
+        });
+        assert_eq!(state.sma, 205);
+        assert_eq!(state.last_accepted, 205);
+    }
+
+    #[test]
+    fn oracle_feed_requires_pricing_initialization() {
+        let (env, id, _admin, resource) = setup();
+        in_contract(&env, &id, || {
+            assert_eq!(
+                observe_oracle_price(&env, resource.clone()),
+                Err(PricingError::NotInitialized)
+            );
+        });
+    }
 
     #[test]
     fn a_first_print_seeds_the_average_verbatim() {

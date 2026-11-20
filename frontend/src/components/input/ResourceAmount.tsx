@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useId } from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
 
 export interface ResourceAmountProps {
   value: number;
@@ -19,6 +21,10 @@ export const ResourceAmount: React.FC<ResourceAmountProps> = ({
   resourceName = 'XLM',
   error,
 }) => {
+  const { t } = useI18n();
+  const inputId = useId();
+  const errorId = `${inputId}-error`;
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const parsed = Number(e.target.value);
     if (!isNaN(parsed)) {
@@ -28,12 +34,12 @@ export const ResourceAmount: React.FC<ResourceAmountProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
-      <label htmlFor="resource-input" style={{ fontSize: '0.8rem', color: '#94A3B8' }}>
-        Amount ({resourceName})
+      <label htmlFor={inputId} style={{ fontSize: '0.8rem', color: colors.textMuted }}>
+        {t('amount.label', { resource: resourceName })}
       </label>
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <input
-          id="resource-input"
+          id={inputId}
           type="number"
           value={value}
           onChange={handleChange}
@@ -41,14 +47,14 @@ export const ResourceAmount: React.FC<ResourceAmountProps> = ({
           max={max}
           step={step}
           aria-invalid={!!error}
-          aria-describedby={error ? 'resource-error' : undefined}
+          aria-describedby={error ? errorId : undefined}
           style={{
             flex: 1,
-            backgroundColor: '#0F172A',
-            border: `1px solid ${error ? '#EF4444' : '#334155'}`,
+            backgroundColor: colors.bgSurface,
+            border: `1px solid ${error ? colors.danger : colors.textMuted}`,
             borderRadius: '6px',
             padding: '8px 12px',
-            color: '#F8FAFC',
+            color: colors.textPrimary,
             fontSize: '0.9rem',
           }}
         />
@@ -56,9 +62,9 @@ export const ResourceAmount: React.FC<ResourceAmountProps> = ({
           type="button"
           onClick={() => onChange(max)}
           style={{
-            backgroundColor: '#1E293B',
-            border: '1px solid #334155',
-            color: '#38BDF8',
+            backgroundColor: colors.bgRaised,
+            border: `1px solid ${colors.textMuted}`,
+            color: colors.accent,
             padding: '8px 12px',
             borderRadius: '6px',
             fontSize: '0.75rem',
@@ -66,11 +72,11 @@ export const ResourceAmount: React.FC<ResourceAmountProps> = ({
             cursor: 'pointer',
           }}
         >
-          MAX
+          {t('amount.max')}
         </button>
       </div>
       {error && (
-        <span id="resource-error" style={{ color: '#EF4444', fontSize: '0.75rem' }}>
+        <span id={errorId} role="alert" style={{ color: colors.danger, fontSize: '0.75rem' }}>
           {error}
         </span>
       )}

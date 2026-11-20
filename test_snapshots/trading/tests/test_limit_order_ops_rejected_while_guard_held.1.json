@@ -52,7 +52,7 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "ReentrancyLock"
+                            "symbol": "GuardReentrancyLock"
                           }
                         ]
                       },

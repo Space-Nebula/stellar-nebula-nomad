@@ -1,9 +1,14 @@
 title = "gitleaks config"
 
+[extend]
+useDefault = true
+
 [allowlist]
 description = "Allowlist test vectors and mock secrets in tests"
 paths = [
   '''services/relayer/src/startup\.test\.ts''',
+  '''services/notifications/src/(?:apns|fcm)-sender\.test\.ts''',
+  '''sdk/src/qrcode\.test\.ts''',
   '''tests/.*''',
 ]
 regexes = [

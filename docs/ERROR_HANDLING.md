@@ -105,3 +105,12 @@ Error handling is cheap:
 - Error propagation: negligible overhead
 
 Errors should be preferred over panics because panics abort entire transactions with no recovery path.
+
+## Complete Codebase Standardization (#659)
+
+All modules across `src/` now consistently implement the `StandardContractError` trait. Every contract error enum conforms to:
+- Stable numeric codes (`#[repr(u32)]`)
+- Deterministic module namespace string
+- Categorized `ErrorKind` (Validation, Authorization, NotFound, Conflict, ResourceLimit, Internal)
+- Explicit retryability flag
+- Consistent error propagation through `Result<T, ModuleError>` across contract entry points.

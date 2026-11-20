@@ -1,4 +1,6 @@
 import React from 'react';
+import { colors, visuallyHidden } from '../../a11y';
+import { useI18n } from '../../i18n';
 
 export interface LeaderboardRow {
   rank: number;
@@ -12,52 +14,63 @@ export interface LeaderboardTableProps {
   currentPlayerId?: string;
 }
 
-export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
-  entries,
-  currentPlayerId,
-}) => {
+export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({ entries, currentPlayerId }) => {
+  const { t, formatNumber } = useI18n();
+  const cell: React.CSSProperties = { padding: '10px 12px' };
   return (
     <div style={{ overflowX: 'auto', width: '100%' }}>
       <table
-        role="table"
-        aria-label="Leaderboard Rankings"
         style={{
           width: '100%',
           borderCollapse: 'collapse',
           fontSize: '0.875rem',
-          textAlign: 'left',
+          textAlign: 'start',
         }}
       >
+        <caption style={visuallyHidden}>{t('leaderboard.label')}</caption>
         <thead>
-          <tr style={{ borderBottom: '1px solid #334155', color: '#94A3B8' }}>
-            <th style={{ padding: '10px 12px' }}>Rank</th>
-            <th style={{ padding: '10px 12px' }}>Explorer</th>
-            <th style={{ padding: '10px 12px' }}>Guild</th>
-            <th style={{ padding: '10px 12px', textAlign: 'right' }}>Score</th>
+          <tr style={{ borderBottom: `1px solid ${colors.border}`, color: colors.textMuted }}>
+            <th scope="col" style={{ ...cell, textAlign: 'start' }}>{t('leaderboard.rank')}</th>
+            <th scope="col" style={{ ...cell, textAlign: 'start' }}>{t('leaderboard.explorer')}</th>
+            <th scope="col" style={{ ...cell, textAlign: 'start' }}>{t('leaderboard.guild')}</th>
+            <th scope="col" style={{ ...cell, textAlign: 'end' }}>{t('leaderboard.score')}</th>
           </tr>
         </thead>
         <tbody>
           {entries.map((entry) => {
-            const isCurrent = currentPlayerId && entry.playerId.toLowerCase() === currentPlayerId.toLowerCase();
+            const isCurrent =
+              !!currentPlayerId && entry.playerId.toLowerCase() === currentPlayerId.toLowerCase();
             return (
               <tr
                 key={entry.rank}
+                aria-current={isCurrent ? 'true' : undefined}
                 style={{
                   backgroundColor: isCurrent ? 'rgba(56, 189, 248, 0.1)' : 'transparent',
-                  borderBottom: '1px solid #1E293B',
+                  borderBottom: `1px solid ${colors.bgRaised}`,
+                  // Not colour alone: the current row also gets a thick edge and "(you)".
+                  boxShadow: isCurrent ? `inset 4px 0 0 ${colors.accent}` : undefined,
                 }}
               >
-                <td style={{ padding: '10px 12px', fontWeight: 700, color: entry.rank <= 3 ? '#F59E0B' : '#94A3B8' }}>
-                  #{entry.rank}
+                <th
+                  scope="row"
+                  style={{
+                    ...cell,
+                    textAlign: 'start',
+                    fontWeight: 700,
+                    color: entry.rank <= 3 ? colors.warning : colors.textMuted,
+                  }}
+                >
+                  #{formatNumber(entry.rank)}
+                </th>
+                <td style={{ ...cell, color: colors.textPrimary, fontFamily: 'monospace' }}>
+                  <span dir="ltr" title={entry.playerId}>
+                    {entry.playerId.slice(0, 6)}...{entry.playerId.slice(-4)}
+                  </span>
+                  {isCurrent && <span style={{ marginInlineStart: 6 }}>{t('common.you')}</span>}
                 </td>
-                <td style={{ padding: '10px 12px', color: '#F8FAFC', fontFamily: 'monospace' }}>
-                  {entry.playerId.slice(0, 6)}...{entry.playerId.slice(-4)}
-                </td>
-                <td style={{ padding: '10px 12px', color: '#38BDF8' }}>
-                  {entry.guild || '-'}
-                </td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#10B981' }}>
-                  {entry.score.toLocaleString()}
+                <td style={{ ...cell, color: colors.accent }}>{entry.guild || '-'}</td>
+                <td style={{ ...cell, textAlign: 'end', fontWeight: 600, color: colors.success }}>
+                  {formatNumber(entry.score)}
                 </td>
               </tr>
             );

@@ -1,4 +1,6 @@
 import React from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
 
 export interface ShipCardProps {
   id: string;
@@ -14,6 +16,13 @@ export interface ShipCardProps {
   onSelect?: (id: string) => void;
 }
 
+const rarityColors: Record<ShipCardProps['rarity'], string> = {
+  Common: colors.textMuted,
+  Rare: colors.accent,
+  Epic: colors.epic,
+  Legendary: colors.warning,
+};
+
 export const ShipCard: React.FC<ShipCardProps> = ({
   id,
   name,
@@ -23,37 +32,46 @@ export const ShipCard: React.FC<ShipCardProps> = ({
   stats,
   onSelect,
 }) => {
-  const rarityColors: Record<string, string> = {
-    Common: '#94A3B8',
-    Rare: '#38BDF8',
-    Epic: '#A855F7',
-    Legendary: '#F59E0B',
-  };
+  const { t, formatNumber } = useI18n();
+  const color = rarityColors[rarity] || colors.textMuted;
+  const rarityText = t(`rarity.${rarity}`);
+  const classText = t(`ship.class.${shipClass}`);
 
-  const color = rarityColors[rarity] || '#94A3B8';
+  const stat = (label: string, value: number, valueColor: string) => (
+    <div
+      style={{
+        backgroundColor: colors.bgSurface,
+        padding: '8px',
+        borderRadius: '6px',
+        textAlign: 'center',
+      }}
+    >
+      <div style={{ color: colors.textMuted }}>{label}</div>
+      <div style={{ fontWeight: 700, color: valueColor }}>{formatNumber(value)}</div>
+    </div>
+  );
 
   return (
     <div
       role="article"
-      aria-label={`Ship: ${name}, ${rarity} ${shipClass}`}
-      tabIndex={0}
+      aria-label={t('ship.label', { name, rarity: rarityText, shipClass: classText })}
       onClick={() => onSelect?.(id)}
-      onKeyDown={(e) => e.key === 'Enter' && onSelect?.(id)}
       style={{
-        backgroundColor: '#1E293B',
+        backgroundColor: colors.bgRaised,
         border: `2px solid ${color}`,
         borderRadius: '12px',
         padding: '16px',
-        color: '#F8FAFC',
+        color: colors.textPrimary,
         display: 'flex',
         flexDirection: 'column',
         gap: '12px',
         cursor: onSelect ? 'pointer' : 'default',
         transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+        position: 'relative',
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h4 style={{ margin: 0, fontSize: '1.1rem', color: '#F8FAFC' }}>{name}</h4>
+        <h3 style={{ margin: 0, fontSize: '1.1rem', color: colors.textPrimary }}>{name}</h3>
         <span
           style={{
             backgroundColor: `${color}22`,
@@ -64,28 +82,56 @@ export const ShipCard: React.FC<ShipCardProps> = ({
             fontWeight: 700,
           }}
         >
-          {rarity}
+          {rarityText}
         </span>
       </div>
 
-      <div style={{ fontSize: '0.85rem', color: '#94A3B8' }}>
-        {shipClass} • Level {level}
+      <div style={{ fontSize: '0.85rem', color: colors.textMuted }}>
+        {classText} • {t('ship.level', { level: formatNumber(level) })}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', fontSize: '0.75rem' }}>
-        <div style={{ backgroundColor: '#0F172A', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
-          <div style={{ color: '#64748B' }}>Speed</div>
-          <div style={{ fontWeight: 700, color: '#38BDF8' }}>{stats.speed}</div>
-        </div>
-        <div style={{ backgroundColor: '#0F172A', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
-          <div style={{ color: '#64748B' }}>Hull</div>
-          <div style={{ fontWeight: 700, color: '#10B981' }}>{stats.hull}</div>
-        </div>
-        <div style={{ backgroundColor: '#0F172A', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
-          <div style={{ color: '#64748B' }}>Scan</div>
-          <div style={{ fontWeight: 700, color: '#A855F7' }}>{stats.scanPower}</div>
-        </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: '8px',
+          fontSize: '0.75rem',
+        }}
+      >
+        {stat(t('ship.speed'), stats.speed, colors.accent)}
+        {stat(t('ship.hull'), stats.hull, colors.success)}
+        {stat(t('ship.scan'), stats.scanPower, colors.epic)}
       </div>
+
+      {onSelect && (
+        // Keyboard and screen-reader users get a real button; mouse users can
+        // click anywhere on the card. `AccessibilityStyles` hides the button
+        // visually until it receives focus.
+        <button
+          type="button"
+          className="snn-reveal-on-focus"
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect(id);
+          }}
+          style={selectButtonStyle}
+        >
+          {t('ship.select', { name })}
+        </button>
+      )}
     </div>
   );
+};
+
+const selectButtonStyle: React.CSSProperties = {
+  position: 'absolute',
+  insetInlineEnd: 8,
+  bottom: 8,
+  padding: '4px 10px',
+  whiteSpace: 'nowrap',
+  border: 'none',
+  borderRadius: 6,
+  backgroundColor: colors.primaryFill,
+  color: colors.textOnAccent,
+  fontWeight: 700,
 };

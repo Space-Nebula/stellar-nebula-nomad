@@ -1,0 +1,157 @@
+{
+  "common": {
+    "language": "اللغة",
+    "close": "إغلاق",
+    "cancel": "إلغاء",
+    "confirm": "تأكيد",
+    "loading": "جارٍ التحميل...",
+    "tryAgain": "حاول مرة أخرى",
+    "skipToContent": "انتقل إلى المحتوى الرئيسي",
+    "you": "(أنت)",
+    "none": "لا شيء"
+  },
+  "layout": {
+    "primaryNavigation": "التنقل الرئيسي"
+  },
+  "errors": {
+    "title": "حدث خطأ ما",
+    "unexpected": "حدث خطأ غير متوقع."
+  },
+  "toast": {
+    "dismiss": "إغلاق الإشعار"
+  },
+  "address": {
+    "label": "عنوان حساب Stellar",
+    "invalid": "تنسيق المفتاح العام لـ Stellar غير صالح (يجب أن يتكون من 56 حرفًا ويبدأ بالحرف G)"
+  },
+  "duration": {
+    "label": "مدة الرحلة الاستكشافية",
+    "hours_zero": "{{count}} ساعة",
+    "hours_one": "ساعة واحدة",
+    "hours_two": "ساعتان",
+    "hours_few": "{{count}} ساعات",
+    "hours_many": "{{count}} ساعة",
+    "hours_other": "{{count}} ساعة",
+    "days_zero": "{{count}} يوم",
+    "days_one": "يوم واحد",
+    "days_two": "يومان",
+    "days_few": "{{count}} أيام",
+    "days_many": "{{count}} يومًا",
+    "days_other": "{{count}} يوم"
+  },
+  "rarity": {
+    "label": "التصفية حسب الندرة",
+    "All": "الكل",
+    "Common": "شائع",
+    "Rare": "نادر",
+    "Epic": "ملحمي",
+    "Legendary": "أسطوري"
+  },
+  "amount": {
+    "label": "الكمية ({{resource}})",
+    "max": "الحد الأقصى"
+  },
+  "actions": {
+    "mint": "سك سفينة ({{cost}} XLM)",
+    "minting": "جارٍ السك على Soroban...",
+    "buy": "اشترِ الآن ({{price}} {{currency}})",
+    "list": "اعرض العنصر ({{price}} {{currency}})",
+    "processingBuy": "جارٍ معالجة الشراء...",
+    "processingSell": "جارٍ معالجة العرض...",
+    "upgrade": "الترقية إلى المستوى {{level}} ({{cost}})",
+    "upgradeDefaultCost": "100 وقود + 50 خام",
+    "upgrading": "جارٍ الترقية...",
+    "bond": "ربط {{amount}} مع {{guild}}",
+    "bonding": "جارٍ ربط الحصة..."
+  },
+  "achievement": {
+    "label": "إنجاز {{title}}: {{status}}",
+    "unlocked": "مفتوح",
+    "locked": "مقفل",
+    "unlockedOn": "فُتح في {{date}}"
+  },
+  "leaderboard": {
+    "label": "لوحة الصدارة",
+    "rank": "الترتيب",
+    "explorer": "المستكشف",
+    "guild": "النقابة",
+    "score": "النقاط"
+  },
+  "nebula": {
+    "label": "قطاع السديم: {{sector}}، الكثافة {{density}}",
+    "anomalyLabel": "تم رصد شذوذ",
+    "anomaly": "شذوذ",
+    "density": "كثافة السديم: {{density}}"
+  },
+  "resource": {
+    "label": "مورد {{name}}",
+    "capacity": "السعة المستخدمة من {{name}}"
+  },
+  "ship": {
+    "label": "سفينة: {{name}}، {{shipClass}} {{rarity}}",
+    "select": "اختر {{name}}",
+    "level": "المستوى {{level}}",
+    "speed": "السرعة",
+    "hull": "الهيكل",
+    "scan": "المسح",
+    "class": {
+      "Scout": "كشافة",
+      "Frigate": "فرقاطة",
+      "Cruiser": "طراد",
+      "Dreadnought": "مدرعة"
+    }
+  },
+  "oracle": {
+    "title": "أوراكل السوق",
+    "description": "أسعار إجماع مجمّعة من مصادر أوراكل مستقلة.",
+    "pricesLabel": "أسعار الموارد",
+    "consensus": "سعر الإجماع",
+    "sources_zero": "لا توجد مصادر متوافقة",
+    "sources_one": "مصدر واحد متوافق",
+    "sources_two": "مصدران متوافقان",
+    "sources_few": "{{count}} مصادر متوافقة",
+    "sources_many": "{{count}} مصدرًا متوافقًا",
+    "sources_other": "{{count}} مصدر متوافق",
+    "updated": "آخر تحديث {{time}}",
+    "status": {
+      "fresh": "تم التحقق",
+      "stale": "قديم",
+      "rejected": "مرفوض"
+    },
+    "rejectedReason": "اختلفت المصادر؛ لا يزال آخر سعر تم التحقق منه مستخدمًا.",
+    "empty": "لم تُنشر أي أسعار بعد.",
+    "resource": "المورد",
+    "sourcesHeader": "المصادر",
+    "updatedHeader": "آخر تحديث",
+    "statusHeader": "الحالة"
+  },
+  "vault": {
+    "title": "خزنة الكنز",
+    "description": "اكتشف الخزائن غير المقفلة واستخدم المفاتيح للحصول على غنائمها.",
+    "vaultsLabel": "خزائنك",
+    "vault": "الخزنة رقم {{id}}",
+    "keys_zero": "لا توجد مفاتيح خزنة",
+    "keys_one": "مفتاح خزنة واحد",
+    "keys_two": "مفتاحا خزنة",
+    "keys_few": "{{count}} مفاتيح خزنة",
+    "keys_many": "{{count}} مفتاحًا للخزنة",
+    "keys_other": "{{count}} مفتاح خزنة",
+    "lockedUntil": "مقفلة حتى {{time}}",
+    "loot": "الغنيمة: {{amount}}",
+    "discover": "اكتشاف الخزنة",
+    "discoverVault": "اكتشاف الخزنة رقم {{id}}",
+    "claim": "استلام الغنيمة",
+    "claimVault": "استلام غنيمة الخزنة رقم {{id}}",
+    "needKey": "تحتاج إلى مفتاح خزنة لاستلام هذه الغنيمة.",
+    "claimed": "تم استلام الغنيمة",
+    "locked": "مقفلة",
+    "undiscovered": "غير مكتشفة",
+    "special": {
+      "None": "",
+      "StarChart": "مكافأة خاصة: خريطة نجمية",
+      "AncientRelic": "مكافأة خاصة: أثر قديم + مفتاح إضافي"
+    },
+    "empty": "ليس لديك خزائن بعد.",
+    "principal": "الإيداع: {{amount}}"
+  }
+}

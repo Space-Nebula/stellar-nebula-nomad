@@ -12,9 +12,14 @@ alerting:
         - targets:
             - alertmanager:9093
 
-# Load alert rules
+# Load alert rules.
+# Paths are resolved relative to this file (monitoring/prometheus/), so
+# ../backup-monitoring.yml points at monitoring/backup-monitoring.yml.
+# BackupFailed / NoRecentBackup live ONLY in backup-monitoring.yml to avoid
+# duplicate alert definitions across loaded rule files.
 rule_files:
   - 'alert-rules.yml'
+  - '../backup-monitoring.yml'
 
 # Scrape configurations
 scrape_configs:

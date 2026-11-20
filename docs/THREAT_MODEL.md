@@ -78,8 +78,8 @@ The Soroban runtime is the innermost trust boundary. Everything outside it — R
 
 **T-03: Reentrancy / cross-contract callback**  
 *Threat:* A malicious contract called by Nebula Nomad re-enters a Nebula Nomad function before it completes, exploiting partially-applied state.  
-*Mitigation:* Soroban's execution model completes cross-contract calls atomically before returning. An explicit reentrancy guard (`src/reentrancy_guard.rs`) provides defense-in-depth.  
-*Residual risk:* Very low.
+*Mitigation:* Soroban completes **outbound** cross-contract calls atomically before returning. For the **inbound** vector — a custom-account `require_auth` callback re-entering a value-moving entry point — an explicit global mutex (`src/reentrancy_guard.rs`) rejects nested calls; 20 production entry points are guarded and six end-to-end attack scenarios are in `tests/security/reentrancy_attack_tests.rs`. Details: `docs/REENTRANCY_PROTECTION.md`.  
+*Residual risk:* Low. Several `require_auth` entry points outside the guarded set rely on checks-effects-interactions ordering; they are not proven exploitable but should be re-audited before adding new composability paths.
 
 **T-04: WASM bytecode replacement**  
 *Threat:* Attacker replaces the deployed contract with a malicious version.  
