@@ -118,6 +118,18 @@ pub enum MarketplaceError {
     InvalidDuration = 17,
 }
 
+impl crate::error_standard::StandardContractError for MarketplaceError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "skin_marketplace",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ─── Internal Helpers ─────────────────────────────────────────────────────────
 
 fn map_skin_error(error: SkinError) -> MarketplaceError {

@@ -41,6 +41,18 @@ pub enum EventFrameworkError {
     Unauthorized = 3,
 }
 
+impl crate::error_standard::StandardContractError for EventFrameworkError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "event_framework",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ── storage layout ───────────────────────────────────────────────────────────
 
 fn schema_key(event_type: &Symbol) -> (Symbol, Symbol) {

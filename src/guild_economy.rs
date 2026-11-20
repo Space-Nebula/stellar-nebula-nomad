@@ -95,6 +95,18 @@ pub enum GuildEconomyError {
     InvalidQuestReward = 12,
 }
 
+impl crate::error_standard::StandardContractError for GuildEconomyError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "guild_economy",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ─── Functions ────────────────────────────────────────────────────────────────
 
 /// Create a proposal to spend/withdraw essence from the alliance treasury.

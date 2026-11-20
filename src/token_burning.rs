@@ -148,6 +148,18 @@ pub enum BurningError {
     AlreadyInitialized = 6,
 }
 
+impl crate::error_standard::StandardContractError for BurningError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "token_burning",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 impl From<MinterError> for BurningError {
     fn from(e: MinterError) -> Self {
         match e {

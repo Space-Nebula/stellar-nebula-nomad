@@ -96,6 +96,18 @@ pub enum ChallengeError {
     InvalidDuration = 7,
 }
 
+impl crate::error_standard::StandardContractError for ChallengeError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "challenge_system",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ─── Internal Helpers ─────────────────────────────────────────────────────────
 
 fn day_index(timestamp: u64) -> u32 {

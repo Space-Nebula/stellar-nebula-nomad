@@ -36,6 +36,18 @@ pub enum OfflineError {
     NotInitialized = 2,
 }
 
+impl crate::error_standard::StandardContractError for OfflineError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "offline_progress",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 const MAX_OFFLINE_HOURS: u64 = 48;
 const PREMIUM_MAX_OFFLINE_HOURS: u64 = 96;
 const SECONDS_PER_HOUR: u64 = 3600;
