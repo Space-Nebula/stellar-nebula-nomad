@@ -643,6 +643,10 @@ pub fn start_combat(
         .persistent()
         .set(&PvPDataKey::Combat(combat_id), &combat);
 
+    // Issue #592: seed the replay with the initial combat state. The hook is
+    // infallible and bounded, so recording can never change PvP behaviour.
+    crate::combat_replay::record_start(env, &combat);
+
     // Update stats
     let mut stats1 = get_or_init_stats(env, player1);
     stats1.combat_count += 1;
@@ -698,6 +702,8 @@ pub fn execute_move(
     if env.ledger().timestamp() > combat.started_at + COMBAT_TIMEOUT {
         combat.status = symbol_short!("cancelled");
         env.storage().persistent().set(&key, &combat);
+        // Issue #592: record the resolution even on timeout.
+        crate::combat_replay::record_cancellation(env, &combat);
         return Err(PvPError::CombatNotFound);
     }
 
@@ -798,6 +804,11 @@ pub fn execute_move(
     }
 
     env.storage().persistent().set(&key, &combat);
+
+    // Issue #592: append the committed post-move state (or the final frame
+    // when the move resolved the combat). Always after the state is final so
+    // the replay reproduces exactly what the contract stored.
+    crate::combat_replay::record_move(env, &combat, &move_type, power);
 
     Ok(())
 }

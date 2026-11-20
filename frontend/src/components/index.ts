@@ -28,6 +28,9 @@ export * from './feedback/ErrorBoundary';
 export * from './feedback/ToastNotification';
 export * from './feedback/ConfirmDialog';
 
+// Combat replay (Issue #592)
+export * from './ReplayViewer';
+
 // Analytics components
 export * from './analytics/SystemHealthPanel';
 export * from './analytics/UserMetricsPanel';

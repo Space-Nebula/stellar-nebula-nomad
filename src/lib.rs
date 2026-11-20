@@ -50,6 +50,8 @@ mod onboarding_tutorial;
 mod player_profile;
 mod player_segmentation;
 mod pvp_combat;
+/// Combat replay recording, bounded frame storage, and playback (Issue #592).
+pub mod combat_replay;
 mod referral_system;
 /// Rate-limited resource minting and the player balance ledger.
 pub mod resource_minter;
@@ -243,6 +245,17 @@ pub use pvp_combat::{
     MatchmakingEntry, PvPError, RewardsConfig, SpectatorInfo, COMBAT_TIMEOUT,
     ELO_DECAY_BASE_POINTS, ELO_DECAY_FLOOR, ELO_DECAY_INACTIVITY_SECS, INITIAL_ELO, K_FACTOR,
     MAX_ENERGY, MAX_HP, MAX_QUEUE_SIZE, MAX_SPECTATORS,
+};
+// Issue #592 — combat replay storage, playback and sharing.
+pub use combat_replay::{
+    deserialize_replay, get_replay, get_replay_bundle, get_replay_by_share, get_replay_frame,
+    get_replay_frames, get_replay_id_for_combat, get_replay_id_for_share, get_player_replays,
+    playback_state, seek_to_turn, serialize_replay, share_replay, CombatReplay, PlaybackState,
+    ReplayBundle, ReplayError, ReplayExport, ReplayFrameView, ReplayKey, ReplayShare,
+    FrameState, ReplayError as CombatReplayError, FRAME_CANCEL, FRAME_FINISH, FRAME_MOVE,
+    FRAME_START, FRAMES_PER_CHUNK, MAX_FRAME_PAGE, MAX_REPLAY_FRAMES, MAX_REPLAYS_PER_OWNER,
+    REPLAY_FORMAT_VERSION, REPLAY_FRAME_BYTES, SPEED_DOUBLE_BPS, SPEED_HALF_BPS,
+    SPEED_NORMAL_BPS,
 };
 // Issue #590 — ELO rating system with 8 tiers, K-factor, seasonal adjustments.
 pub use elo_rating::{
@@ -1123,6 +1136,112 @@ impl NebulaNomadContract {
     /// Set PvP combat admin (admin only).
     pub fn set_pvp_admin(env: Env, admin: Address) {
         let _ = pvp_combat::set_admin(&env, &admin);
+    }
+
+    // === Combat Replay API (Issue #592) ===
+
+    /// Look up the replay id recorded for a combat.
+    pub fn get_combat_replay_id(env: Env, combat_id: u64) -> Result<u64, ReplayError> {
+        combat_replay::get_replay_id_for_combat(&env, combat_id)
+    }
+
+    /// Read replay metadata (does not load frames).
+    pub fn get_combat_replay(env: Env, replay_id: u64) -> Result<CombatReplay, ReplayError> {
+        combat_replay::get_replay(&env, replay_id)
+    }
+
+    /// Read one frame, with out-of-range indices clamped to the last frame.
+    pub fn get_combat_replay_frame(
+        env: Env,
+        replay_id: u64,
+        index: u32,
+    ) -> Result<ReplayFrameView, ReplayError> {
+        combat_replay::get_replay_frame(&env, replay_id, index)
+    }
+
+    /// Read a bounded page of frames for incremental playback / virtualization.
+    pub fn get_combat_replay_frames(
+        env: Env,
+        replay_id: u64,
+        start: u32,
+        limit: u32,
+    ) -> Result<Vec<ReplayFrameView>, ReplayError> {
+        combat_replay::get_replay_frames(&env, replay_id, start, limit)
+    }
+
+    /// Read metadata plus all (bounded) frames for full playback.
+    pub fn get_combat_replay_bundle(
+        env: Env,
+        replay_id: u64,
+    ) -> Result<ReplayBundle, ReplayError> {
+        combat_replay::get_replay_bundle(&env, replay_id)
+    }
+
+    /// Replay ids involving a player (bounded, most recent retained).
+    pub fn get_player_combat_replays(env: Env, player: Address) -> Vec<u64> {
+        combat_replay::get_player_replays(&env, &player)
+    }
+
+    /// Serialize a replay into its compact transport form.
+    pub fn export_combat_replay(
+        env: Env,
+        replay_id: u64,
+    ) -> Result<ReplayExport, ReplayError> {
+        combat_replay::serialize_replay(&env, replay_id)
+    }
+
+    /// Deserialize and publish a previously exported replay.
+    pub fn import_combat_replay(
+        env: Env,
+        caller: Address,
+        export: ReplayExport,
+    ) -> Result<u64, ReplayError> {
+        combat_replay::deserialize_replay(&env, &caller, &export)
+    }
+
+    /// Create a share token for a replay (only the two duelists may publish).
+    pub fn share_combat_replay(
+        env: Env,
+        caller: Address,
+        replay_id: u64,
+    ) -> Result<ReplayShare, ReplayError> {
+        combat_replay::share_replay(&env, &caller, replay_id)
+    }
+
+    /// Resolve a share token back to a replay id.
+    pub fn get_combat_replay_id_by_share(
+        env: Env,
+        token: Symbol,
+    ) -> Result<u64, ReplayError> {
+        combat_replay::replay_id_for_share(&env, token)
+    }
+
+    /// Full replay referenced by a share link (`/replays?share=<token>`).
+    pub fn get_combat_replay_by_share(
+        env: Env,
+        token: Symbol,
+    ) -> Result<ReplayBundle, ReplayError> {
+        combat_replay::get_replay_by_share(&env, token)
+    }
+
+    /// Playback cursor: clamped frame index, turn, speed and frame interval.
+    pub fn get_replay_playback_state(
+        env: Env,
+        replay_id: u64,
+        frame_index: u32,
+        speed_bps: u32,
+    ) -> Result<PlaybackState, ReplayError> {
+        combat_replay::playback_state(&env, replay_id, frame_index, speed_bps)
+    }
+
+    /// Seek to a 1-based turn number (0 = setup frame) with speed control.
+    pub fn seek_combat_replay(
+        env: Env,
+        replay_id: u64,
+        turn_number: u32,
+        speed_bps: u32,
+    ) -> Result<PlaybackState, ReplayError> {
+        combat_replay::seek_to_turn(&env, replay_id, turn_number, speed_bps)
     }
 
     // ─── MMR Matchmaking — Issue #591 ─────────────────────────────────────
