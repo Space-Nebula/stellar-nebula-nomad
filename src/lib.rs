@@ -148,6 +148,8 @@ mod nft_marketplace;
 mod rewards;
 /// Seasonal content windows, leaderboards, and reward tracks.
 pub mod seasons;
+/// Exclusive rotating content, season-pass tracks and seasonal challenges.
+pub mod seasonal_rewards;
 pub mod trading;
 
 /// Pure bracket / pairing algorithms behind the tournament formats (Issue #587).
@@ -409,7 +411,8 @@ pub use event_scheduler::{
     reset_burst_counter as reset_event_burst, schedule_event, schedule_weekly_festival,
     trigger_scheduled_event, update_participants, EventError, EventResult, ScheduledEvent,
     SeasonalChallengeSpec, SeasonalEvent, SeasonalEventConfig, SeasonalEventEntry,
-    SeasonalEventStatus, MAX_ACTIVE_EVENTS, MAX_CHALLENGES_PER_EVENT, MAX_PENDING_SEASONAL_EVENTS,
+    SeasonalEventStatus, TimeLimitedChallenge, MAX_ACTIVE_EVENTS, MAX_CHALLENGES_PER_EVENT,
+    MAX_PENDING_SEASONAL_EVENTS,
     MAX_SEASONAL_EVENT_COOLDOWN, MAX_SEASONAL_EVENT_DURATION, MIN_SEASONAL_EVENT_DURATION,
     SEASONAL_REWARD_CLAIM_WINDOW, WEEKLY_FESTIVAL_INTERVAL,
 };
@@ -438,8 +441,26 @@ pub use prize_distributor::{
     get_total_distributed, initialize_prize_distributor, submit_leaderboard_snapshot, PrizeError,
     PrizeRecord, MAX_PAYOUT_POSITIONS, WEEK_SECONDS,
 };
+pub use battle_pass::PassTier;
 pub use seasons::{
-    seasonal_event_reward_pool, Season, SeasonError, SeasonTheme, EXCLUSIVE_EVENT_BONUS_BPS,
+    get_last_transition, get_season_phase, is_transition_due, season_id_at, season_window,
+    seasonal_event_reward_pool, Season, SeasonArchive, SeasonConfig as SeasonContentConfig,
+    SeasonError, SeasonNebulaType, SeasonPhase, SeasonTheme, SeasonTransition,
+    CHAPTER_DURATION_SECS, CHAPTERS_PER_SEASON, EXCLUSIVE_EVENT_BONUS_BPS, SEASON_DURATION_SECS,
+    SEASON_MONTHS,
+};
+// Issue #594 — seasonal rewards, pass tiers, challenges and rotation.
+pub use seasonal_rewards::{
+    claim_season_pass_reward, claim_seasonal_challenge_reward, create_seasonal_challenge,
+    ensure_season_transition, exclusive_content_for, get_challenge_status, get_exclusive_content,
+    get_season_dashboard, get_season_pass_summary, highest_unlocked_tier, init_season_pass,
+    next_unlocked_tier, pro_rata_reward, record_nebula_discovery, record_seasonal_activity,
+    record_seasonal_challenge_progress, rotate_exclusive_content, seasonal_challenges_for_season,
+    theme_symbol, tier_xp_required, transition_season, unlock_premium_pass, ChallengeStatus,
+    ExclusiveContent, SeasonDashboard, SeasonPassSummary, SeasonTransitionView,
+    SeasonalRewardsError, SeasonalRewardsKey,
+    FREE_TIER_XP_BASE, FREE_TIER_XP_STEP, PREMIUM_TIER_XP_BASE, PREMIUM_TIER_XP_STEP,
+    SEASONAL_CHALLENGE_WINDOW_SECS,
 };
 pub use state_snapshot::{
     auto_snapshot, get_ship_snapshots, get_snapshot, reset_session_count, restore_from_snapshot,
@@ -3573,6 +3594,217 @@ impl NebulaNomadContract {
     /// Get the current season.
     pub fn get_current_season(env: Env) -> Result<Season, SeasonError> {
         seasons::get_current_season(&env)
+    }
+
+    /// Whether the current 90-day season is active or awaiting rollover.
+    pub fn get_season_phase(env: Env) -> Result<SeasonPhase, SeasonError> {
+        seasons::get_season_phase(&env)
+    }
+
+    /// Seconds remaining in the current season (0 once due for transition).
+    pub fn get_season_time_remaining(env: Env) -> Result<u64, SeasonError> {
+        seasons::get_season_time_remaining(&env)
+    }
+
+    /// Whether the 90-day window has closed and a rollover is due.
+    pub fn is_transition_due(env: Env) -> Result<bool, SeasonError> {
+        seasons::is_transition_due(&env)
+    }
+
+    /// Most recent atomic transition audit record, if one exists.
+    pub fn get_last_transition(env: Env) -> Option<SeasonTransition> {
+        seasons::get_last_transition(&env)
+    }
+
+    /// Current chapter (1–3) derived from elapsed season time.
+    pub fn get_current_chapter(env: Env) -> Result<u32, SeasonError> {
+        seasons::get_current_chapter(&env)
+    }
+
+    /// Admin: persist the chapter derived from elapsed time.
+    pub fn advance_chapter(env: Env, admin: Address) -> Result<u32, SeasonError> {
+        seasons::advance_chapter(&env, &admin)
+    }
+
+    /// Record a player's seasonal scan/essence progress and award pass XP.
+    pub fn record_seasonal_participation(
+        env: Env,
+        profile_id: u64,
+        scans: u32,
+        essence: i128,
+    ) -> Result<(), SeasonalRewardsError> {
+        seasons::record_participation(&env, profile_id, scans, essence)?;
+        seasonal_rewards::record_seasonal_activity(&env, profile_id, scans, essence)?;
+        Ok(())
+    }
+
+    /// Record discovery of the season's exclusive nebula and award pass XP.
+    pub fn record_seasonal_nebula_discovery(
+        env: Env,
+        profile_id: u64,
+    ) -> Result<(), SeasonalRewardsError> {
+        seasonal_rewards::record_nebula_discovery(&env, profile_id)
+    }
+
+    /// Admin: end the current season and start the next one.
+    pub fn rollover_season(
+        env: Env,
+        admin: Address,
+        new_title: String,
+        participant_ids: Vec<u64>,
+    ) -> Result<u64, SeasonError> {
+        seasons::rollover_season(&env, &admin, new_title, &participant_ids)
+    }
+
+    /// Admin/keeper: full season transition including ELO ranking reset and
+    /// provisioning of the next season's pass and rotating content.
+    pub fn transition_season(
+        env: Env,
+        admin: Address,
+        new_title: String,
+        participant_ids: Vec<u64>,
+        ranked_players: Vec<Address>,
+    ) -> Result<SeasonTransitionView, SeasonalRewardsError> {
+        seasonal_rewards::transition_season(
+            &env,
+            admin,
+            new_title,
+            participant_ids,
+            ranked_players,
+        )
+    }
+
+    /// Idempotent keeper hook: transitions only when the season has expired.
+    pub fn ensure_season_transition(
+        env: Env,
+        admin: Address,
+        new_title: String,
+        participant_ids: Vec<u64>,
+        ranked_players: Vec<Address>,
+    ) -> Result<Option<SeasonTransitionView>, SeasonalRewardsError> {
+        seasonal_rewards::ensure_season_transition(
+            &env,
+            admin,
+            new_title,
+            participant_ids,
+            ranked_players,
+        )
+    }
+
+    /// One-read seasonal dashboard payload for the frontend.
+    pub fn get_season_dashboard(
+        env: Env,
+        profile_id: Option<u64>,
+    ) -> Result<SeasonDashboard, SeasonalRewardsError> {
+        seasonal_rewards::get_season_dashboard(&env, profile_id)
+    }
+
+    /// Admin: install a season's free/premium reward tables and exclusive content.
+    pub fn init_season_pass(
+        env: Env,
+        admin: Address,
+        season_id: u64,
+    ) -> Result<bool, SeasonalRewardsError> {
+        seasonal_rewards::init_season_pass(&env, admin, season_id)
+    }
+
+    /// Exclusive cosmetics/nebula active for a season.
+    pub fn get_exclusive_content(env: Env, season_id: u64) -> Option<ExclusiveContent> {
+        seasonal_rewards::get_exclusive_content(&env, season_id)
+    }
+
+    /// Admin: refresh a season's rotated content bundle after a theme hotfix.
+    pub fn rotate_exclusive_content(
+        env: Env,
+        admin: Address,
+        season_id: u64,
+    ) -> Result<ExclusiveContent, SeasonalRewardsError> {
+        seasonal_rewards::rotate_exclusive_content(&env, admin, season_id)
+    }
+
+    /// Player's season-pass tier progress for the active season.
+    pub fn get_season_pass_summary(
+        env: Env,
+        profile_id: u64,
+    ) -> Result<SeasonPassSummary, SeasonalRewardsError> {
+        seasonal_rewards::get_season_pass_summary(&env, profile_id)
+    }
+
+    /// Claim a season-pass tier reward from the free or premium track.
+    pub fn claim_season_pass_reward(
+        env: Env,
+        player: Address,
+        profile_id: u64,
+        tier: u32,
+        pass_tier: PassTier,
+    ) -> Result<i128, SeasonalRewardsError> {
+        seasonal_rewards::claim_season_pass_reward(&env, player, profile_id, tier, pass_tier)
+    }
+
+    /// Unlock the cosmetic-only premium pass track for the active season.
+    pub fn unlock_premium_pass(
+        env: Env,
+        player: Address,
+        profile_id: u64,
+    ) -> Result<(), SeasonalRewardsError> {
+        seasonal_rewards::unlock_premium_pass(&env, player, profile_id)
+    }
+
+    /// Admin: create a challenge bounded by the active season window.
+    pub fn create_seasonal_challenge(
+        env: Env,
+        admin: Address,
+        spec: SeasonalChallengeSpec,
+        duration_secs: u64,
+    ) -> Result<u64, SeasonalRewardsError> {
+        seasonal_rewards::create_seasonal_challenge(&env, &admin, spec, duration_secs)
+    }
+
+    /// Record progress toward a challenge in the active season.
+    pub fn record_seasonal_challenge_progress(
+        env: Env,
+        profile_id: u64,
+        challenge_id: u64,
+        metric_delta: u64,
+    ) -> Result<u64, SeasonalRewardsError> {
+        seasonal_rewards::record_seasonal_challenge_progress(
+            &env,
+            profile_id,
+            challenge_id,
+            metric_delta,
+        )
+    }
+
+    /// Claim a completed seasonal challenge (premium rate for pass holders).
+    pub fn claim_seasonal_challenge_reward(
+        env: Env,
+        player: Address,
+        profile_id: u64,
+        challenge_id: u64,
+    ) -> Result<i128, SeasonalRewardsError> {
+        seasonal_rewards::claim_seasonal_challenge_reward(
+            &env,
+            player,
+            profile_id,
+            challenge_id,
+        )
+    }
+
+    /// Open challenges belonging to a season.
+    pub fn get_seasonal_challenges(
+        env: Env,
+        season_id: u64,
+    ) -> Vec<TimeLimitedChallenge> {
+        seasonal_rewards::seasonal_challenges_for_season(&env, season_id)
+    }
+
+    /// Player-facing progress for one seasonal challenge.
+    pub fn get_seasonal_challenge_status(
+        env: Env,
+        profile_id: u64,
+        challenge_id: u64,
+    ) -> Result<ChallengeStatus, SeasonalRewardsError> {
+        seasonal_rewards::get_challenge_status(&env, profile_id, challenge_id)
     }
 
     // ─── Time-Limited Seasonal Events ─────────────────────────────────────

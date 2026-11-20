@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol};
 
 // ─── Duration Constants ───────────────────────────────────────────────────────
 
@@ -10,6 +10,12 @@ pub const CHAPTER_DURATION_SECS: u64 = 30 * 24 * 60 * 60;
 
 /// Number of chapters in a season.
 pub const CHAPTERS_PER_SEASON: u32 = 3;
+
+/// Seasons are three calendar months long (three 30-day chapters).
+pub const SEASON_MONTHS: u32 = 3;
+
+/// Number of distinct themes in the exclusive-content rotation.
+pub const SEASONS_PER_ROTATION: u64 = 6;
 
 // ─── Reward Constants ─────────────────────────────────────────────────────────
 
@@ -47,7 +53,7 @@ pub enum SeasonTheme {
 impl SeasonTheme {
     /// Map a season ID (1-based) to its cycling theme.
     pub fn from_season_id(id: u64) -> SeasonTheme {
-        match (id.saturating_sub(1)) % 6 {
+        match (id.saturating_sub(1)) % SEASONS_PER_ROTATION {
             0 => SeasonTheme::EmberNebula,
             1 => SeasonTheme::VoidTide,
             2 => SeasonTheme::StellarApex,
@@ -196,6 +202,32 @@ pub struct SeasonArchive {
     pub full_chapter_completions: u32,
 }
 
+/// Lifecycle phase of the active season record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub enum SeasonPhase {
+    /// The 90-day window is still open.
+    Active,
+    /// The window has closed; a rollover is due. Queries still work until it runs.
+    Expired,
+}
+
+/// Immutable record of one atomic season-to-season transition.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct SeasonTransition {
+    pub from_season_id: u64,
+    pub to_season_id: u64,
+    pub transitioned_at: u64,
+    pub next_start: u64,
+    pub next_end: u64,
+    /// Timestamp recorded for reset bookkeeping (the full transition path
+    /// archives and clears the seasonal leaderboards at this instant).
+    pub leaderboard_reset_at: u64,
+    pub theme: SeasonTheme,
+    pub seasonal_nebula_type: SeasonNebulaType,
+}
+
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -215,6 +247,8 @@ pub enum SeasonKey {
     NebulaDiscovery(u64, u64),
     /// Number of seasons a profile has participated in.
     ProfileSeasonCount(u64),
+    /// Most recent atomic rollover record.
+    LastTransition,
 }
 
 // ─── Errors ───────────────────────────────────────────────────────────────────
@@ -259,6 +293,39 @@ fn chapter_index(elapsed: u64) -> u32 {
     u32::try_from(elapsed / CHAPTER_DURATION_SECS).map_or(last, |i| i.min(last))
 }
 
+/// Zero-based position of a season in the exclusive-content rotation.
+///
+/// Season 1 maps to 0, season 7 maps to 0 again (six rotating themes).
+pub fn rotation_index(season_id: u64) -> u64 {
+    season_id.saturating_sub(1) % SEASONS_PER_ROTATION
+}
+
+/// Half-open `[start, end)` window for a 90-day season anchored at `genesis_start`.
+///
+/// All math is saturating so a corrupt or far-future season ID cannot wrap the
+/// ledger clock.
+pub fn season_window(season_id: u64, genesis_start: u64) -> (u64, u64) {
+    let elapsed_seasons = season_id.saturating_sub(1).saturating_mul(SEASON_DURATION_SECS);
+    let start = genesis_start.saturating_add(elapsed_seasons);
+    (start, start.saturating_add(SEASON_DURATION_SECS))
+}
+
+/// Derive the season number that owns `timestamp` for a given genesis anchor.
+///
+/// Timestamps before genesis belong to season 1. The subtraction and addition
+/// are saturating, so an extreme timestamp cannot wrap the ledger clock.
+pub fn season_id_at(genesis_start: u64, timestamp: u64) -> u64 {
+    if timestamp < genesis_start {
+        return 1;
+    }
+    1u64.saturating_add((timestamp - genesis_start) / SEASON_DURATION_SECS)
+}
+
+/// Whether `now` has reached the end of `season` (the transition window is open).
+pub fn is_season_expired(season: &Season, now: u64) -> bool {
+    now >= season.end_time
+}
+
 // ─── Initialize ───────────────────────────────────────────────────────────────
 
 /// Initialize the very first season.
@@ -277,7 +344,7 @@ pub fn initialize_season(
 
     let id = 1u64;
     let start_time = env.ledger().timestamp();
-    let end_time = start_time + SEASON_DURATION_SECS;
+    let end_time = start_time.saturating_add(SEASON_DURATION_SECS);
     let theme = SeasonTheme::from_season_id(id);
     let nebula_type = theme.seasonal_nebula_type();
 
@@ -352,6 +419,41 @@ pub fn get_season_time_remaining(env: &Env) -> Result<u64, SeasonError> {
     Ok(season.end_time.saturating_sub(now))
 }
 
+/// Whether a rollover is currently due. Reads never mutate state, so clients
+/// can safely poll this before submitting a transition transaction.
+pub fn is_transition_due(env: &Env) -> Result<bool, SeasonError> {
+    let season = get_current_season(env)?;
+    Ok(is_season_expired(&season, env.ledger().timestamp()))
+}
+
+/// Phase of the active season record.
+pub fn get_season_phase(env: &Env) -> Result<SeasonPhase, SeasonError> {
+    Ok(if is_transition_due(env)? {
+        SeasonPhase::Expired
+    } else {
+        SeasonPhase::Active
+    })
+}
+
+/// Percentage of the 90-day window already elapsed, in basis points.
+pub fn get_season_progress_bps(env: &Env) -> Result<u32, SeasonError> {
+    let season = get_current_season(env)?;
+    let now = env.ledger().timestamp();
+    let elapsed = now.saturating_sub(season.start_time);
+    let elapsed_bps = elapsed
+        .saturating_mul(10_000)
+        .checked_div(SEASON_DURATION_SECS)
+        .unwrap_or(u64::MAX);
+    Ok(u32::try_from(elapsed_bps.min(10_000)).unwrap_or(10_000))
+}
+
+/// Most recent atomic rollover, if one has happened yet.
+pub fn get_last_transition(env: &Env) -> Option<SeasonTransition> {
+    env.storage()
+        .instance()
+        .get(&SeasonKey::LastTransition)
+}
+
 // ─── Chapter Advancement ──────────────────────────────────────────────────────
 
 /// Admin: advance the season's stored `current_chapter` counter.
@@ -418,8 +520,8 @@ pub fn record_participation(
                 found_seasonal_nebula: false,
             });
 
-    stats.total_scans += scans;
-    stats.essence_collected += essence;
+    stats.total_scans = stats.total_scans.saturating_add(scans);
+    stats.essence_collected = stats.essence_collected.saturating_add(essence);
 
     // Track which chapter this participation falls in using a u32 bitmask.
     // Bit 0 = chapter 1, bit 1 = chapter 2, bit 2 = chapter 3.
@@ -479,11 +581,46 @@ pub fn get_participant_stats(
 
 // ─── Season Rollover ──────────────────────────────────────────────────────────
 
-/// Unified season rollover: end the current season, compute and store per-player
-/// rewards, archive it, and immediately start the next season.
+/// Seasonal leaderboards that are archived and cleared at every rollover.
 ///
-/// This replaces the old `end_season` + `reset_season` split.  Call this once
-/// per rollover; the `new_title` argument names the incoming season.
+/// Only these boards use `PERIOD_SEASONAL`; daily/weekly/monthly and all-time
+/// boards deliberately survive the transition.
+pub const SEASONAL_LEADERBOARD_CATEGORIES: [&str; 5] = [
+    crate::leaderboards::CATEGORY_SCANS,
+    crate::leaderboards::CATEGORY_ESSENCE,
+    crate::leaderboards::CATEGORY_PVP_RATING,
+    crate::leaderboards::CATEGORY_PVP_WINS,
+    crate::leaderboards::CATEGORY_SEASONAL_SCORE,
+];
+
+/// Archive and clear every seasonal leaderboard.
+///
+/// Uses the inner (non-authenticating) reset primitive so the surrounding
+/// transition only needs one `require_auth` call. Errors are ignored here: the
+/// category list is a compile-time constant and an empty board simply archives
+/// an empty vector, so a reset must never block a due season rollover.
+fn reset_seasonal_leaderboards(env: &Env, season_id: u64) {
+    for category in SEASONAL_LEADERBOARD_CATEGORIES.iter() {
+        let symbol = Symbol::new(env, *category);
+        let _ =
+            crate::leaderboards::reset_seasonal_leaderboard_silent_inner(env, symbol, season_id);
+    }
+}
+
+/// Keep the ELO season counter aligned with the `seasons` ID and soft-reset
+/// every supplied player's rating by the configured seasonal decay.
+fn apply_ranking_soft_reset(env: &Env, new_season_id: u64, players: soroban_sdk::Vec<Address>) {
+    let advanced = crate::elo_rating::advance_season(env);
+    let mut config = crate::elo_rating::get_season_config(env);
+    config.current_season = u32::try_from(new_season_id).unwrap_or(advanced);
+    env.storage()
+        .persistent()
+        .set(&crate::elo_rating::EloKey::SeasonConfig, &config);
+    crate::elo_rating::apply_seasonal_reset(env, players);
+}
+
+/// Atomic rollover implementation. Authentication is performed by the public
+/// wrappers; callers of this function must have already authenticated `admin`.
 ///
 /// ### Reward formula
 /// ```text
@@ -492,17 +629,18 @@ pub fn get_participant_stats(
 ///        + (all 3 chapters active ? CHAPTER_COMPLETION_BONUS : 0)
 /// ```
 ///
-/// Returns the new season's ID.
-pub fn rollover_season(
+/// `reset_rankings` opts into the ELO/leaderboard resets used by the full
+/// transition path. The legacy `rollover_season` leaves those untouched.
+///
+/// Returns `(new_season_id, transition_record)`.
+pub(crate) fn rollover_season_inner(
     env: &Env,
-    admin: &Address,
+    now: u64,
     new_title: soroban_sdk::String,
     participant_ids: &soroban_sdk::Vec<u64>,
-) -> Result<u64, SeasonError> {
-    admin.require_auth();
-
+    reset_rankings: bool,
+) -> Result<(u64, SeasonTransition), SeasonError> {
     let season = get_current_season(env)?;
-    let now = env.ledger().timestamp();
 
     if now < season.end_time {
         return Err(SeasonError::SeasonNotExpired);
@@ -523,15 +661,22 @@ pub fn rollover_season(
         {
             let chapter_bonus = if (stats.chapters_active & all_chapters_mask) == all_chapters_mask
             {
-                full_completions += 1;
+                full_completions = full_completions.saturating_add(1);
                 CHAPTER_COMPLETION_BONUS
             } else {
                 0
             };
 
-            let reward = i128::from(stats.total_scans) * REWARD_PER_SCAN
-                + stats.essence_collected * ESSENCE_REWARD_BPS / 10_000
-                + chapter_bonus;
+            let reward = i128::from(stats.total_scans)
+                .saturating_mul(REWARD_PER_SCAN)
+                .saturating_add(
+                    stats
+                        .essence_collected
+                        .saturating_mul(ESSENCE_REWARD_BPS)
+                        .checked_div(10_000)
+                        .unwrap_or(0),
+                )
+                .saturating_add(chapter_bonus);
 
             env.storage()
                 .persistent()
@@ -549,10 +694,10 @@ pub fn rollover_season(
                 .unwrap_or(0);
             env.storage()
                 .persistent()
-                .set(&season_count_key, &(prev_count + 1));
+                .set(&season_count_key, &prev_count.saturating_add(1));
 
-            total_essence += stats.essence_collected;
-            total_rewards += reward;
+            total_essence = total_essence.saturating_add(stats.essence_collected);
+            total_rewards = total_rewards.saturating_add(reward);
         }
     }
 
@@ -569,14 +714,20 @@ pub fn rollover_season(
         .instance()
         .set(&SeasonKey::ArchivedSeason(season.id), &archive);
 
+    // The full transition path archives + clears rankings before the new
+    // season goes live. The legacy rollover keeps its original side effects.
+    if reset_rankings {
+        reset_seasonal_leaderboards(env, season.id);
+    }
+
     // Start the next season immediately with the theme derived from its new ID.
-    let new_id = season.id + 1;
+    let new_id = season.id.saturating_add(1);
     let new_theme = SeasonTheme::from_season_id(new_id);
     let new_nebula_type = new_theme.seasonal_nebula_type();
 
     let new_config = SeasonConfig {
-        theme: new_theme,
-        seasonal_nebula_type: new_nebula_type,
+        theme: new_theme.clone(),
+        seasonal_nebula_type: new_nebula_type.clone(),
         free_pass_tiers: 30,
         premium_pass_tiers: 50,
         leaderboard_reset_at: now,
@@ -586,7 +737,7 @@ pub fn rollover_season(
     let new_season = Season {
         id: new_id,
         start_time: now,
-        end_time: now + SEASON_DURATION_SECS,
+        end_time: now.saturating_add(SEASON_DURATION_SECS),
         title: new_title,
         config: new_config,
         current_chapter: 1u32,
@@ -599,6 +750,20 @@ pub fn rollover_season(
         .instance()
         .set(&SeasonKey::SeasonCount, &new_id);
 
+    let transition = SeasonTransition {
+        from_season_id: season.id,
+        to_season_id: new_id,
+        transitioned_at: now,
+        next_start: new_season.start_time,
+        next_end: new_season.end_time,
+        leaderboard_reset_at: now,
+        theme: new_theme,
+        seasonal_nebula_type: new_nebula_type,
+    };
+    env.storage()
+        .instance()
+        .set(&SeasonKey::LastTransition, &transition);
+
     // A rollover is one atomic transition (old season archived, new one live),
     // so a single event carries both sides instead of `ended` + `started`.
     env.events().publish(
@@ -606,7 +771,64 @@ pub fn rollover_season(
         (season.id, new_id, now, total_rewards, new_season.end_time),
     );
 
+    Ok((new_id, transition))
+}
+
+/// Unified season rollover: end the current season, compute and store per-player
+/// rewards, archive it, and immediately start the next 90-day season with the
+/// next rotating theme.
+///
+/// This preserves the original public API and its side effects. Use
+/// `rollover_season_with_rankings` or `ensure_season_transition` when the
+/// leaderboard/ELO resets are also required. Returns the new season's ID.
+pub fn rollover_season(
+    env: &Env,
+    admin: &Address,
+    new_title: soroban_sdk::String,
+    participant_ids: &soroban_sdk::Vec<u64>,
+) -> Result<u64, SeasonError> {
+    admin.require_auth();
+    let now = env.ledger().timestamp();
+    let (new_id, _) = rollover_season_inner(env, now, new_title, participant_ids, false)?;
     Ok(new_id)
+}
+
+/// Rollover variant that also soft-resets ELO ratings for `ranked_players`.
+///
+/// The ELO season counter is aligned with the new `seasons` ID before decay is
+/// applied, so ranking queries and archival agree on the season number.
+pub fn rollover_season_with_rankings(
+    env: &Env,
+    admin: &Address,
+    new_title: soroban_sdk::String,
+    participant_ids: &soroban_sdk::Vec<u64>,
+    ranked_players: soroban_sdk::Vec<Address>,
+) -> Result<(u64, SeasonTransition), SeasonError> {
+    admin.require_auth();
+    let now = env.ledger().timestamp();
+    let result = rollover_season_inner(env, now, new_title, participant_ids, true)?;
+    apply_ranking_soft_reset(env, result.0, ranked_players);
+    Ok(result)
+}
+
+/// Idempotent keeper entry point: rolls over only when the 90-day window has
+/// actually elapsed. Returns `None` (and writes nothing) when too early.
+pub fn ensure_season_transition(
+    env: &Env,
+    admin: &Address,
+    new_title: soroban_sdk::String,
+    participant_ids: &soroban_sdk::Vec<u64>,
+    ranked_players: soroban_sdk::Vec<Address>,
+) -> Result<Option<(u64, SeasonTransition)>, SeasonError> {
+    admin.require_auth();
+    let season = get_current_season(env)?;
+    let now = env.ledger().timestamp();
+    if !is_season_expired(&season, now) {
+        return Ok(None);
+    }
+    let result = rollover_season_inner(env, now, new_title, participant_ids, true)?;
+    apply_ranking_soft_reset(env, result.0, ranked_players);
+    Ok(Some(result))
 }
 
 // ─── Reward Claiming ──────────────────────────────────────────────────────────
@@ -653,4 +875,92 @@ pub fn get_profile_season_count(env: &Env, profile_id: u64) -> u32 {
         .persistent()
         .get(&SeasonKey::ProfileSeasonCount(profile_id))
         .unwrap_or(0)
+}
+
+// ─── Pure Logic Tests ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seasons_are_90_days_in_three_chapters() {
+        assert_eq!(SEASON_DURATION_SECS, 90 * 24 * 60 * 60);
+        assert_eq!(CHAPTER_DURATION_SECS, 30 * 24 * 60 * 60);
+        assert_eq!(CHAPTERS_PER_SEASON, SEASON_MONTHS);
+        assert_eq!(CHAPTER_DURATION_SECS * u64::from(CHAPTERS_PER_SEASON), SEASON_DURATION_SECS);
+
+        let genesis = 1_000_000u64;
+        let (start, end) = season_window(1, genesis);
+        assert_eq!(start, genesis);
+        assert_eq!(end - start, SEASON_DURATION_SECS);
+        let (next_start, next_end) = season_window(2, genesis);
+        assert_eq!(next_start, end);
+        assert_eq!(next_end - next_start, SEASON_DURATION_SECS);
+    }
+
+    #[test]
+    fn timestamps_map_to_the_owning_season() {
+        let genesis = 10_000u64;
+        assert_eq!(season_id_at(genesis, genesis - 1), 1);
+        assert_eq!(season_id_at(genesis, genesis), 1);
+        assert_eq!(season_id_at(genesis, genesis + SEASON_DURATION_SECS - 1), 1);
+        assert_eq!(season_id_at(genesis, genesis + SEASON_DURATION_SECS), 2);
+        assert_eq!(season_id_at(genesis, genesis + 6 * SEASON_DURATION_SECS), 7);
+        let last_id = 1u64 + (u64::MAX - genesis) / SEASON_DURATION_SECS;
+        assert_eq!(season_id_at(genesis, u64::MAX), last_id);
+    }
+
+    #[test]
+    fn chapters_are_clamped_and_themes_rotate() {
+        assert_eq!(chapter_index(0), 0);
+        assert_eq!(chapter_index(CHAPTER_DURATION_SECS - 1), 0);
+        assert_eq!(chapter_index(CHAPTER_DURATION_SECS), 1);
+        assert_eq!(chapter_index(2 * CHAPTER_DURATION_SECS), 2);
+        assert_eq!(chapter_index(u64::MAX), 2);
+
+        assert_eq!(rotation_index(1), 0);
+        assert_eq!(rotation_index(6), 5);
+        assert_eq!(rotation_index(7), 0);
+        assert_eq!(
+            SeasonTheme::from_season_id(3).seasonal_nebula_type(),
+            SeasonNebulaType::CrystalPeak
+        );
+    }
+
+    #[test]
+    fn seasonal_reward_pool_scales_with_theme_and_exclusivity() {
+        let base = 1_000i128;
+        let ember = seasonal_event_reward_pool(&SeasonTheme::EmberNebula, base, false).unwrap();
+        let exclusive = seasonal_event_reward_pool(&SeasonTheme::EmberNebula, base, true).unwrap();
+        assert_eq!(ember, 1_100);
+        assert_eq!(exclusive, 1_350);
+        assert_eq!(
+            seasonal_event_reward_pool(&SeasonTheme::NovaBurst, base, false),
+            Some(1_500)
+        );
+        assert_eq!(seasonal_event_reward_pool(&SeasonTheme::NovaBurst, 0, false), None);
+        assert_eq!(seasonal_event_reward_pool(&SeasonTheme::NovaBurst, -5, false), None);
+    }
+
+    #[test]
+    fn expiry_is_inclusive_of_the_end_timestamp() {
+        let season = Season {
+            id: 1,
+            start_time: 0,
+            end_time: SEASON_DURATION_SECS,
+            title: soroban_sdk::String::from_str(&Env::default(), "S1"),
+            config: SeasonConfig {
+                theme: SeasonTheme::EmberNebula,
+                seasonal_nebula_type: SeasonNebulaType::EmberCloud,
+                free_pass_tiers: 30,
+                premium_pass_tiers: 50,
+                leaderboard_reset_at: 0,
+                nebula_bonus_active: true,
+            },
+            current_chapter: 1,
+        };
+        assert!(!is_season_expired(&season, SEASON_DURATION_SECS - 1));
+        assert!(is_season_expired(&season, SEASON_DURATION_SECS));
+    }
 }

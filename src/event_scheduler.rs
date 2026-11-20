@@ -937,6 +937,14 @@ pub fn get_challenge_progress(
         .get(&EventKey::ChallengeProgress(challenge_id, profile_id))
 }
 
+/// Whether a player has already claimed a challenge reward.
+pub fn is_challenge_claimed(env: &Env, challenge_id: u64, profile_id: u64) -> bool {
+    env.storage()
+        .persistent()
+        .get(&EventKey::ChallengeClaimed(challenge_id, profile_id))
+        .unwrap_or(false)
+}
+
 /// Get all active event IDs.
 pub fn get_active_events(env: &Env) -> Vec<u64> {
     env.storage()

@@ -677,7 +677,8 @@ pub fn reset_if_due(
 ///
 /// Uses the existing `LeaderboardDataKey::Archive(category, PERIOD_SEASONAL,
 /// season_number)` key — `season_id` is cast to `u32` as the archive index.
-/// Called automatically during `rollover_season` in `seasons.rs`.
+/// Called automatically by the full season transition in `seasons.rs` /
+/// `seasonal_rewards.rs`.
 ///
 /// Returns the newly bumped season number for this board.
 pub fn reset_seasonal_leaderboard(
@@ -687,6 +688,35 @@ pub fn reset_seasonal_leaderboard(
     season_id: u64,
 ) -> Result<u32, LeaderboardError> {
     require_admin(env, caller)?;
+    reset_seasonal_leaderboard_inner(env, category, season_id)
+}
+
+/// Archive-and-clear implementation without the admin auth check.
+///
+/// Used by the atomic season rollover, which authenticates once for the whole
+/// transition. External callers should use `reset_seasonal_leaderboard`.
+pub fn reset_seasonal_leaderboard_inner(
+    env: &Env,
+    category: Symbol,
+    season_id: u64,
+) -> Result<u32, LeaderboardError> {
+    let next_season = reset_seasonal_leaderboard_silent_inner(env, category.clone(), season_id)?;
+    env.events().publish(
+        (symbol_short!("lb"), symbol_short!("seas_rst")),
+        (category, season_id, next_season),
+    );
+    Ok(next_season)
+}
+
+/// Same reset without the event emission, for the atomic season rollover.
+///
+/// Keeping the rollover at one `season/rolled` event preserves the existing gas
+/// and emission contract; the transition record itself is the audit trail.
+pub fn reset_seasonal_leaderboard_silent_inner(
+    env: &Env,
+    category: Symbol,
+    season_id: u64,
+) -> Result<u32, LeaderboardError> {
     validate_category(env, &category)?;
 
     let period_sym = Symbol::new(env, PERIOD_SEASONAL);
@@ -719,11 +749,6 @@ pub fn reset_seasonal_leaderboard(
     env.storage().persistent().set(
         &LeaderboardDataKey::LastReset(category.clone(), period_sym.clone()),
         &env.ledger().timestamp(),
-    );
-
-    env.events().publish(
-        (symbol_short!("lb"), symbol_short!("seas_rst")),
-        (category, season_id, next_season),
     );
 
     Ok(next_season)
@@ -897,6 +922,7 @@ fn validate_category(env: &Env, category: &Symbol) -> Result<(), LeaderboardErro
         || c == Symbol::new(env, CATEGORY_PVP_RATING)
         || c == Symbol::new(env, CATEGORY_GUILD_CONTRIBUTION)
         || c == Symbol::new(env, CATEGORY_ACHIEVEMENTS)
+        || c == Symbol::new(env, CATEGORY_SEASONAL_SCORE)
     {
         Ok(())
     } else {
