@@ -28,6 +28,9 @@ export * from './feedback/ErrorBoundary';
 export * from './feedback/ToastNotification';
 export * from './feedback/ConfirmDialog';
 
+// Admin / safety components
+export * from './AntiCheatReviewDashboard';
+
 // Analytics components
 export * from './analytics/SystemHealthPanel';
 export * from './analytics/UserMetricsPanel';

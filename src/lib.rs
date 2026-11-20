@@ -50,6 +50,8 @@ mod onboarding_tutorial;
 mod player_profile;
 mod player_segmentation;
 mod pvp_combat;
+/// Server-side anti-cheat detection, scoring, review and appeals for PvP (Issue #593).
+pub mod anti_cheat;
 mod referral_system;
 /// Rate-limited resource minting and the player balance ledger.
 pub mod resource_minter;
@@ -243,6 +245,16 @@ pub use pvp_combat::{
     MatchmakingEntry, PvPError, RewardsConfig, SpectatorInfo, COMBAT_TIMEOUT,
     ELO_DECAY_BASE_POINTS, ELO_DECAY_FLOOR, ELO_DECAY_INACTIVITY_SECS, INITIAL_ELO, K_FACTOR,
     MAX_ENERGY, MAX_HP, MAX_QUEUE_SIZE, MAX_SPECTATORS,
+};
+// Issue #593 — anti-cheat detection, suspicion scoring, review and appeals.
+pub use anti_cheat::{
+    AntiCheatConfig, AntiCheatError, AppealRecord as AntiCheatAppeal,
+    AppealStatus as AntiCheatAppealStatus, DetectionRecord as AntiCheatDetection,
+    DetectionType as AntiCheatDetectionType, PenaltyKind as AntiCheatPenalty,
+    PlayerRiskProfile as AntiCheatProfile, ReviewDecision as AntiCheatReviewDecision,
+    Severity as AntiCheatSeverity, APPEAL_WINDOW_SECS as DEFAULT_APPEAL_WINDOW_SECS,
+    DEFAULT_PERMANENT_BAN_THRESHOLD, DEFAULT_REVIEW_THRESHOLD, DEFAULT_TEMP_BAN_THRESHOLD,
+    DEFAULT_WARNING_THRESHOLD, MAX_SCORE as ANTI_CHEAT_MAX_SCORE,
 };
 // Issue #590 — ELO rating system with 8 tiers, K-factor, seasonal adjustments.
 pub use elo_rating::{
@@ -4548,6 +4560,96 @@ impl NebulaNomadContract {
     /// Add a guest to a friends-only house.
     pub fn add_house_guest(env: Env, owner: Address, guest: Address) -> Result<(), HousingError> {
         player_housing::add_guest(&env, owner, guest)
+    }
+
+    // === Anti-Cheat Detection & Review (Issue #593) ===
+
+    /// Bootstrap or rotate the anti-cheat administrator.
+    pub fn ac_set_admin(env: Env, caller: Address, admin: Address) -> Result<(), AntiCheatError> {
+        anti_cheat::set_admin(&env, &caller, &admin)
+    }
+
+    /// Update anti-cheat thresholds (admin only).
+    pub fn ac_set_config(
+        env: Env,
+        caller: Address,
+        config: AntiCheatConfig,
+    ) -> Result<(), AntiCheatError> {
+        anti_cheat::set_config(&env, &caller, config)
+    }
+
+    /// Current anti-cheat thresholds.
+    pub fn ac_get_config(env: Env) -> AntiCheatConfig {
+        anti_cheat::get_config(&env)
+    }
+
+    /// Current suspicion profile for a player.
+    pub fn ac_get_profile(env: Env, player: Address) -> AntiCheatProfile {
+        anti_cheat::get_profile(&env, &player)
+    }
+
+    /// Whether a player is currently banned from PvP actions.
+    pub fn ac_is_banned(env: Env, player: Address) -> bool {
+        anti_cheat::is_banned(&env, &player)
+    }
+
+    /// Fetch a single detection record by id.
+    pub fn ac_get_detection(
+        env: Env,
+        detection_id: u64,
+    ) -> Result<AntiCheatDetection, AntiCheatError> {
+        anti_cheat::get_detection(&env, detection_id)
+    }
+
+    /// Most recent detections for a player (bounded by `limit`).
+    pub fn ac_get_player_detections(
+        env: Env,
+        player: Address,
+        limit: u32,
+    ) -> Vec<AntiCheatDetection> {
+        anti_cheat::get_player_detections(&env, &player, limit)
+    }
+
+    /// Detections awaiting manual admin review (bounded by `limit`).
+    pub fn ac_get_review_queue(env: Env, limit: u32) -> Vec<AntiCheatDetection> {
+        anti_cheat::get_review_queue(&env, limit)
+    }
+
+    /// Resolve a queued detection (admin only).
+    pub fn ac_resolve_review(
+        env: Env,
+        admin: Address,
+        detection_id: u64,
+        decision: AntiCheatReviewDecision,
+        reason: Symbol,
+    ) -> Result<(), AntiCheatError> {
+        anti_cheat::resolve_review(&env, &admin, detection_id, decision, reason)
+    }
+
+    /// File an appeal for a detection (player only, within appeal window).
+    pub fn ac_submit_appeal(
+        env: Env,
+        player: Address,
+        detection_id: u64,
+        reason: Symbol,
+    ) -> Result<u64, AntiCheatError> {
+        anti_cheat::submit_appeal(&env, &player, detection_id, reason)
+    }
+
+    /// Fetch an appeal by id.
+    pub fn ac_get_appeal(env: Env, appeal_id: u64) -> Result<AntiCheatAppeal, AntiCheatError> {
+        anti_cheat::get_appeal(&env, appeal_id)
+    }
+
+    /// Approve or reject an appeal (admin only).
+    pub fn ac_resolve_appeal(
+        env: Env,
+        admin: Address,
+        appeal_id: u64,
+        approve: bool,
+        reason: Symbol,
+    ) -> Result<(), AntiCheatError> {
+        anti_cheat::resolve_appeal(&env, &admin, appeal_id, approve, reason)
     }
 }
 

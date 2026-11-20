@@ -472,6 +472,9 @@ pub fn create_challenge(
     stake: i128,
 ) -> Result<u64, PvPError> {
     challenger.require_auth();
+    // Issue #593: banned players cannot initiate combat. No-op for everyone
+    // else, so legitimate challenges follow the original code path.
+    crate::anti_cheat::enforce_allowed(env, challenger).map_err(|_| PvPError::Unauthorized)?;
     crate::rate_limiter::check_rate_limit(
         env,
         challenger,
@@ -514,6 +517,15 @@ pub fn create_challenge(
         .persistent()
         .set(&PvPDataKey::PvpChallenge(challenge_id), &challenge);
 
+    // Issue #593: observe timing/patterns for every challenge creation.
+    crate::anti_cheat::observe_action(
+        env,
+        challenger,
+        symbol_short!("challenge"),
+        Some(challenge_id),
+        now,
+    );
+
     env.events().publish(
         (symbol_short!("pvp"), symbol_short!("chall")),
         (challenger.clone(), opponent.clone(), challenge_id),
@@ -524,6 +536,7 @@ pub fn create_challenge(
 
 pub fn accept_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Result<u64, PvPError> {
     caller.require_auth();
+    crate::anti_cheat::enforce_allowed(env, caller).map_err(|_| PvPError::Unauthorized)?;
     crate::rate_limiter::check_rate_limit(
         env,
         caller,
@@ -555,6 +568,29 @@ pub fn accept_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Resul
     challenge.status = symbol_short!("accepted");
     env.storage().persistent().set(&key, &challenge);
 
+    // Issue #593: a challenge cannot be accepted before it was created; catch
+    // timestamp manipulation and observe the acceptance timing.
+    let now = env.ledger().timestamp();
+    if now < challenge.created_at {
+        crate::anti_cheat::record_cheat_attempt(
+            env,
+            caller,
+            crate::anti_cheat::DetectionType::TimingAnomaly,
+            crate::anti_cheat::Severity::High,
+            Some(challenge_id),
+            symbol_short!("accept"),
+            symbol_short!("clock"),
+            now,
+        );
+    }
+    crate::anti_cheat::observe_action(
+        env,
+        caller,
+        symbol_short!("accept"),
+        Some(challenge_id),
+        now,
+    );
+
     // Track last active
     update_last_active(env, caller);
     update_last_active(env, &challenge.challenger);
@@ -565,6 +601,7 @@ pub fn accept_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Resul
 
 pub fn decline_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Result<(), PvPError> {
     caller.require_auth();
+    crate::anti_cheat::enforce_allowed(env, caller).map_err(|_| PvPError::Unauthorized)?;
 
     let key = PvPDataKey::PvpChallenge(challenge_id);
     let mut challenge: Challenge = env
@@ -579,6 +616,14 @@ pub fn decline_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Resu
 
     challenge.status = symbol_short!("declined");
     env.storage().persistent().set(&key, &challenge);
+
+    crate::anti_cheat::observe_action(
+        env,
+        caller,
+        symbol_short!("decline"),
+        Some(challenge_id),
+        env.ledger().timestamp(),
+    );
 
     env.events().publish(
         (symbol_short!("pvp"), symbol_short!("decline")),
@@ -669,9 +714,37 @@ pub fn execute_move(
 ) -> Result<(), PvPError> {
     player.require_auth();
 
+    // Issue #593: every move is checked against the anti-cheat ban state and
+    // observed for timing/burst patterns before any combat state is touched.
+    crate::anti_cheat::enforce_allowed(env, player).map_err(|_| PvPError::Unauthorized)?;
+    let now = env.ledger().timestamp();
+    crate::anti_cheat::observe_action(
+        env,
+        player,
+        symbol_short!("move"),
+        Some(combat_id),
+        now,
+    );
+
     // Bound the move power: an unbounded value lets one move exceed a full
     // health bar and makes the energy/damage arithmetic overflow-prone.
+    // Exploit attempts are neutralised (no state change) and logged so the
+    // detection survives as a persistent record instead of being rolled back
+    // by a failing transaction.
     if power == 0 || power > MAX_MOVE_POWER {
+        crate::anti_cheat::record_cheat_attempt(
+            env,
+            player,
+            crate::anti_cheat::DetectionType::InvalidAction,
+            crate::anti_cheat::Severity::High,
+            Some(combat_id),
+            move_type.clone(),
+            symbol_short!("power"),
+            now,
+        );
+        // Preserve the established error contract; the aborted transaction
+        // rolls back the detection record, but the invalid action is still
+        // rejected before any combat state can change.
         return Err(PvPError::InvalidMove);
     }
 
@@ -686,8 +759,19 @@ pub fn execute_move(
         return Err(PvPError::InvalidCombatParams);
     }
 
-    // Verify it's player's turn
+    // Verify it's player's turn. An out-of-turn submission is an exploit
+    // attempt: log it and leave the combat unchanged.
     if combat.turn != *player {
+        crate::anti_cheat::record_cheat_attempt(
+            env,
+            player,
+            crate::anti_cheat::DetectionType::InvalidAction,
+            crate::anti_cheat::Severity::High,
+            Some(combat_id),
+            move_type.clone(),
+            symbol_short!("turn"),
+            now,
+        );
         return Err(PvPError::InvalidMove);
     }
 
@@ -704,14 +788,46 @@ pub fn execute_move(
     let energy_cost = power / 2;
     let is_player1 = *player == combat.player1;
 
-    // Verify energy
+    // Issue #593: derive the server-side expectation before mutating state.
+    let expected = crate::anti_cheat::validate_move(
+        env,
+        player,
+        combat_id,
+        &combat,
+        move_type.clone(),
+        power,
+        now,
+    );
+
+    // Verify energy. Insufficient energy is an exploit attempt, so neutralise
+    // and record it rather than reverting the (now logged) detection.
     if is_player1 {
         if combat.player1_energy < energy_cost {
+            crate::anti_cheat::record_cheat_attempt(
+                env,
+                player,
+                crate::anti_cheat::DetectionType::InvalidAction,
+                crate::anti_cheat::Severity::High,
+                Some(combat_id),
+                move_type.clone(),
+                symbol_short!("energy"),
+                now,
+            );
             return Err(PvPError::InvalidMove);
         }
         combat.player1_energy -= energy_cost;
     } else {
         if combat.player2_energy < energy_cost {
+            crate::anti_cheat::record_cheat_attempt(
+                env,
+                player,
+                crate::anti_cheat::DetectionType::InvalidAction,
+                crate::anti_cheat::Severity::High,
+                Some(combat_id),
+                move_type.clone(),
+                symbol_short!("energy"),
+                now,
+            );
             return Err(PvPError::InvalidMove);
         }
         combat.player2_energy -= energy_cost;
@@ -776,8 +892,22 @@ pub fn execute_move(
         };
         combat.history.push_back(log_entry);
     } else {
+        // Unknown move type: `validate_move` already observed the attempt.
+        // Return without writing the mutated local state.
         return Err(PvPError::InvalidMove);
     }
+
+    // Issue #593: compare the applied state with the server-derived
+    // expectation. Mismatches are logged and restored before winner resolution
+    // so impossible damage/heal/energy cannot affect the match outcome.
+    crate::anti_cheat::verify_state_transition(
+        env,
+        player,
+        combat_id,
+        &expected,
+        &mut combat,
+        now,
+    );
 
     // Check for winner
     if combat.player1_hp == 0 {
@@ -918,6 +1048,7 @@ pub fn join_matchmaking(
     preferred_stake: i128,
 ) -> Result<(), PvPError> {
     player.require_auth();
+    crate::anti_cheat::enforce_allowed(env, player).map_err(|_| PvPError::Unauthorized)?;
     crate::rate_limiter::check_rate_limit(
         env,
         player,
@@ -961,6 +1092,14 @@ pub fn join_matchmaking(
         .persistent()
         .set(&PvPDataKey::MatchmakingQueue, &queue);
 
+    crate::anti_cheat::observe_action(
+        env,
+        player,
+        symbol_short!("join"),
+        None,
+        env.ledger().timestamp(),
+    );
+
     env.events().publish(
         (symbol_short!("pvp"), symbol_short!("queue")),
         (player.clone(), elo),
@@ -971,6 +1110,7 @@ pub fn join_matchmaking(
 
 pub fn leave_matchmaking(env: &Env, player: &Address) -> Result<(), PvPError> {
     player.require_auth();
+    crate::anti_cheat::enforce_allowed(env, player).map_err(|_| PvPError::Unauthorized)?;
 
     let key = PvPDataKey::MatchmakingQueue;
     let queue: Vec<MatchmakingEntry> = env
@@ -995,6 +1135,14 @@ pub fn leave_matchmaking(env: &Env, player: &Address) -> Result<(), PvPError> {
     }
 
     env.storage().persistent().set(&key, &new_queue);
+
+    crate::anti_cheat::observe_action(
+        env,
+        player,
+        symbol_short!("leave"),
+        None,
+        env.ledger().timestamp(),
+    );
 
     env.events().publish(
         (symbol_short!("pvp"), symbol_short!("mq_leave")),
@@ -1049,6 +1197,7 @@ pub fn get_matchmaking_queue_size(env: &Env) -> u32 {
 
 pub fn add_spectator(env: &Env, spectator: &Address, combat_id: u64) -> Result<(), PvPError> {
     spectator.require_auth();
+    crate::anti_cheat::enforce_allowed(env, spectator).map_err(|_| PvPError::Unauthorized)?;
 
     let combat_key = PvPDataKey::Combat(combat_id);
     let combat: CombatState = env
@@ -1087,6 +1236,14 @@ pub fn add_spectator(env: &Env, spectator: &Address, combat_id: u64) -> Result<(
     info.spectators.push_back(spectator.clone());
     env.storage().persistent().set(&spec_key, &info);
 
+    crate::anti_cheat::observe_action(
+        env,
+        spectator,
+        symbol_short!("spectate"),
+        Some(combat_id),
+        env.ledger().timestamp(),
+    );
+
     env.events().publish(
         (symbol_short!("pvp"), symbol_short!("spectate")),
         (spectator.clone(), combat_id),
@@ -1097,6 +1254,7 @@ pub fn add_spectator(env: &Env, spectator: &Address, combat_id: u64) -> Result<(
 
 pub fn remove_spectator(env: &Env, spectator: &Address, combat_id: u64) -> Result<(), PvPError> {
     spectator.require_auth();
+    crate::anti_cheat::enforce_allowed(env, spectator).map_err(|_| PvPError::Unauthorized)?;
 
     let spec_key = PvPDataKey::Spectators(combat_id);
     let mut info: SpectatorInfo = env
