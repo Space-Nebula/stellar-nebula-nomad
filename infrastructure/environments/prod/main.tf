@@ -51,5 +51,14 @@ module "database" {
 
 module "secrets" {
   source      = "../../modules/secrets"
-  environment = "prod"
+  environment = "production"
+}
+
+module "cdn" {
+  source      = "../../modules/cdn"
+  environment = "production"
+}
+
+output "cdn_url" {
+  value = module.cdn.distribution_url
 }

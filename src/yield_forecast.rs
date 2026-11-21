@@ -92,6 +92,37 @@ pub struct YieldForecast {
     pub model_version: u32,
 }
 
+/// Risk bucket for a player's yield history.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[contracttype]
+pub enum YieldRiskLevel {
+    /// Not enough history to judge (fewer than 2 points).
+    Unknown,
+    Low,
+    Medium,
+    High,
+}
+
+/// Risk and trend summary used to recommend a strategy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct YieldRiskReport {
+    pub data_points: u32,
+    pub average_yield: i128,
+    /// Average change per day (can be negative).
+    pub trend_per_day: i128,
+    /// Mean absolute deviation as a % of the average yield.
+    pub volatility_pct: i128,
+    pub level: YieldRiskLevel,
+    /// `hold`, `diversify`, `reduce` or `observe`.
+    pub recommendation: Symbol,
+}
+
+/// Volatility (%) at or below which yield counts as low risk.
+pub const LOW_RISK_VOLATILITY_PCT: i128 = 15;
+/// Volatility (%) above which yield counts as high risk.
+pub const HIGH_RISK_VOLATILITY_PCT: i128 = 40;
+
 /// Model parameters for yield prediction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[contracttype]
@@ -200,21 +231,37 @@ pub fn generate_yield_forecast(
     let volatility = calculate_volatility(env, &recent_data);
 
     // Apply adjustments
-    let trend_adjustment = (trend * params.trend_weight as i128) / 100;
-    let volatility_dampening = 100 - ((volatility * params.volatility_adjustment as i128) / 10000);
+    // Forecast math is derived (non-state) data: clamp rather than trap so a
+    // pathological input cannot abort a read-only forecast call. Balances and
+    // rewards never use saturating math — those paths use checked_* helpers.
+    let trend_adjustment = crate::safe_math::saturating_mul_div_i128(
+        trend,
+        i128::from(params.trend_weight),
+        100,
+    );
+    let volatility_dampening = 100_i128.saturating_sub(
+        crate::safe_math::saturating_mul_div_i128(
+            volatility,
+            i128::from(params.volatility_adjustment),
+            10_000,
+        ),
+    );
 
     // Calculate predicted yield per day
-    let base_daily = avg_yield + trend_adjustment;
-    let adjusted_daily = (base_daily * volatility_dampening) / 100;
+    let base_daily = crate::safe_math::saturating_add_i128(avg_yield, trend_adjustment);
+    let adjusted_daily =
+        crate::safe_math::saturating_mul_div_i128(base_daily, volatility_dampening, 100);
 
     // Total forecast for requested days
-    let predicted_yield = adjusted_daily * days as i128;
+    let predicted_yield = adjusted_daily.saturating_mul(i128::from(days));
 
     // Calculate confidence score (0-100)
     // Based on data volume and volatility
-    let data_points_score = (history.len().min(100) * 50) / 100; // Up to 50 points
-    let volatility_penalty = (volatility.min(100) * 50) / 100; // Up to -50 points
-    let confidence_score = data_points_score as u32 + 50 - volatility_penalty as u32;
+    let data_points_score = (history.len().min(100) as u32).saturating_mul(50) / 100; // Up to 50 points
+    let volatility_penalty = (volatility.clamp(0, 100) as u32).saturating_mul(50) / 100; // Up to -50 points
+    let confidence_score = data_points_score
+        .saturating_add(50)
+        .saturating_sub(volatility_penalty);
     let confidence_score = confidence_score.min(100);
 
     let forecast = YieldForecast {
@@ -438,6 +485,55 @@ fn calculate_volatility(env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
         (mad * 100) / avg
     } else {
         mad
+    }
+}
+
+/// Maps volatility and trend to a risk level and a recommended action.
+fn classify_risk(
+    env: &Env,
+    points: u32,
+    volatility_pct: i128,
+    trend: i128,
+) -> (YieldRiskLevel, Symbol) {
+    if points < 2 {
+        return (YieldRiskLevel::Unknown, Symbol::new(env, "observe"));
+    }
+    let level = if volatility_pct <= LOW_RISK_VOLATILITY_PCT {
+        YieldRiskLevel::Low
+    } else if volatility_pct <= HIGH_RISK_VOLATILITY_PCT {
+        YieldRiskLevel::Medium
+    } else {
+        YieldRiskLevel::High
+    };
+    let action = match level {
+        YieldRiskLevel::High if trend < 0 => "reduce",
+        YieldRiskLevel::High | YieldRiskLevel::Medium => "diversify",
+        _ if trend < 0 => "diversify",
+        _ => "hold",
+    };
+    (level, Symbol::new(env, action))
+}
+
+/// Risk analysis of a player's recorded yield history: average, daily trend,
+/// volatility, a risk level and a recommended action.
+pub fn analyze_yield_risk(env: &Env, player: &Address) -> YieldRiskReport {
+    let history = get_player_history(env, player);
+    let points = history.len();
+    let average_yield = if points == 0 {
+        0
+    } else {
+        calculate_moving_average(env, &history)
+    };
+    let trend_per_day = calculate_trend(env, &history);
+    let volatility_pct = calculate_volatility(env, &history);
+    let (level, recommendation) = classify_risk(env, points, volatility_pct, trend_per_day);
+    YieldRiskReport {
+        data_points: points,
+        average_yield,
+        trend_per_day,
+        volatility_pct,
+        level,
+        recommendation,
     }
 }
 

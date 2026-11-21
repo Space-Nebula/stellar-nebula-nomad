@@ -1,4 +1,7 @@
 import React from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
+import { actionButtonStyle } from './actionButtonStyle';
 
 export interface MintButtonProps {
   onMint: () => void | Promise<void>;
@@ -13,33 +16,18 @@ export const MintButton: React.FC<MintButtonProps> = ({
   costXlm = 50,
   disabled = false,
 }) => {
+  const { t, formatNumber } = useI18n();
   return (
     <button
       type="button"
       onClick={onMint}
       disabled={disabled || isLoading}
       aria-busy={isLoading}
-      style={{
-        backgroundColor: '#10B981',
-        color: '#FFFFFF',
-        border: 'none',
-        borderRadius: '8px',
-        padding: '10px 18px',
-        fontSize: '0.9rem',
-        fontWeight: 700,
-        cursor: disabled || isLoading ? 'not-allowed' : 'pointer',
-        opacity: disabled || isLoading ? 0.6 : 1,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '8px',
-      }}
+      style={actionButtonStyle(colors.successFill, colors.textOnAccent, disabled || isLoading)}
     >
-      {isLoading ? (
-        <span>Minting on Soroban...</span>
-      ) : (
-        <span>Mint Ship ({costXlm} XLM)</span>
-      )}
+      <span aria-live="polite">
+        {isLoading ? t('actions.minting') : t('actions.mint', { cost: formatNumber(costXlm) })}
+      </span>
     </button>
   );
 };

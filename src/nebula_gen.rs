@@ -516,6 +516,25 @@ impl NebulaGen {
         Ok(true)
     }
 
+    /// Classify a specific anomaly within a ship's active nebula layout.
+    pub fn classify_layout_anomaly_at(
+        env: Env,
+        ship_id: u64,
+        anomaly_index: u32,
+    ) -> Result<crate::anomaly_classifier::ClassificationRecord, NebulaError> {
+        if ship_id < MIN_SHIP_ID {
+            return Err(NebulaError::InvalidShipId);
+        }
+        let layout = Self::get_live_layout(&env, ship_id).ok_or(NebulaError::LayoutNotFound)?;
+        let anomaly = layout
+            .anomalies
+            .get(anomaly_index)
+            .ok_or(NebulaError::AnomalyOutOfBounds)?;
+        let composite_id = ship_id.saturating_mul(10_000).saturating_add(anomaly_index as u64);
+        crate::anomaly_classifier::classify_nebula_anomaly(&env, composite_id, &anomaly)
+            .map_err(|_| NebulaError::AnomalyOutOfBounds)
+    }
+
     // ── Admin operations ──────────────────────────────────────
 
     /// Update the time-to-live configuration for all nebula layouts.

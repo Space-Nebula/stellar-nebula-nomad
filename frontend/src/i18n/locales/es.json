@@ -1,0 +1,320 @@
+{
+  "common": {
+    "language": "Idioma",
+    "close": "Cerrar",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar",
+    "loading": "Cargando...",
+    "tryAgain": "Reintentar",
+    "skipToContent": "Saltar al contenido principal",
+    "you": "(tú)",
+    "none": "Ninguno"
+  },
+  "layout": {
+    "primaryNavigation": "Navegación principal"
+  },
+  "errors": {
+    "title": "Algo salió mal",
+    "unexpected": "Se produjo un error inesperado."
+  },
+  "toast": {
+    "dismiss": "Descartar notificación"
+  },
+  "address": {
+    "label": "Dirección de cuenta Stellar",
+    "invalid": "Formato de clave pública Stellar no válido (debe tener 56 caracteres y empezar por G)"
+  },
+  "duration": {
+    "label": "Duración de la expedición",
+    "hours_one": "{{count}} hora",
+    "hours_other": "{{count}} horas",
+    "hours_many": "{{count}} horas",
+    "days_one": "{{count}} día",
+    "days_other": "{{count}} días",
+    "days_many": "{{count}} días"
+  },
+  "rarity": {
+    "label": "Filtrar por rareza",
+    "All": "Todas",
+    "Common": "Común",
+    "Rare": "Rara",
+    "Epic": "Épica",
+    "Legendary": "Legendaria"
+  },
+  "amount": {
+    "label": "Cantidad ({{resource}})",
+    "max": "MÁX"
+  },
+  "actions": {
+    "mint": "Acuñar nave ({{cost}} XLM)",
+    "minting": "Acuñando en Soroban...",
+    "buy": "Comprar ahora ({{price}} {{currency}})",
+    "list": "Publicar artículo ({{price}} {{currency}})",
+    "processingBuy": "Procesando compra...",
+    "processingSell": "Procesando publicación...",
+    "upgrade": "Mejorar a nivel {{level}} ({{cost}})",
+    "upgradeDefaultCost": "100 de combustible + 50 de mineral",
+    "upgrading": "Mejorando...",
+    "bond": "Vincular {{amount}} con {{guild}}",
+    "bonding": "Vinculando participación..."
+  },
+  "achievement": {
+    "label": "Logro {{title}}: {{status}}",
+    "unlocked": "Desbloqueado",
+    "locked": "Bloqueado",
+    "unlockedOn": "Desbloqueado el {{date}}"
+  },
+  "leaderboard": {
+    "label": "Clasificación",
+    "rank": "Puesto",
+    "explorer": "Explorador",
+    "guild": "Gremio",
+    "score": "Puntuación"
+  },
+  "nebula": {
+    "label": "Sector de nebulosa: {{sector}}, densidad {{density}}",
+    "anomalyLabel": "anomalía detectada",
+    "anomaly": "ANOMALÍA",
+    "density": "Densidad de la nebulosa: {{density}}"
+  },
+  "resource": {
+    "label": "Recurso {{name}}",
+    "capacity": "Capacidad de {{name}} usada"
+  },
+  "ship": {
+    "label": "Nave: {{name}}, {{shipClass}} {{rarity}}",
+    "select": "Seleccionar {{name}}",
+    "level": "Nivel {{level}}",
+    "speed": "Velocidad",
+    "hull": "Casco",
+    "scan": "Escáner",
+    "class": {
+      "Scout": "Explorador",
+      "Frigate": "Fragata",
+      "Cruiser": "Crucero",
+      "Dreadnought": "Acorazado"
+    }
+  },
+  "oracle": {
+    "title": "Oráculo de mercado",
+    "description": "Precios de consenso agregados de fuentes de oráculo independientes.",
+    "pricesLabel": "Precios de recursos",
+    "consensus": "Precio de consenso",
+    "sources_one": "{{count}} fuente coincidente",
+    "sources_other": "{{count}} fuentes coincidentes",
+    "sources_many": "{{count}} fuentes coincidentes",
+    "updated": "Actualizado {{time}}",
+    "status": {
+      "fresh": "Validado",
+      "stale": "Obsoleto",
+      "rejected": "Rechazado"
+    },
+    "rejectedReason": "Las fuentes no coincidieron; se sigue usando el último precio validado.",
+    "empty": "Aún no se han publicado precios.",
+    "resource": "Recurso",
+    "sourcesHeader": "Fuentes",
+    "updatedHeader": "Actualizado",
+    "statusHeader": "Estado"
+  },
+  "vault": {
+    "title": "Bóveda del tesoro",
+    "description": "Descubre bóvedas desbloqueadas y usa llaves para reclamar su botín.",
+    "vaultsLabel": "Tus bóvedas",
+    "vault": "Bóveda n.º {{id}}",
+    "keys_one": "{{count}} llave de bóveda",
+    "keys_other": "{{count}} llaves de bóveda",
+    "keys_many": "{{count}} llaves de bóveda",
+    "lockedUntil": "Bloqueada hasta {{time}}",
+    "loot": "Botín: {{amount}}",
+    "discover": "Descubrir bóveda",
+    "discoverVault": "Descubrir la bóveda n.º {{id}}",
+    "claim": "Reclamar botín",
+    "claimVault": "Reclamar el botín de la bóveda n.º {{id}}",
+    "needKey": "Necesitas una llave de bóveda para reclamar este botín.",
+    "claimed": "Botín reclamado",
+    "locked": "Bloqueada",
+    "undiscovered": "Sin descubrir",
+    "special": {
+      "None": "",
+      "StarChart": "Recompensa especial: Carta estelar",
+      "AncientRelic": "Recompensa especial: Reliquia antigua + llave extra"
+    },
+    "empty": "Aún no tienes bóvedas.",
+    "principal": "Depósito: {{amount}}"
+  },
+  "theme": {
+    "title": "Apariencia",
+    "active": "Tema activo: {{name}}",
+    "family": "Tema",
+    "modeLabel": "Modo de color",
+    "mode": {
+      "dark": "Oscuro",
+      "light": "Claro",
+      "system": "Igual que el dispositivo"
+    },
+    "id": {
+      "nebula": "Nebulosa",
+      "cosmic": "Cósmico",
+      "aurora": "Aurora",
+      "highContrast": "Alto contraste"
+    },
+    "accessibility": "Paleta de accesibilidad",
+    "profile": {
+      "standard": "Estándar",
+      "highContrast": "Alto contraste",
+      "redGreenSafe": "Apta para daltonismo rojo/verde",
+      "blueYellowSafe": "Apta para daltonismo azul/amarillo"
+    },
+    "textSize": "Tamaño del texto",
+    "reducedMotion": "Reducir movimiento",
+    "customColors": "Colores personalizados",
+    "customHint": "Se rechazan los colores que bajen el contraste del texto por debajo de {{ratio}}:1.",
+    "slot": {
+      "background": "Fondo",
+      "surface": "Paneles",
+      "text": "Texto",
+      "primary": "Botones",
+      "accent": "Acento",
+      "border": "Bordes"
+    },
+    "colorApplied": "Color de {{slot}} aplicado.",
+    "colorReset": "Color de {{slot}} restablecido.",
+    "colorRejected": "Color de {{slot}} rechazado: dificultaría la lectura del texto.",
+    "slotIgnored": "Ignorado en este modo (poco contraste)",
+    "reset": "Restablecer",
+    "resetSlot": "Restablecer el color de {{slot}}",
+    "resetAll": "Restablecer apariencia",
+    "resetDone": "Apariencia restablecida."
+  },
+  "referral": {
+    "title": "Programa de referidos",
+    "description": "Gana {{reward}} de esencia por cada amigo que complete su primer escaneo. Ellos reciben {{bonus}} de esencia de bienvenida.",
+    "blocked": "Tu cuenta de referidos está suspendida hasta su revisión.",
+    "yourCode": "Tu código",
+    "copyLink": "Copiar enlace de invitación",
+    "copied": "Enlace de invitación copiado.",
+    "copyFailed": "No se pudo copiar. Selecciona el código y cópialo manualmente.",
+    "generate": "Obtener mi código de referido",
+    "stats": {
+      "total": "Invitados",
+      "pending": "Esperando primer escaneo",
+      "claimable": "Listos para reclamar",
+      "claimed": "Reclamados",
+      "earned": "Esencia ganada"
+    },
+    "tier": "Nivel: {{tier}} (recompensas ×{{multiplier}})",
+    "tierProgress": "Progreso al siguiente nivel",
+    "toNextTier_one": "{{count}} referido más para llegar a {{tier}}",
+    "toNextTier_many": "{{count}} referidos más para llegar a {{tier}}",
+    "toNextTier_other": "{{count}} referidos más para llegar a {{tier}}",
+    "maxTier": "Has alcanzado el nivel máximo.",
+    "tiers": {
+      "bronze": "Bronce",
+      "silver": "Plata",
+      "gold": "Oro",
+      "platinum": "Platino",
+      "diamond": "Diamante"
+    },
+    "referees": "Tus referidos",
+    "noReferees": "Aún no tienes referidos. Comparte tu código para empezar.",
+    "joined": "se unió el {{date}}",
+    "claim": "Reclamar",
+    "claimFor": "Reclamar recompensa de {{address}}",
+    "status": {
+      "pending": "Esperando primer escaneo",
+      "claimable": "Listo para reclamar",
+      "claimed": "Reclamado"
+    },
+    "haveCode": "¿Tienes un código de referido?",
+    "redeem": "Canjear",
+    "invalidCode": "Los códigos tienen 8 caracteres, letras y dígitos, sin 0, O, 1, I, L ni U."
+  },
+  "daily": {
+    "title": "Recompensas diarias",
+    "streak_one": "Racha de {{count}} día",
+    "streak_many": "Racha de {{count}} días",
+    "streak_other": "Racha de {{count}} días",
+    "best_one": "mejor: {{count}} día",
+    "best_many": "mejor: {{count}} días",
+    "best_other": "mejor: {{count}} días",
+    "eventTitle": "¡Evento {{name}}!",
+    "eventDetail": "Recompensas ×{{multiplier}} más {{bonus}} extra hasta el {{date}}.",
+    "todayReward": "Recompensa de hoy",
+    "nextReward": "Recompensa de mañana",
+    "amount": "{{amount}} de {{kind}}",
+    "streakBonus": "Incluye +{{percent}} % por racha",
+    "claim": "Reclamar recompensa",
+    "atRisk": "Reclama en {{hours}} h {{minutes}} min para mantener tu racha.",
+    "claimedToday": "Reclamada hoy. Próxima recompensa en {{hours}} h {{minutes}} min.",
+    "calendar": "Calendario de recompensas de 28 días",
+    "day": "Día {{day}}",
+    "milestone": "hito",
+    "state": {
+      "claimed": "reclamada",
+      "next": "próxima recompensa",
+      "upcoming": "próximamente"
+    },
+    "kind": {
+      "Essence": "esencia",
+      "StellarDust": "polvo estelar",
+      "DarkMatter": "materia oscura",
+      "ExoticMatter": "materia exótica",
+      "Energy": "energía",
+      "CosmeticRoll": "tirada cosmética"
+    }
+  },
+  "bots": {
+    "title": "Cola de revisión de bots",
+    "filter": "Mostrar",
+    "filters": {
+      "open": "Casos abiertos",
+      "resolved": "Resueltos",
+      "all": "Todos"
+    },
+    "summary": {
+      "open": "Abiertos",
+      "highRisk": "Riesgo alto",
+      "cleared": "Absueltos",
+      "banned": "Expulsados"
+    },
+    "empty": "No hay casos para revisar.",
+    "caption": "Jugadores marcados, mayor riesgo primero",
+    "col": {
+      "player": "Jugador",
+      "score": "Puntuación",
+      "signals": "Señales",
+      "opened": "Abierto",
+      "action": "Acción"
+    },
+    "case": "Caso n.º {{id}}",
+    "response": {
+      "Allow": "Sin acción",
+      "Monitor": "En observación",
+      "Captcha": "Requiere CAPTCHA",
+      "Block": "Bloqueado temporalmente",
+      "Ban": "Expulsado"
+    },
+    "signal": {
+      "burst": "Ráfaga de acciones",
+      "rateLimit": "Límite de frecuencia",
+      "regularTiming": "Ritmo automatizado",
+      "repetitive": "Bucle repetitivo",
+      "multiAccount": "Multicuenta",
+      "farming": "Granja de cuentas",
+      "captchaFail": "CAPTCHA fallido",
+      "manual": "Marca manual"
+    },
+    "status": {
+      "Open": "Abierto",
+      "Cleared": "Absuelto",
+      "Banned": "Expulsado"
+    },
+    "clear": "Absolver",
+    "clearCase": "Absolver el caso {{id}}",
+    "ban": "Expulsar",
+    "banCase": "Expulsar al jugador del caso {{id}}",
+    "confirmBan": "Confirmar expulsión",
+    "confirmBanCase": "Confirmar expulsión del caso {{id}}",
+    "cancel": "Cancelar"
+  }
+}

@@ -1,0 +1,45 @@
+name: Setup Rust
+description: |
+  Install a Rust toolchain with the Soroban WASM target and restore a shared
+  Cargo build cache. Centralising this avoids the eleven divergent hand-rolled
+  actions/cache blocks that previously forced every job to recompile the whole
+  dependency graph independently.
+
+inputs:
+  toolchain:
+    description: Rust toolchain channel (stable, nightly, or a pinned version).
+    required: false
+    default: stable
+  components:
+    description: Comma-separated rustup components to install.
+    required: false
+    default: rustfmt, clippy
+  targets:
+    description: Comma-separated rustup targets to install.
+    required: false
+    default: wasm32v1-none
+  cache-key:
+    description: |
+      Shared cache key. Jobs that pass the same key reuse each other's compiled
+      dependencies (e.g. "native" for lint/test/docs, "wasm" for WASM builds).
+    required: false
+    default: native
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        targets: ${{ inputs.targets }}
+        components: ${{ inputs.components }}
+
+    # Swatinem/rust-cache hashes Cargo.lock + rustflags + targets and, unlike
+    # the previous per-job keys, supports a shared key so compiled artifacts
+    # flow between jobs instead of being rebuilt from scratch every time.
+    - name: Restore shared Cargo cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ inputs.cache-key }}
+        cache-on-failure: true

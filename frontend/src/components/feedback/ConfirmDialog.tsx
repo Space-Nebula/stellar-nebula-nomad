@@ -1,4 +1,6 @@
 import React from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
 import { ModalWrapper } from '../layout/ModalWrapper';
 
 export interface ConfirmDialogProps {
@@ -16,16 +18,17 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   isOpen,
   title,
   message,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
+  confirmLabel,
+  cancelLabel,
   isDestructive = false,
   onConfirm,
   onCancel,
 }) => {
+  const { t } = useI18n();
   return (
     <ModalWrapper isOpen={isOpen} onClose={onCancel} title={title}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <p style={{ margin: 0, color: '#CBD5E1', fontSize: '0.9rem', lineHeight: 1.5 }}>
+        <p style={{ margin: 0, color: colors.textSecondary, fontSize: '0.9rem', lineHeight: 1.5 }}>
           {message}
         </p>
 
@@ -34,8 +37,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             type="button"
             onClick={onCancel}
             style={{
-              backgroundColor: '#334155',
-              color: '#F8FAFC',
+              backgroundColor: colors.border,
+              color: colors.textPrimary,
               border: 'none',
               padding: '8px 16px',
               borderRadius: '6px',
@@ -43,14 +46,14 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
               fontWeight: 600,
             }}
           >
-            {cancelLabel}
+            {cancelLabel ?? t('common.cancel')}
           </button>
           <button
             type="button"
             onClick={onConfirm}
             style={{
-              backgroundColor: isDestructive ? '#EF4444' : '#3B82F6',
-              color: '#FFFFFF',
+              backgroundColor: isDestructive ? colors.dangerFill : colors.primaryFill,
+              color: colors.textOnAccent,
               border: 'none',
               padding: '8px 16px',
               borderRadius: '6px',
@@ -58,7 +61,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
               fontWeight: 600,
             }}
           >
-            {confirmLabel}
+            {confirmLabel ?? t('common.confirm')}
           </button>
         </div>
       </div>

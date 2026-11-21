@@ -208,6 +208,18 @@ pub enum RealtimeError {
     EventEnded = 122,
 }
 
+impl crate::error_standard::StandardContractError for RealtimeError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "realtime_events",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
 fn require_admin(env: &Env, caller: &Address) -> Result<(), RealtimeError> {

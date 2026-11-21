@@ -1,0 +1,47 @@
+/*
+ * Optional global accessibility stylesheet (Issue #698).
+ *
+ * `DashboardLayout` already injects these rules via `<AccessibilityStyles />`
+ * (see src/a11y/index.tsx, the source of truth). Import this file only in apps
+ * that do not render DashboardLayout or AccessibilityStyles. Keep both in sync.
+ */
+:focus-visible {
+  outline: 3px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+.snn-skip-link {
+  position: absolute;
+  inset-inline-start: 8px;
+  top: -100px;
+  z-index: 2000;
+  padding: 8px 16px;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.snn-skip-link:focus {
+  top: 8px;
+}
+
+.snn-reveal-on-focus:not(:focus) {
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  border: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

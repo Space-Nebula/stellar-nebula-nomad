@@ -47,6 +47,18 @@ pub enum StakingError {
     InvalidSlash = 21,
 }
 
+impl crate::error_standard::StandardContractError for StakingError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "staking",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ─── Data Types ───────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -296,9 +308,17 @@ pub fn get_global_staking_stats(env: &Env) -> GlobalStakingStats {
 pub fn calculate_early_withdraw_penalty(env: &Env, stake: &StakeRecord) -> EarlyWithdrawalResult {
     let config = get_tier_config(env, stake.tier.clone());
     let penalty_bps = config.early_withdraw_penalty_bps;
-    let penalty = stake.amount * penalty_bps as i128 / BPS_DENOMINATOR as i128;
+    // Clamp the penalty at the staked amount (a 100% penalty is the upper
+    // bound) instead of allowing an unchecked multiply/subtract to trap or
+    // wrap on adversarial inputs.
+    let penalty = crate::safe_math::saturating_mul_div_i128(
+        stake.amount,
+        i128::from(penalty_bps),
+        i128::from(BPS_DENOMINATOR),
+    )
+    .clamp(0, stake.amount.max(0));
     EarlyWithdrawalResult {
-        amount_returned: stake.amount - penalty,
+        amount_returned: stake.amount.saturating_sub(penalty),
         penalty,
         penalty_bps,
     }
@@ -322,7 +342,7 @@ pub fn stake_with_tier(
     }
 
     let current_ledger = env.ledger().sequence();
-    let unlock_ledger = current_ledger + config.lock_duration_ledgers;
+    let unlock_ledger = current_ledger.saturating_add(config.lock_duration_ledgers);
 
     let apy = get_variable_apy(&env, amount, config.lock_duration_ledgers);
 
@@ -1023,8 +1043,12 @@ pub fn slash_stake(
         .persistent()
         .get(&DataKey::Stake(staker.clone()))
         .ok_or(StakingError::NoActiveStake)?;
-    let slashed = stake.amount.saturating_mul(i128::from(slash_bps)) / i128::from(BPS_DENOMINATOR);
-    stake.amount -= slashed;
+    let slashed = crate::safe_math::saturating_mul_div_i128(
+        stake.amount,
+        i128::from(slash_bps),
+        i128::from(BPS_DENOMINATOR),
+    );
+    stake.amount = crate::safe_math::saturating_sub_i128(stake.amount, slashed);
     if stake.amount == 0 {
         env.storage()
             .persistent()

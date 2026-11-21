@@ -8,6 +8,9 @@ pub const PAIR_LIFETIME_SECS: u64 = 30 * 86_400;
 /// Maximum messages sent in one burst call.
 pub const MAX_MESSAGE_BURST: u32 = 20;
 
+/// Default maximum number of messages allowed per entanglement pair.
+pub const DEFAULT_PAIR_USE_LIMIT: u64 = 100;
+
 // ─── Storage Keys ──────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -19,6 +22,16 @@ pub enum EntanglementKey {
     Pair(u64),
     /// Message log index per pair (pair_id → total messages sent).
     MsgCount(u64),
+    /// Stored encrypted message by `(pair_id, sequence)`.
+    Message(u64, u64),
+    /// Custom message limit per pair.
+    PairUseLimit(u64),
+    /// Shared encryption key commitment hash per pair.
+    PairEncryptionKeyHash(u64),
+    /// Guild coordination channel by `guild_id`.
+    GuildChannel(u64),
+    /// Stored guild coordination message by `(guild_id, sequence)`.
+    GuildMessage(u64, u64),
 }
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
@@ -39,6 +52,14 @@ pub enum EntanglementError {
     BurstTooLarge = 5,
     /// Message batch is empty.
     EmptyBatch = 6,
+    /// Pair has exhausted its message use limit.
+    UsageLimitReached = 7,
+    /// Provided use limit is invalid (must be > 0).
+    InvalidLimit = 8,
+    /// No encryption key commitment has been set for this pair.
+    EncryptionKeyNotSet = 9,
+    /// Guild coordination channel does not exist.
+    GuildChannelNotFound = 10,
 }
 
 impl crate::error_standard::StandardContractError for EntanglementError {
@@ -47,9 +68,11 @@ impl crate::error_standard::StandardContractError for EntanglementError {
         let (kind, retryable) = match self {
             Self::PairNotActive => (ErrorKind::Conflict, false),
             Self::NotAuthorized => (ErrorKind::Authorization, false),
-            Self::PairNotFound => (ErrorKind::NotFound, false),
-            Self::SameShip | Self::EmptyBatch => (ErrorKind::Validation, false),
-            Self::BurstTooLarge => (ErrorKind::ResourceLimit, false),
+            Self::PairNotFound | Self::EncryptionKeyNotSet | Self::GuildChannelNotFound => {
+                (ErrorKind::NotFound, false)
+            }
+            Self::SameShip | Self::EmptyBatch | Self::InvalidLimit => (ErrorKind::Validation, false),
+            Self::BurstTooLarge | Self::UsageLimitReached => (ErrorKind::ResourceLimit, false),
         };
         crate::error_standard::ErrorDescriptor {
             module: "entanglement_comms",
@@ -194,7 +217,22 @@ pub fn send_entangled_message(
         .get(&EntanglementKey::MsgCount(pair_id))
         .unwrap_or(0);
 
+    let limit = pair_use_limit(env, pair_id);
+    if seq >= limit {
+        return Err(EntanglementError::UsageLimitReached);
+    }
+
     let new_seq = seq + 1;
+    let stored = EntangledMessage {
+        pair_id,
+        sender_ship,
+        payload: _message.clone(),
+        sent_at: now,
+        sequence: new_seq,
+    };
+    env.storage()
+        .persistent()
+        .set(&EntanglementKey::Message(pair_id, new_seq), &stored);
     env.storage()
         .instance()
         .set(&EntanglementKey::MsgCount(pair_id), &new_seq);
@@ -278,4 +316,270 @@ pub fn get_message_count(env: &Env, pair_id: u64) -> u64 {
         .instance()
         .get(&EntanglementKey::MsgCount(pair_id))
         .unwrap_or(0)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct GuildCommsChannel {
+    pub guild_id: u64,
+    pub creator: Address,
+    pub encrypted_topic: BytesN<32>,
+    pub message_count: u64,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct GuildMessage {
+    pub guild_id: u64,
+    pub sender: Address,
+    pub sender_region: u64,
+    pub payload: BytesN<64>,
+    pub sent_at: u64,
+    pub sequence: u64,
+}
+
+fn pair_use_limit(env: &Env, pair_id: u64) -> u64 {
+    env.storage()
+        .instance()
+        .get(&EntanglementKey::PairUseLimit(pair_id))
+        .unwrap_or(DEFAULT_PAIR_USE_LIMIT)
+}
+
+/// Set a custom message use limit for an active entanglement pair.
+pub fn set_pair_use_limit(
+    env: &Env,
+    caller: &Address,
+    pair_id: u64,
+    limit: u64,
+) -> Result<(), EntanglementError> {
+    caller.require_auth();
+    if limit == 0 {
+        return Err(EntanglementError::InvalidLimit);
+    }
+    let pair = get_entanglement_pair(env, pair_id)?;
+    require_participant(&pair, caller)?;
+    env.storage()
+        .instance()
+        .set(&EntanglementKey::PairUseLimit(pair_id), &limit);
+    Ok(())
+}
+
+/// Return remaining message uses for a pair.
+pub fn get_pair_remaining_uses(env: &Env, pair_id: u64) -> Result<u64, EntanglementError> {
+    let _ = get_entanglement_pair(env, pair_id)?;
+    let limit = pair_use_limit(env, pair_id);
+    let used = get_message_count(env, pair_id);
+    Ok(limit.saturating_sub(used))
+}
+
+/// Register or rotate the shared encryption key commitment hash for a pair.
+pub fn set_pair_encryption_key(
+    env: &Env,
+    caller: &Address,
+    pair_id: u64,
+    key_hash: BytesN<32>,
+) -> Result<(), EntanglementError> {
+    caller.require_auth();
+    let pair = get_entanglement_pair(env, pair_id)?;
+    require_active_pair(&pair, env.ledger().timestamp())?;
+    require_participant(&pair, caller)?;
+    env.storage()
+        .persistent()
+        .set(&EntanglementKey::PairEncryptionKeyHash(pair_id), &key_hash);
+    env.events().publish(
+        (symbol_short!("entangle"), symbol_short!("keyset")),
+        (pair_id, caller.clone()),
+    );
+    Ok(())
+}
+
+/// Read the shared encryption key commitment hash for a pair.
+pub fn get_pair_encryption_key(
+    env: &Env,
+    pair_id: u64,
+) -> Result<BytesN<32>, EntanglementError> {
+    env.storage()
+        .persistent()
+        .get(&EntanglementKey::PairEncryptionKeyHash(pair_id))
+        .ok_or(EntanglementError::EncryptionKeyNotSet)
+}
+
+/// Read a bounded page of encrypted messages sent over a pair.
+pub fn get_entangled_messages(
+    env: &Env,
+    pair_id: u64,
+    offset: u64,
+    limit: u32,
+) -> Vec<EntangledMessage> {
+    let total = get_message_count(env, pair_id);
+    let mut out = Vec::new(env);
+    let capped = core::cmp::min(limit, MAX_MESSAGE_BURST) as u64;
+    let start = offset.saturating_add(1);
+    let end = core::cmp::min(total, offset.saturating_add(capped));
+    let mut seq = start;
+    while seq <= end {
+        if let Some(msg) = env
+            .storage()
+            .persistent()
+            .get::<EntanglementKey, EntangledMessage>(&EntanglementKey::Message(pair_id, seq))
+        {
+            out.push_back(msg);
+        }
+        seq += 1;
+    }
+    out
+}
+
+/// Create or activate a guild-wide instant communication channel backed by `alliance_manager`.
+pub fn create_guild_channel(
+    env: &Env,
+    caller: &Address,
+    guild_id: u64,
+    encrypted_topic: BytesN<32>,
+) -> Result<GuildCommsChannel, EntanglementError> {
+    caller.require_auth();
+    let alliance = crate::alliance_manager::get_alliance(env, guild_id)
+        .map_err(|_| EntanglementError::GuildChannelNotFound)?;
+    if alliance.founder != *caller {
+        return Err(EntanglementError::NotAuthorized);
+    }
+
+    let channel = GuildCommsChannel {
+        guild_id,
+        creator: caller.clone(),
+        encrypted_topic,
+        message_count: 0,
+        active: true,
+    };
+    env.storage()
+        .persistent()
+        .set(&EntanglementKey::GuildChannel(guild_id), &channel);
+    env.events().publish(
+        (symbol_short!("entangle"), symbol_short!("g_chan")),
+        (guild_id, caller.clone()),
+    );
+    Ok(channel)
+}
+
+/// Broadcast an encrypted coordination message to a guild channel across regions.
+pub fn send_guild_message(
+    env: &Env,
+    caller: &Address,
+    guild_id: u64,
+    sender_region: u64,
+    payload: BytesN<64>,
+) -> Result<u64, EntanglementError> {
+    caller.require_auth();
+    let mut channel: GuildCommsChannel = env
+        .storage()
+        .persistent()
+        .get(&EntanglementKey::GuildChannel(guild_id))
+        .ok_or(EntanglementError::GuildChannelNotFound)?;
+    if !channel.active {
+        return Err(EntanglementError::PairNotActive);
+    }
+
+    let alliance = crate::alliance_manager::get_alliance(env, guild_id)
+        .map_err(|_| EntanglementError::GuildChannelNotFound)?;
+    if !alliance.members.contains(caller) {
+        return Err(EntanglementError::NotAuthorized);
+    }
+
+    channel.message_count = channel.message_count.saturating_add(1);
+    let seq = channel.message_count;
+    let now = env.ledger().timestamp();
+    let msg = GuildMessage {
+        guild_id,
+        sender: caller.clone(),
+        sender_region,
+        payload,
+        sent_at: now,
+        sequence: seq,
+    };
+    env.storage()
+        .persistent()
+        .set(&EntanglementKey::GuildMessage(guild_id, seq), &msg);
+    env.storage()
+        .persistent()
+        .set(&EntanglementKey::GuildChannel(guild_id), &channel);
+    env.events().publish(
+        (symbol_short!("entangle"), symbol_short!("g_msg")),
+        (guild_id, sender_region, seq, now),
+    );
+    Ok(seq)
+}
+
+/// Fetch a bounded page of guild coordination messages.
+pub fn get_guild_messages(
+    env: &Env,
+    guild_id: u64,
+    offset: u64,
+    limit: u32,
+) -> Vec<GuildMessage> {
+    let total = env
+        .storage()
+        .persistent()
+        .get::<EntanglementKey, GuildCommsChannel>(&EntanglementKey::GuildChannel(guild_id))
+        .map(|c| c.message_count)
+        .unwrap_or(0);
+    let mut out = Vec::new(env);
+    let capped = core::cmp::min(limit, MAX_MESSAGE_BURST) as u64;
+    let start = offset.saturating_add(1);
+    let end = core::cmp::min(total, offset.saturating_add(capped));
+    let mut seq = start;
+    while seq <= end {
+        if let Some(msg) = env
+            .storage()
+            .persistent()
+            .get::<EntanglementKey, GuildMessage>(&EntanglementKey::GuildMessage(guild_id, seq))
+        {
+            out.push_back(msg);
+        }
+        seq += 1;
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{contract, contractimpl, BytesN, Env};
+
+    #[contract]
+    struct Stub;
+    #[contractimpl]
+    impl Stub {}
+
+    #[test]
+    fn test_pair_messaging_limits_and_encryption_key() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(Stub, ());
+        let a = Address::generate(&env);
+        let b = Address::generate(&env);
+
+        env.as_contract(&cid, || {
+            let pair_id = create_entanglement_pair(&env, &a, 1, &b, 2).unwrap();
+            set_pair_use_limit(&env, &a, pair_id, 2).unwrap();
+            let key_hash = BytesN::from_array(&env, &[9u8; 32]);
+            set_pair_encryption_key(&env, &a, pair_id, key_hash.clone()).unwrap();
+            assert_eq!(get_pair_encryption_key(&env, pair_id).unwrap(), key_hash);
+
+            let payload = BytesN::from_array(&env, &[7u8; 64]);
+            assert_eq!(send_entangled_message(&env, &a, pair_id, &payload).unwrap(), 1);
+            assert_eq!(send_entangled_message(&env, &b, pair_id, &payload).unwrap(), 2);
+            assert_eq!(get_pair_remaining_uses(&env, pair_id).unwrap(), 0);
+            assert_eq!(
+                send_entangled_message(&env, &a, pair_id, &payload),
+                Err(EntanglementError::UsageLimitReached)
+            );
+
+            let history = get_entangled_messages(&env, pair_id, 0, 10);
+            assert_eq!(history.len(), 2);
+            assert_eq!(history.get(0).unwrap().sender_ship, 1);
+            assert_eq!(history.get(1).unwrap().sender_ship, 2);
+        });
+    }
 }

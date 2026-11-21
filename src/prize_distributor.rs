@@ -85,9 +85,17 @@ pub struct PrizeRecord {
 ///   total_weight = top_n * (top_n + 1) / 2
 ///   share(i) = pool * weight(i) / total_weight
 fn prize_share(pool: i128, rank: u32, top_n: u32) -> i128 {
-    let weight = (top_n + 1 - rank) as i128;
-    let total_weight = (top_n as i128 * (top_n as i128 + 1)) / 2;
-    pool * weight / total_weight
+    if top_n == 0 || rank == 0 || rank > top_n {
+        return 0;
+    }
+    let weight = i128::from(top_n.saturating_add(1).saturating_sub(rank));
+    let total_weight = crate::safe_math::checked_mul_div_i128(
+        i128::from(top_n),
+        i128::from(top_n).saturating_add(1),
+        2,
+    )
+    .unwrap_or(0);
+    crate::safe_math::saturating_mul_div_i128(pool, weight, total_weight)
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -219,7 +227,7 @@ pub fn distribute_weekly_prizes(
             .ok_or(PrizeError::InvalidRank)?;
 
         let amount = prize_share(pool, rank, effective_n);
-        total_paid += amount;
+        total_paid = crate::safe_math::saturating_add_i128(total_paid, amount);
 
         let record = PrizeRecord {
             rank,

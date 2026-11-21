@@ -1,4 +1,6 @@
 import React from 'react';
+import { AccessibilityStyles, colors } from '../../a11y';
+import { useI18n } from '../../i18n';
 
 export interface DashboardLayoutProps {
   header: React.ReactNode;
@@ -6,27 +8,34 @@ export interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
-export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
-  header,
-  sidebar,
-  children,
-}) => {
+/**
+ * Page shell with landmarks (banner, navigation, main), a skip link to the
+ * main content, and the global accessibility styles (focus ring, reduced
+ * motion).
+ */
+export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ header, sidebar, children }) => {
+  const { t, dir } = useI18n();
   return (
     <div
+      dir={dir}
       style={{
         display: 'flex',
         flexDirection: 'column',
         minHeight: '100vh',
-        backgroundColor: '#0B1020',
-        color: '#F8FAFC',
+        backgroundColor: colors.bgApp,
+        color: colors.textPrimary,
         fontFamily: 'Inter, system-ui, sans-serif',
       }}
     >
+      <AccessibilityStyles />
+      <a className="snn-skip-link" href="#main-content">
+        {t('common.skipToContent')}
+      </a>
       <header
         style={{
-          borderBottom: '1px solid #1E293B',
+          borderBottom: `1px solid ${colors.bgRaised}`,
           padding: '12px 24px',
-          backgroundColor: '#0F172A',
+          backgroundColor: colors.bgSurface,
           position: 'sticky',
           top: 0,
           zIndex: 40,
@@ -37,18 +46,23 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
       <div style={{ display: 'flex', flex: 1 }}>
         {sidebar && (
-          <aside
+          <nav
+            aria-label={t('layout.primaryNavigation')}
             style={{
               width: '260px',
-              borderRight: '1px solid #1E293B',
-              backgroundColor: '#0F172A',
+              borderInlineEnd: `1px solid ${colors.bgRaised}`,
+              backgroundColor: colors.bgSurface,
               padding: '20px 16px',
             }}
           >
             {sidebar}
-          </aside>
+          </nav>
         )}
-        <main style={{ flex: 1, padding: '24px 20px', overflowY: 'auto' }}>
+        <main
+          id="main-content"
+          tabIndex={-1}
+          style={{ flex: 1, padding: '24px 20px', overflowY: 'auto' }}
+        >
           {children}
         </main>
       </div>

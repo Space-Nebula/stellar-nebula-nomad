@@ -1,0 +1,157 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": { "list": [] },
+  "description": "Performance monitoring and alerts dashboard (Issue #676) — tracks response times, error rates, gas usage, user metrics, and system health",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            { "color": "red", "value": null },
+            { "color": "green", "value": 1 }
+          ]
+        }
+      },
+      "title": "System Health Status",
+      "type": "stat",
+      "targets": [{ "expr": "nebula_system_health_status", "legendFormat": "Health", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 5, "x": 4, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Contract Error Rate",
+      "type": "stat",
+      "targets": [{ "expr": "nebula_contract_error_rate", "legendFormat": "Error Rate", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 5, "x": 9, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "p95 Response Latency (s)",
+      "type": "stat",
+      "targets": [{ "expr": "nebula_contract_response_time_p95_seconds", "legendFormat": "p95 Latency", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 0 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Avg Gas Instructions",
+      "type": "stat",
+      "targets": [{ "expr": "nebula_contract_gas_instructions_avg", "legendFormat": "Avg Gas", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 0 },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "title": "Batch Gas Savings",
+      "type": "stat",
+      "targets": [{ "expr": "nebula_contract_gas_batch_savings_percent", "legendFormat": "Savings %", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 6,
+      "options": { "tooltip": { "mode": "multi" } },
+      "title": "Response Times Over Time",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "nebula_contract_response_time_seconds", "legendFormat": "Current Response Time", "refId": "A" },
+        { "expr": "horizon_request_duration_seconds", "legendFormat": "Horizon RPC Latency", "refId": "B" },
+        { "expr": "nebula_contract_response_time_p95_seconds", "legendFormat": "p95 Threshold", "refId": "C" }
+      ]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 7,
+      "options": { "tooltip": { "mode": "multi" } },
+      "title": "Invocations & Error Rates",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(nebula_contract_invocations_total[5m])", "legendFormat": "Invocations / sec", "refId": "A" },
+        { "expr": "rate(nebula_contract_errors_total[5m])", "legendFormat": "Errors / sec", "refId": "B" },
+        { "expr": "nebula_contract_error_rate", "legendFormat": "Error Rate %", "refId": "C" }
+      ]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 8,
+      "options": { "tooltip": { "mode": "multi" } },
+      "title": "Gas Usage & Instructions Distribution",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "nebula_contract_gas_instructions_avg", "legendFormat": "Avg Gas Instructions", "refId": "A" },
+        { "expr": "rate(nebula_contract_gas_instructions_total[5m])", "legendFormat": "Gas Rate Total", "refId": "B" }
+      ]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 9,
+      "options": { "tooltip": { "mode": "multi" } },
+      "title": "User Metrics & Activity",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "nebula_active_users{period=\"daily\"}", "legendFormat": "Daily Active Users (DAU)", "refId": "A" },
+        { "expr": "nebula_active_users{period=\"hourly\"}", "legendFormat": "Hourly Active Users", "refId": "B" },
+        { "expr": "rate(nebula_user_operations_total[5m])", "legendFormat": "User Ops / sec", "refId": "C" },
+        { "expr": "nebula_user_retention_ratio", "legendFormat": "Retention Ratio", "refId": "D" }
+      ]
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["nebula-nomad", "performance", "monitoring", "gas", "sla"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "utc",
+  "title": "Performance Monitoring & Alerts",
+  "uid": "nebula-performance-monitoring",
+  "version": 1
+}

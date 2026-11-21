@@ -1,0 +1,149 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": { "list": [] },
+  "description": "Contract health, performance and error-rate metrics exported by contract_exporter.py",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "title": "Contract Health Status",
+      "type": "stat",
+      "targets": [{ "expr": "nebula_contract_health_status", "legendFormat": "Healthy", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "id": 2,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "value" },
+      "title": "Time Since Last Success",
+      "type": "stat",
+      "targets": [{ "expr": "time() - nebula_contract_last_success_timestamp", "legendFormat": "Age", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "percentunit",
+          "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.05 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "id": 3,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "title": "Contract Error Rate",
+      "type": "stat",
+      "targets": [{ "expr": "rate(nebula_contract_errors_total[5m]) / clamp_min(rate(nebula_contract_invocations_total[5m]), 1)", "legendFormat": "Error Rate", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "id": 4,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "value" },
+      "title": "Invocations / min",
+      "type": "stat",
+      "targets": [{ "expr": "rate(nebula_contract_invocations_total[5m]) * 60", "legendFormat": "TX/min", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "id": 5,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "value" },
+      "title": "Active Users (rate)",
+      "type": "stat",
+      "targets": [{ "expr": "rate(soroban_active_users[5m])", "legendFormat": "Users/s", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "id": 6,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "value" },
+      "title": "Soroban Tx Success Rate",
+      "type": "stat",
+      "targets": [{ "expr": "rate(soroban_tx_success_total[5m]) / clamp_min(rate(soroban_tx_success_total[5m]) + rate(soroban_tx_failure_total[5m]), 1)", "legendFormat": "Success Rate", "refId": "A" }]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2 }, "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 7,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "list" } },
+      "title": "Invocations and Errors by Method",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "sum by (method) (rate(nebula_contract_invocations_total[5m]))", "legendFormat": "{{method}} invocations", "refId": "A" },
+        { "expr": "sum by (reason) (rate(nebula_contract_errors_total[5m]))", "legendFormat": "{{reason}}", "refId": "B" }
+      ]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2 } }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 8,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "list" } },
+      "title": "Gas Instructions (p50 / p95 / p99)",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(nebula_contract_gas_instructions_bucket[5m]))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, rate(nebula_contract_gas_instructions_bucket[5m]))", "legendFormat": "p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, rate(nebula_contract_gas_instructions_bucket[5m]))", "legendFormat": "p99", "refId": "C" }
+      ]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2 }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 9,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "list" } },
+      "title": "Horizon RPC Latency",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(horizon_request_duration_seconds_bucket[5m]))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, rate(horizon_request_duration_seconds_bucket[5m]))", "legendFormat": "p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, rate(horizon_request_duration_seconds_bucket[5m]))", "legendFormat": "p99", "refId": "C" }
+      ]
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2 } }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 10,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "list" } },
+      "title": "Soroban Transaction Outcomes",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(soroban_tx_success_total[5m])", "legendFormat": "Success", "refId": "A" },
+        { "expr": "rate(soroban_tx_failure_total[5m])", "legendFormat": "Failure", "refId": "B" },
+        { "expr": "rate(soroban_gas_used_total[5m])", "legendFormat": "Gas used", "refId": "C" }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["stellar", "soroban", "nebula", "contract", "health"],
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "title": "Stellar Nebula Nomad — Contract Health",
+  "uid": "nebula-contract-health",
+  "version": 1
+}

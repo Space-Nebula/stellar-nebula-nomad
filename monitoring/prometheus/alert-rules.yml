@@ -3,6 +3,28 @@ groups:
     interval: 30s
     rules:
 
+      # Contract health gauge (0 = unhealthy, 1 = healthy) from exporter
+      - alert: ContractUnhealthy
+        expr: nebula_contract_health_status == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: contract
+        annotations:
+          summary: "Contract health check failing"
+          description: "nebula_contract_health_status has been 0 for more than 2 minutes."
+          runbook: "https://github.com/yourorg/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#monitoring--alerts"
+
+      # System Health: Subsystem or overall system degraded
+      - alert: SystemHealthDegraded
+        expr: nebula_system_health_status == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Nebula system health degraded"
+          description: "One or more core subsystems (Horizon, Contract, Exporter) are unhealthy."
+
       # Contract invocation error rate > 5%
       - alert: HighContractErrorRate
         expr: |
@@ -10,7 +32,7 @@ groups:
             rate(nebula_contract_errors_total[5m])
             /
             rate(nebula_contract_invocations_total[5m])
-          ) > 0.05
+          ) > 0.05 or nebula_contract_error_rate > 0.05
         for: 2m
         labels:
           severity: critical
@@ -18,18 +40,39 @@ groups:
           summary: "High contract error rate ({{ $value | humanizePercentage }})"
           description: "Contract error rate has exceeded 5% for more than 2 minutes."
 
+      # Contract response time / latency p95 > 2s
+      - alert: HighContractResponseTime
+        expr: nebula_contract_response_time_p95_seconds > 2.0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High contract response latency (p95 > 2s)"
+          description: "95th percentile contract response time has exceeded 2.0 seconds."
+
       # Gas usage per transaction > 1M instructions
       - alert: HighGasUsage
         expr: |
           histogram_quantile(0.95,
             rate(nebula_contract_gas_instructions_bucket[10m])
-          ) > 1000000
+          ) > 1000000 or nebula_contract_gas_instructions_avg > 1000000
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "High gas usage detected (p95 > 1M instructions)"
           description: "95th percentile gas usage has exceeded 1,000,000 CPU instructions."
+
+      # Gas Spike Anomaly
+      - alert: GasSpikeAnomaly
+        expr: |
+          rate(nebula_contract_gas_instructions_total[5m]) > (rate(nebula_contract_gas_instructions_total[1h] offset 1h) * 1.5)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Contract gas spike anomaly detected"
+          description: "Gas instructions consumption has surged over 50% compared to previous hour."
 
       # Transaction throughput drops below 1 tx/min
       - alert: LowTransactionThroughput
@@ -47,13 +90,23 @@ groups:
         expr: |
           histogram_quantile(0.99,
             rate(horizon_request_duration_seconds_bucket[5m])
-          ) > 3
+          ) > 3 or horizon_request_duration_seconds > 3.0
         for: 5m
         labels:
           severity: critical
         annotations:
           summary: "Slow Horizon RPC responses (p99 > 3s)"
           description: "Horizon RPC 99th percentile latency has exceeded 3 seconds."
+
+      # User metrics anomaly: sharp drop in active users
+      - alert: UserActivityDropAnomaly
+        expr: nebula_active_users{period="hourly"} < 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Abnormal drop in active users"
+          description: "Hourly active users dropped below threshold of 5 for 15 minutes."
 
       # Node memory > 90%
       - alert: HighMemoryUsage
@@ -143,7 +196,7 @@ groups:
       # Migration in progress but incomplete
       - alert: MigrationTimeout
         expr: |
-          (time() - migration_started_timestamp) > 3600 AND migration_status == "in_progress"
+          (time() - migration_started_timestamp) > 3600 and migration_status == 1
         for: 1m
         labels:
           severity: critical
@@ -151,7 +204,21 @@ groups:
           summary: "Migration timeout - exceeded 1 hour"
           description: "Data migration has been running for over 1 hour."
 
-      # Backup pipeline
+      # Active user count anomaly
+      - alert: ActiveUserCountAnomalous
+        expr: |
+          abs(
+            rate(soroban_active_users[1h])
+            - avg_over_time(rate(soroban_active_users[1h])[24h:1h])
+          ) > 2 * stddev_over_time(rate(soroban_active_users[1h])[24h:1h])
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Anomalous active user count"
+          description: "Active user count deviates significantly from historical average."
+
+      # Backup pipeline failure
       - alert: BackupFailed
         expr: backup_success == 0
         for: 5m
@@ -169,17 +236,3 @@ groups:
         annotations:
           summary: "No successful backup in 48 hours"
           description: "Last successful backup was more than 48 hours ago."
-
-      # Active user count anomaly
-      - alert: ActiveUserCountAnomalous
-        expr: |
-          abs(
-            rate(soroban_active_users[1h])
-            - avg_over_time(rate(soroban_active_users[1h])[24h:1h])
-          ) > 2 * stddev_over_time(rate(soroban_active_users[1h])[24h:1h])
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Anomalous active user count"
-          description: "Active user count deviates significantly from historical average."

@@ -512,9 +512,13 @@ fn next_pool_id(env: &Env) -> u64 {
     n + 1
 }
 
-/// Constant product formula: k = reserve_a * reserve_b
+/// Constant product formula: k = reserve_a * reserve_b.
+///
+/// Uses saturating multiplication so an extreme reserve pair cannot abort the
+/// host with an overflow trap. Reserves are validated before they reach this
+/// helper, so saturation is a defensive backstop only.
 fn constant_product(reserve_a: i128, reserve_b: i128) -> i128 {
-    reserve_a * reserve_b
+    reserve_a.saturating_mul(reserve_b)
 }
 
 /// Calculate output amount for a given input using constant product AMM.
@@ -544,10 +548,10 @@ fn calculate_lp_mint(
         // First deposit: geometric mean
         let sqrt = |x: i128| -> i128 {
             let mut r = x;
-            let mut s = x / 2 + 1;
+            let mut s = (x / 2).saturating_add(1);
             while s < r {
                 r = s;
-                s = (s + x / s) / 2;
+                s = s.saturating_add(x / s) / 2;
             }
             r
         };
@@ -937,7 +941,7 @@ pub fn swap_exact_input(
             env.storage()
                 .persistent()
                 .set(&AmmKey::Pool(last_pool_id), &last_pool);
-            current_amount -= fee;
+            current_amount = crate::safe_math::saturating_sub_i128(current_amount, fee);
         }
 
         if current_amount < min_amount_out {

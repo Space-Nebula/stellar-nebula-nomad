@@ -52,3 +52,12 @@ module "secrets" {
   source      = "../../modules/secrets"
   environment = "dev"
 }
+
+module "cdn" {
+  source      = "../../modules/cdn"
+  environment = "dev"
+}
+
+output "cdn_url" {
+  value = module.cdn.distribution_url
+}

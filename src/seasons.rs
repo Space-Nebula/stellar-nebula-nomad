@@ -304,6 +304,10 @@ pub fn initialize_season(
         .set(&SeasonKey::CurrentSeason, &season);
     env.storage().instance().set(&SeasonKey::SeasonCount, &id);
 
+    // Seed the free + premium battle-pass tracks for the opening season. The
+    // admin already authorized this frame, so use the internal (no-auth) helper.
+    let _ = crate::battle_pass::seed_default_season_rewards(env, id);
+
     env.events().publish(
         (symbol_short!("season"), symbol_short!("started")),
         (id, start_time, end_time),
@@ -598,6 +602,9 @@ pub fn rollover_season(
     env.storage()
         .instance()
         .set(&SeasonKey::SeasonCount, &new_id);
+
+    // New season, fresh progression: seed both battle-pass reward tracks.
+    let _ = crate::battle_pass::seed_default_season_rewards(env, new_id);
 
     // A rollover is one atomic transition (old season archived, new one live),
     // so a single event carries both sides instead of `ended` + `started`.

@@ -86,6 +86,15 @@ module "secrets" {
   environment = "staging"
 }
 
+module "cdn" {
+  source      = "../../modules/cdn"
+  environment = "staging"
+}
+
+output "cdn_url" {
+  value = module.cdn.distribution_url
+}
+
 resource "aws_security_group" "team_access" {
   name_prefix = "nebula-nomad-staging-team-"
   vpc_id      = var.vpc_id

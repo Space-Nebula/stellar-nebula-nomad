@@ -114,6 +114,18 @@ pub enum ProxyError {
     NotInitialized = 6,
 }
 
+impl crate::error_standard::StandardContractError for ProxyError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "proxy",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ─── Initialization ───────────────────────────────────────────────────────────
 
 /// Initialize the proxy with the given `admin` address.

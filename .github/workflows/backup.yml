@@ -21,13 +21,18 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # `secrets` cannot be referenced directly in an `if:` expression; expose
+      # the presence check through the env context instead.
+      HAS_AWS_CREDENTIALS: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+      VALIDATION_REPORT_DIR: backups/verification-reports
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create backup directory
-        run: mkdir -p backups
+      - name: Create backup and report directories
+        run: mkdir -p backups "$VALIDATION_REPORT_DIR"
 
       - name: Run backup script (Horizon snapshots)
         env:
@@ -37,31 +42,102 @@ jobs:
           HORIZON_URL: ${{ secrets.HORIZON_URL }}
           RETENTION_DAYS: 30
         run: |
-          chmod +x scripts/backup.sh
+          chmod +x scripts/backup.sh scripts/verify-backup.sh
           ./scripts/backup.sh
 
       - name: Upload backup to S3
-        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+        if: env.HAS_AWS_CREDENTIALS == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
           S3_BUCKET: ${{ secrets.S3_BACKUP_BUCKET }}
         run: |
-          aws s3 cp backups/*.tar.gz s3://$S3_BUCKET/backups/ --recursive
+          if [ -z "${S3_BUCKET:-}" ] || [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "S3 backup not configured (S3_BUCKET / AWS credentials missing); skipping."
+            exit 0
+          fi
+          aws s3 cp backups/*.tar.gz "s3://$S3_BUCKET/backups/" --recursive
 
       - name: Upload backup artifact
-        uses: actions/upload-artifact@v7
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: backup-${{ github.run_number }}
           path: backups/*.tar.gz
           retention-days: 30
+          if-no-files-found: error
 
       - name: Verify backup integrity
         run: |
-          chmod +x scripts/restore.sh
           LATEST_BACKUP=$(ls -t backups/*.tar.gz | head -n 1)
-          ./scripts/restore.sh --backup "$LATEST_BACKUP" --verify-only
+          echo "Verifying backup: $LATEST_BACKUP"
+          ./scripts/verify-backup.sh \
+            --backup "$LATEST_BACKUP" \
+            --report-dir "$VALIDATION_REPORT_DIR" \
+            --dry-run
+
+      - name: Fail job if backup verification failed
+        if: always()
+        run: |
+          REPORT="$VALIDATION_REPORT_DIR/backup-validation.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::Backup validation report is missing - verification did not complete"
+            exit 1
+          fi
+          STATUS=$(jq -r '.status // "fail"' "$REPORT")
+          echo "Backup verification status: $STATUS"
+          if [ "$STATUS" != "pass" ]; then
+            echo "::error::Backup verification FAILED; see backup-validation-report.md"
+            jq -r '.errors[]?' "$REPORT" | while read -r err; do echo "::error::$err"; done
+            exit 1
+          fi
+
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-validation-${{ github.run_number }}
+          path: ${{ env.VALIDATION_REPORT_DIR }}
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Publish backup status metrics for monitoring exporter
+        if: always()
+        run: |
+          mkdir -p backup-metrics
+          if [ -f "$VALIDATION_REPORT_DIR/backup_status.prom" ]; then
+            cp "$VALIDATION_REPORT_DIR/backup_status.prom" backup-metrics/backup_status.prom
+          else
+            # Ensure a failure is still visible to BackupFailed/NoRecentBackup.
+            {
+              echo '# HELP backup_success Whether the most recent backup verification succeeded.'
+              echo '# TYPE backup_success gauge'
+              echo 'backup_success{archive="unknown"} 0'
+              echo '# TYPE backup_last_success_timestamp gauge'
+              echo 'backup_last_success_timestamp 0'
+              echo '# TYPE backup_duration_seconds gauge'
+              echo 'backup_duration_seconds 0'
+              echo '# TYPE backup_size_bytes gauge'
+              echo 'backup_size_bytes 0'
+              echo '# TYPE backup_verified_timestamp gauge'
+              echo "backup_verified_timestamp $(date -u +%s)"
+            } > backup-metrics/backup_status.prom
+          fi
+          echo "### Backup status metrics" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat backup-metrics/backup_status.prom >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat backup-metrics/backup_status.prom
+
+      - name: Upload backup status metrics artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-status-${{ github.run_number }}
+          path: backup-metrics/backup_status.prom
+          retention-days: 30
+          if-no-files-found: error
 
       - name: Send success notification
         if: success()
@@ -70,10 +146,10 @@ jobs:
           status: custom
           custom_payload: |
             {
-              text: "✅ Backup completed successfully",
+              text: "✅ Backup completed and verified successfully",
               attachments: [{
                 color: 'good',
-                text: `Backup completed for ${process.env.AS_WORKFLOW}\nRun: ${process.env.AS_RUN_NUMBER}`
+                text: `Backup verified for ${process.env.AS_WORKFLOW}\nRun: ${process.env.AS_RUN_NUMBER}`
               }]
             }
         env:
@@ -87,10 +163,10 @@ jobs:
           status: custom
           custom_payload: |
             {
-              text: "❌ Backup failed",
+              text: "❌ Backup failed or failed verification",
               attachments: [{
                 color: 'danger',
-                text: `Backup failed for ${process.env.AS_WORKFLOW}\nRun: ${process.env.AS_RUN_NUMBER}`
+                text: `Backup failed for ${process.env.AS_WORKFLOW}\nRun: ${process.env.AS_RUN_NUMBER}. Check the validation report and backup_status.prom.`
               }]
             }
         env:
@@ -99,38 +175,117 @@ jobs:
 
   monthly-drill:
     runs-on: ubuntu-latest
-    # Run on first Monday of each month
-    if: github.event.schedule == '0 2 * * *' && github.event_name == 'schedule'
     needs: backup
+    env:
+      DRILL_REPORT_DIR: drill-reports
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # The schedule fires daily; only the first Monday of the month is the
+      # monthly drill. Compute the gate in the shell rather than relying on an
+      # `if:` expression that GitHub Actions cannot evaluate for dates.
+      - name: First-Monday gate
+        id: gate
+        run: |
+          if [ "$(date -u +%u)" = "1" ] && [ "$(date -u +%d)" -le 7 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download latest backup
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: backup-${{ github.run_number }}
           path: backups/
 
-      - name: Run disaster recovery drill
+      - name: Run disaster recovery drill (dry run, no network/deploy)
         run: |
-          chmod +x scripts/restore.sh
+          chmod +x scripts/verify-backup.sh
           LATEST_BACKUP=$(ls -t backups/*.tar.gz | head -n 1)
-          ./scripts/restore.sh \
+          echo "Disaster recovery drill for: $LATEST_BACKUP"
+          ./scripts/verify-backup.sh \
             --backup "$LATEST_BACKUP" \
-            --network testnet \
-            --dry-run
+            --dry-run \
+            --report-dir "$DRILL_REPORT_DIR"
+
+      - name: Fail drill if verification failed
+        if: always()
+        run: |
+          REPORT="$DRILL_REPORT_DIR/backup-validation.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::Drill validation report is missing"
+            exit 1
+          fi
+          STATUS=$(jq -r '.status // "fail"' "$REPORT")
+          if [ "$STATUS" != "pass" ]; then
+            echo "::error::Disaster recovery drill FAILED (status: $STATUS)"
+            exit 1
+          fi
+          echo "Disaster recovery drill verification status: $STATUS"
 
       - name: Generate drill report
+        if: always()
         run: |
-          echo "# Disaster Recovery Drill Report" > drill-report.md
-          echo "Date: $(date)" >> drill-report.md
-          echo "Status: Success" >> drill-report.md
-          echo "Recovery Time: < 1 hour" >> drill-report.md
+          mkdir -p "$DRILL_REPORT_DIR"
+          {
+            echo "# Disaster Recovery Drill Report"
+            echo
+            echo "- Date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- Run: ${{ github.run_number }}"
+            if [ -f "$DRILL_REPORT_DIR/backup-validation.json" ]; then
+              echo "- Validation status: $(jq -r '.status // "unknown"' "$DRILL_REPORT_DIR/backup-validation.json")"
+            else
+              echo "- Validation status: unknown"
+            fi
+            echo "- Recovery Time: < 1 hour (RTO target)"
+            echo "- Mode: dry run (no network calls, no deployments)"
+          } > drill-report.md
+          cat drill-report.md
 
       - name: Upload drill report
-        uses: actions/upload-artifact@v7
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: drill-report-${{ github.run_number }}
-          path: drill-report.md
+          path: |
+            drill-report.md
+            ${{ env.DRILL_REPORT_DIR }}
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Send drill success notification
+        if: success()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              text: "✅ Disaster recovery drill (dry run) passed",
+              attachments: [{
+                color: 'good',
+                text: `DR drill passed for ${process.env.AS_WORKFLOW}\nRun: ${process.env.AS_RUN_NUMBER}`
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+      - name: Send drill failure notification
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              text: "❌ Disaster recovery drill (dry run) failed",
+              attachments: [{
+                color: 'danger',
+                text: `DR drill failed for ${process.env.AS_WORKFLOW}\nRun: ${process.env.AS_RUN_NUMBER}. Escalate immediately.`
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true

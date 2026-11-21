@@ -1,0 +1,52 @@
+{
+  "captureModes": ["browser"],
+  "browsers": {
+    "chromium": {
+      "launchArgs": ["--disable-dev-shm-usage"]
+    }
+  },
+  "viewport": {
+    "default": {
+      "name": "Desktop",
+      "width": 1280,
+      "height": 720,
+      "deviceScaleFactor": 1
+    },
+    "mobile": {
+      "name": "Mobile",
+      "width": 375,
+      "height": 812,
+      "deviceScaleFactor": 2,
+      "mobile": true,
+      "hasTouch": true
+    },
+    "tablet": {
+      "name": "Tablet",
+      "width": 768,
+      "height": 1024,
+      "deviceScaleFactor": 1,
+      "mobile": true
+    }
+  },
+  "stories": [
+    {
+      "path": "**/*.stories.@(ts|tsx|js|jsx)",
+      "skip": ["**/*.do-not-snapshot.stories.*"]
+    }
+  ],
+  "comparison": {
+    "threshold": 0.01,
+    "thresholdType": "relative"
+  },
+  "outputDir": "./visual-regression-results",
+  "baselineDir": "./visual-regression-baselines",
+  "diffDir": "./visual-regression-diffs",
+  "maxRetries": 3,
+  "concurrency": 4,
+  "timeout": 30000,
+  "exitCode": {
+    "noDifferences": 0,
+    "withDifferences": 1,
+    "withErrors": 2
+  }
+}

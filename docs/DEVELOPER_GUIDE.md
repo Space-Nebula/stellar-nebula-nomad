@@ -330,6 +330,20 @@ Closes #170
 - **Use symbol_short!() for keys** - reduces storage footprint
 - **Cache computed values** when used multiple times in same function
 
+### Memory Safety Checks
+
+The `Memory Leak Detection` CI job runs `scripts/valgrind-leak-check.sh` on every
+native test binary. Before opening a PR, run the same script locally (requires
+`valgrind` and `jq`). It fails only on definite/indirect leaks; Rust test
+harnesses intentionally keep some thread-local allocations "still reachable".
+
+Guidelines:
+
+- RAII types (`Vec`, `Map`, `Bytes`) release their buffers on drop; avoid
+  duplicating them in loops when a borrow is sufficient.
+- Release held guards and rollback state on every error path.
+- Do not leak resources across test cases; storage is isolated per test.
+
 ### Testing Gotchas
 
 - **Mock signatures before calling authenticated functions**: `env.mock_all_signatures()`

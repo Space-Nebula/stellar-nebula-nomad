@@ -25,6 +25,10 @@ pub enum DataKey {
     Resource(Symbol),
     /// Original resource that was fractionalized (resource_id -> owner).
     OriginalResourceOwner(u64),
+    /// Open sale listing for a share (share_id -> ShareListing).
+    FracShareListing(u64),
+    /// Last traded price per unit for a resource type (price discovery).
+    FracLastUnitPrice(Symbol),
 }
 
 // ─── Error Handling ───────────────────────────────────────────────────────
@@ -53,6 +57,10 @@ pub enum FractionalError {
     AlreadyFractionalized = 9,
     /// Maximum fractions per transaction exceeded.
     MaxFractionsExceeded = 10,
+    /// Listing price must be positive.
+    InvalidPrice = 11,
+    /// The share is not listed for sale.
+    NotListed = 12,
 }
 
 impl crate::error_standard::StandardContractError for FractionalError {
@@ -63,11 +71,13 @@ impl crate::error_standard::StandardContractError for FractionalError {
             Self::InsufficientShares | Self::MaxFractionsExceeded => {
                 (ErrorKind::ResourceLimit, false)
             }
-            Self::InvalidShareCount | Self::ShareTooSmall | Self::IncompatibleShares => {
-                (ErrorKind::Validation, false)
-            }
+            Self::InvalidShareCount
+            | Self::ShareTooSmall
+            | Self::IncompatibleShares
+            | Self::InvalidPrice => (ErrorKind::Validation, false),
             Self::NotOwner | Self::Unauthorized => (ErrorKind::Authorization, false),
             Self::AlreadyFractionalized => (ErrorKind::Conflict, false),
+            Self::NotListed => (ErrorKind::NotFound, false),
         };
         crate::error_standard::ErrorDescriptor {
             module: "fractional_resources",
@@ -101,6 +111,17 @@ pub struct OriginalResource {
     pub resource_type: Symbol,
     pub total_amount: u32,
     pub is_fractionalized: bool,
+}
+
+/// A share offered for sale on the micro-market.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct ShareListing {
+    pub share_id: u64,
+    pub seller: Address,
+    /// Asking price for the whole share.
+    pub price: i128,
+    pub listed_at: u64,
 }
 
 /// Configuration for fractionalization.
@@ -362,6 +383,11 @@ pub fn transfer_share(
         return Err(FractionalError::NotOwner);
     }
 
+    // A transferred share can no longer be sold under the old owner's listing.
+    env.storage()
+        .persistent()
+        .remove(&DataKey::FracShareListing(share_id));
+
     // Update share ownership
     remove_share_from_owner(env, from, share_id);
     share.owner = to.clone();
@@ -377,6 +403,116 @@ pub fn transfer_share(
     );
 
     Ok(share)
+}
+
+// ─── Micro-trading ────────────────────────────────────────────────────────
+
+/// Lists a share for sale at `price`. Re-listing updates the price.
+pub fn list_share_for_sale(
+    env: &Env,
+    seller: &Address,
+    share_id: u64,
+    price: i128,
+) -> Result<ShareListing, FractionalError> {
+    seller.require_auth();
+    if price <= 0 {
+        return Err(FractionalError::InvalidPrice);
+    }
+    let share = get_share(env, share_id).ok_or(FractionalError::ShareNotFound)?;
+    if share.owner != *seller {
+        return Err(FractionalError::NotOwner);
+    }
+    let listing = ShareListing {
+        share_id,
+        seller: seller.clone(),
+        price,
+        listed_at: env.ledger().timestamp(),
+    };
+    env.storage()
+        .persistent()
+        .set(&DataKey::FracShareListing(share_id), &listing);
+    env.events().publish(
+        (symbol_short!("frac"), symbol_short!("listed")),
+        (seller.clone(), share_id, price),
+    );
+    Ok(listing)
+}
+
+/// Removes a listing. Only the seller can cancel it.
+pub fn cancel_share_listing(
+    env: &Env,
+    seller: &Address,
+    share_id: u64,
+) -> Result<(), FractionalError> {
+    seller.require_auth();
+    let listing = get_share_listing(env, share_id).ok_or(FractionalError::NotListed)?;
+    if listing.seller != *seller {
+        return Err(FractionalError::NotOwner);
+    }
+    env.storage()
+        .persistent()
+        .remove(&DataKey::FracShareListing(share_id));
+    Ok(())
+}
+
+/// Buys a listed share: ownership moves to the buyer, the listing closes and
+/// the sale updates the resource type's last unit price (price discovery).
+/// Settlement of `price` happens in the trading layer; this records the trade.
+/// Returns the price paid.
+pub fn buy_listed_share(
+    env: &Env,
+    buyer: &Address,
+    share_id: u64,
+) -> Result<i128, FractionalError> {
+    buyer.require_auth();
+    let listing = get_share_listing(env, share_id).ok_or(FractionalError::NotListed)?;
+    let mut share = get_share(env, share_id).ok_or(FractionalError::ShareNotFound)?;
+    if share.owner != listing.seller {
+        // Stale listing: the share changed hands another way.
+        env.storage()
+            .persistent()
+            .remove(&DataKey::FracShareListing(share_id));
+        return Err(FractionalError::NotListed);
+    }
+    if share.owner == *buyer {
+        return Err(FractionalError::NotOwner);
+    }
+
+    remove_share_from_owner(env, &listing.seller, share_id);
+    share.owner = buyer.clone();
+    env.storage()
+        .persistent()
+        .set(&DataKey::Share(share_id), &share);
+    add_share_to_owner(env, buyer, share_id);
+    env.storage()
+        .persistent()
+        .remove(&DataKey::FracShareListing(share_id));
+
+    let unit_price = listing.price / i128::from(share.amount.max(1));
+    env.storage().persistent().set(
+        &DataKey::FracLastUnitPrice(share.resource_type.clone()),
+        &unit_price,
+    );
+
+    env.events().publish(
+        (symbol_short!("frac"), symbol_short!("sold")),
+        (listing.seller, buyer.clone(), share_id, listing.price),
+    );
+    Ok(listing.price)
+}
+
+/// Open listing for a share, if any.
+pub fn get_share_listing(env: &Env, share_id: u64) -> Option<ShareListing> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::FracShareListing(share_id))
+}
+
+/// Last traded price per resource unit for `resource_type`, if it has traded.
+pub fn get_last_share_price(env: &Env, resource_type: Symbol) -> Option<i128> {
+    env.storage()
+        .persistent()
+        .get(&DataKey::FracLastUnitPrice(resource_type))
 }
 
 // ─── View Functions ───────────────────────────────────────────────────────

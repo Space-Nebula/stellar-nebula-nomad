@@ -570,3 +570,95 @@ pub fn get_guild_boss(env: &Env, alliance_id: u64) -> Option<GuildBossState> {
     let boss_key = AllianceKey::GuildBoss(alliance_id);
     env.storage().persistent().get(&boss_key)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::{contract_env, in_contract};
+    use soroban_sdk::testutils::Address as _;
+
+    fn env_with_auth() -> Env {
+        let env = contract_env();
+        env.mock_all_auths();
+        env
+    }
+
+    fn alliance_name(env: &Env) -> String {
+        String::from_str(env, "Nomads")
+    }
+
+    #[test]
+    fn creating_alliance_sets_leader_as_member() {
+        let env = env_with_auth();
+        let leader = Address::generate(&env);
+        let alliance_id = in_contract(&env, || {
+            found_alliance(&env, leader.clone(), alliance_name(&env))
+        })
+        .unwrap();
+
+        assert_eq!(get_player_alliance(&env, leader.clone()), Some(alliance_id));
+        let alliance = get_alliance(&env, alliance_id).unwrap();
+        assert_eq!(alliance.founder, leader);
+        assert!(alliance.members.iter().any(|member| member == &leader));
+    }
+
+    #[test]
+    fn joining_twice_does_not_duplicate_membership() {
+        let env = env_with_auth();
+        let leader = Address::generate(&env);
+        let player = Address::generate(&env);
+        let alliance_id = in_contract(&env, || {
+            found_alliance(&env, leader.clone(), alliance_name(&env))
+        })
+        .unwrap();
+
+        assert!(in_contract(&env, || join_alliance(&env, alliance_id, player.clone())).is_ok());
+        assert!(matches!(
+            in_contract(&env, || join_alliance(&env, alliance_id, player.clone())),
+            Err(AllianceError::AlreadyInAlliance)
+        ));
+
+        let alliance = get_alliance(&env, alliance_id).unwrap();
+        let member_count = alliance
+            .members
+            .iter()
+            .filter(|member| member == &player)
+            .count();
+        assert_eq!(member_count, 1);
+        assert_eq!(get_player_alliance(&env, player.clone()), Some(alliance_id));
+    }
+
+    #[test]
+    fn leaving_alliance_not_in_fails_clear() {
+        let env = env_with_auth();
+        let outsider = Address::generate(&env);
+        assert_eq!(
+            in_contract(&env, || leave_alliance(&env, outsider.clone())),
+            Err(AllianceError::NotMember)
+        );
+    }
+
+    #[test]
+    fn leader_leaving_does_not_orphan_alliance() {
+        let env = env_with_auth();
+        let leader = Address::generate(&env);
+        let member = Address::generate(&env);
+        let alliance_id = in_contract(&env, || {
+            found_alliance(&env, leader.clone(), alliance_name(&env))
+        })
+        .unwrap();
+        assert!(in_contract(&env, || join_alliance(&env, alliance_id, member.clone())).is_ok());
+
+        // Behavior: leaving removes the player from membership but the alliance
+        // itself persists (is_active stays true) and remaining members are kept,
+        // so the alliance is not silently orphaned.
+        assert!(in_contract(&env, || leave_alliance(&env, leader.clone())).is_ok());
+
+        assert_eq!(get_player_alliance(&env, leader.clone()), None);
+        assert_eq!(get_player_alliance(&env, member.clone()), Some(alliance_id));
+        let alliance = get_alliance(&env, alliance_id).unwrap();
+        assert!(alliance.is_active);
+        assert!(!alliance.members.iter().any(|m| m == &leader));
+        assert!(alliance.members.iter().any(|m| m == &member));
+    }
+}

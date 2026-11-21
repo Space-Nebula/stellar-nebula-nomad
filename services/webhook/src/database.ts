@@ -3,9 +3,15 @@ import { WebhookRegistration, DeliveryAttempt } from "./types";
 
 export class Database {
   private pool: Pool;
+  private activeWebhooksCache: { value: WebhookRegistration[]; expiresAt: number } | null = null;
 
   constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
+    this.pool = new Pool({
+      connectionString,
+      max: 20,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+    });
     this.initSchema();
   }
 
@@ -34,12 +40,18 @@ export class Database {
       );
 
       CREATE INDEX IF NOT EXISTS idx_webhook_active ON webhooks(active);
+      CREATE INDEX IF NOT EXISTS idx_webhook_active_created ON webhooks(active, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_delivery_webhook ON delivery_attempts(webhook_id);
       CREATE INDEX IF NOT EXISTS idx_delivery_status ON delivery_attempts(status);
+      CREATE INDEX IF NOT EXISTS idx_delivery_webhook_status_timestamp
+        ON delivery_attempts(webhook_id, status, timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_delivery_event_webhook
+        ON delivery_attempts(event_id, webhook_id);
     `);
   }
 
   async saveWebhook(webhook: WebhookRegistration): Promise<void> {
+    this.activeWebhooksCache = null;
     await this.pool.query(
       `INSERT INTO webhooks (id, url, events, secret, active, filters, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -81,6 +93,7 @@ export class Database {
     }
 
     if (fields.length > 0) {
+      this.activeWebhooksCache = null;
       values.push(id);
       await this.pool.query(
         `UPDATE webhooks SET ${fields.join(", ")} WHERE id = $${paramCount}`,
@@ -90,15 +103,24 @@ export class Database {
   }
 
   async deleteWebhook(id: string): Promise<void> {
+    this.activeWebhooksCache = null;
     await this.pool.query("DELETE FROM webhooks WHERE id = $1", [id]);
   }
 
   async getActiveWebhooks(): Promise<WebhookRegistration[]> {
+    const now = Date.now();
+    if (this.activeWebhooksCache && this.activeWebhooksCache.expiresAt > now) {
+      return this.activeWebhooksCache.value;
+    }
+
     const result = await this.pool.query(
-      "SELECT * FROM webhooks WHERE active = true",
+      `SELECT id, url, events, secret, active, filters, created_at
+       FROM webhooks
+       WHERE active = true
+       ORDER BY created_at DESC`,
     );
 
-    return result.rows.map((row) => ({
+    const webhooks = result.rows.map((row) => ({
       id: row.id,
       url: row.url,
       events: row.events,
@@ -107,6 +129,8 @@ export class Database {
       createdAt: row.created_at,
       filters: row.filters,
     }));
+    this.activeWebhooksCache = { value: webhooks, expiresAt: now + 30_000 };
+    return webhooks;
   }
 
   async saveDeliveryAttempt(attempt: DeliveryAttempt): Promise<void> {
@@ -133,7 +157,8 @@ export class Database {
     limit: number,
   ): Promise<DeliveryAttempt[]> {
     const result = await this.pool.query(
-      `SELECT * FROM delivery_attempts 
+      `SELECT id, webhook_id, event_id, attempt, status, status_code, response, error, timestamp
+       FROM delivery_attempts
        WHERE webhook_id = $1 AND status = 'failed'
        ORDER BY timestamp DESC
        LIMIT $2`,

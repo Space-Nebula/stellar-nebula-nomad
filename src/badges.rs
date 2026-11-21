@@ -118,6 +118,18 @@ pub enum BadgeError {
     SameOwner = 4,
 }
 
+impl crate::error_standard::StandardContractError for BadgeError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "badges",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ─── Mint ─────────────────────────────────────────────────────────────────────
 
 /// Mint a badge NFT with full display metadata.

@@ -61,9 +61,10 @@ pub fn emit_stats_snapshot(env: &Env, stats: ContractStats) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::has_event_topics;
     use soroban_sdk::testutils::Address as _;
 
-    // #[test]
+    #[test]
     fn test_register_metadata() {
         let env = Env::default();
         env.mock_all_auths();
@@ -79,30 +80,34 @@ mod tests {
             ),
         };
         register_expert_metadata(&env, &admin, metadata);
+        assert!(has_event_topics(&env, &["expert", "meta"]));
     }
 
-    // #[test]
+    #[test]
     fn test_emit_interaction_event() {
         let env = Env::default();
         let user = Address::generate(&env);
         emit_interaction_event(&env, &user, String::from_str(&env, "scan"), 100);
+        assert!(has_event_topics(&env, &["expert", "action"]));
     }
 
-    // #[test]
+    #[test]
     fn test_emit_volume_event() {
         let env = Env::default();
         let user = Address::generate(&env);
         emit_volume_event(&env, &user, String::from_str(&env, "trade"), 5000);
+        assert!(has_event_topics(&env, &["expert", "volume"]));
     }
 
-    // #[test]
+    #[test]
     fn test_emit_activity_event() {
         let env = Env::default();
         let user = Address::generate(&env);
         emit_activity_event(&env, &user, String::from_str(&env, "login"));
+        assert!(has_event_topics(&env, &["expert", "active"]));
     }
 
-    // #[test]
+    #[test]
     fn test_emit_stats_snapshot() {
         let env = Env::default();
         let stats = ContractStats {
@@ -112,5 +117,6 @@ mod tests {
             active_today: 12,
         };
         emit_stats_snapshot(&env, stats);
+        assert!(has_event_topics(&env, &["expert", "stats"]));
     }
 }

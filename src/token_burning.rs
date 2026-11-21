@@ -148,6 +148,18 @@ pub enum BurningError {
     AlreadyInitialized = 6,
 }
 
+impl crate::error_standard::StandardContractError for BurningError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "token_burning",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 impl From<MinterError> for BurningError {
     fn from(e: MinterError) -> Self {
         match e {
@@ -552,6 +564,71 @@ pub fn get_burn_record(env: &Env, burn_id: u64) -> Option<BurnRecord> {
     env.storage().persistent().get(&BurnKey::Record(burn_id))
 }
 
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct DeflationProjection {
+    pub initial_supply: u64,
+    pub projected_supply: u64,
+    pub total_burned: u64,
+    pub deflation_bps: u32,
+    pub epochs: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct BurnAnalytics {
+    pub resource_type: ResourceType,
+    pub total_burned: u64,
+    pub current_fee_bps: u32,
+    pub deflation_rate_bps: u32,
+}
+
+/// Model cumulative deflationary supply reduction across `epochs` for a given
+/// per-epoch volume and burn rate in basis points (integer-safe, saturating).
+pub fn project_deflation(
+    initial_supply: u64,
+    burn_rate_bps: u32,
+    volume_per_epoch: u64,
+    epochs: u32,
+) -> DeflationProjection {
+    if initial_supply == 0 || burn_rate_bps == 0 || volume_per_epoch == 0 || epochs == 0 {
+        return DeflationProjection {
+            initial_supply,
+            projected_supply: initial_supply,
+            total_burned: 0,
+            deflation_bps: 0,
+            epochs,
+        };
+    }
+
+    let burn_per_epoch =
+        ((volume_per_epoch as u128).saturating_mul(burn_rate_bps as u128) / 10_000u128) as u64;
+    let total_burned = burn_per_epoch
+        .saturating_mul(epochs as u64)
+        .min(initial_supply);
+    let projected_supply = initial_supply.saturating_sub(total_burned);
+    let deflation_bps =
+        ((total_burned as u128).saturating_mul(10_000u128) / (initial_supply as u128)) as u32;
+
+    DeflationProjection {
+        initial_supply,
+        projected_supply,
+        total_burned,
+        deflation_bps,
+        epochs,
+    }
+}
+
+/// Snapshot of current burn analytics for a resource type.
+pub fn get_burn_analytics(env: &Env, resource_type: ResourceType) -> BurnAnalytics {
+    BurnAnalytics {
+        total_burned: total_burned(env, &resource_type),
+        current_fee_bps: get_burn_fee_bps(env),
+        deflation_rate_bps: deflation_rate_bps(env, &resource_type),
+        resource_type,
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -607,6 +684,30 @@ mod tests {
     }
 
     // ── Burn mechanisms ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_project_deflation_and_burn_analytics() {
+        let proj = project_deflation(1_000_000, 200, 50_000, 10);
+        assert_eq!(proj.total_burned, 10_000);
+        assert_eq!(proj.projected_supply, 990_000);
+        assert_eq!(proj.deflation_bps, 100);
+
+        let zero = project_deflation(1_000_000, 0, 50_000, 10);
+        assert_eq!(zero.total_burned, 0);
+        assert_eq!(zero.projected_supply, 1_000_000);
+
+        let capped = project_deflation(1_000, 5_000, 1_000, 10);
+        assert_eq!(capped.total_burned, 1_000);
+        assert_eq!(capped.projected_supply, 0);
+        assert_eq!(capped.deflation_bps, 10_000);
+
+        let h = setup(1_000);
+        h.run(|| {
+            let analytics = get_burn_analytics(&h.env, h.rt.clone());
+            assert_eq!(analytics.total_burned, 0);
+            assert_eq!(analytics.current_fee_bps, get_burn_fee_bps(&h.env));
+        });
+    }
 
     // // #[test]
     fn voluntary_burn_reduces_balance_and_supply() {

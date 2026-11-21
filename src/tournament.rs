@@ -121,6 +121,18 @@ pub enum TournamentError {
     ResultLocked = 34,
 }
 
+impl crate::error_standard::StandardContractError for TournamentError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "tournament",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 impl From<crate::rate_limiter::RateLimitError> for TournamentError {
     fn from(_: crate::rate_limiter::RateLimitError) -> Self {
         TournamentError::RateLimitExceeded

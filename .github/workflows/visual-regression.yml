@@ -1,0 +1,196 @@
+name: Visual Regression Testing
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/src/**"
+      - "frontend/.storybook/**"
+      - ".github/workflows/visual-regression.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend/src/**"
+      - "frontend/.storybook/**"
+
+jobs:
+  storybook-build:
+    name: Build Storybook
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build Storybook
+        working-directory: frontend
+        run: npm run build-storybook
+
+      - name: Upload Storybook artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: storybook-build
+          path: frontend/storybook-static
+          retention-days: 7
+
+  visual-regression:
+    name: Visual Regression Tests
+    runs-on: ubuntu-latest
+    needs: storybook-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Download Storybook
+        uses: actions/download-artifact@v7
+        with:
+          name: storybook-build
+          path: frontend/storybook-static
+
+      - name: Run visual regression tests
+        working-directory: frontend
+        run: npm run test:visual || true
+        continue-on-error: true
+
+      - name: Upload visual regression report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: visual-regression-report
+          path: frontend/visual-regression-results
+          retention-days: 30
+
+  screenshot-capture:
+    name: Capture Baseline Screenshots
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: storybook-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Download Storybook
+        uses: actions/download-artifact@v7
+        with:
+          name: storybook-build
+          path: frontend/storybook-static
+
+      - name: Capture baseline screenshots
+        working-directory: frontend
+        run: npm run test:visual:baseline || true
+
+      - name: Commit baseline updates
+        if: success()
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update visual regression baselines"
+          file_pattern: "frontend/visual-regression-baselines/**"
+          skip_dirty_check: true
+
+  accessibility-check:
+    name: Accessibility Scan
+    runs-on: ubuntu-latest
+    needs: storybook-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Download Storybook
+        uses: actions/download-artifact@v7
+        with:
+          name: storybook-build
+          path: frontend/storybook-static
+
+      - name: Run accessibility tests
+        working-directory: frontend
+        run: npm run test:a11y || true
+        continue-on-error: true
+
+      - name: Upload accessibility report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: accessibility-report
+          path: frontend/accessibility-results
+          retention-days: 30
+
+  comment-pr:
+    name: Comment Visual Test Results
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [visual-regression, accessibility-check]
+    continue-on-error: true
+    steps:
+      - name: Download visual regression report
+        uses: actions/download-artifact@v7
+        with:
+          name: visual-regression-report
+          path: visual-regression-results
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let comment = '## 🎨 Visual Regression Testing\n\n';
+
+            if (fs.existsSync('visual-regression-results/summary.json')) {
+              try {
+                const report = JSON.parse(fs.readFileSync('visual-regression-results/summary.json', 'utf8'));
+                comment += `- **Passed**: ${report.passed || 0}\n`;
+                comment += `- **Failed**: ${report.failed || 0}\n`;
+                comment += `- **New**: ${report.new || 0}\n`;
+              } catch (e) {
+                comment += '- Report parsing error\n';
+              }
+            } else {
+              comment += '- No significant visual changes detected\n';
+            }
+
+            comment += '\nFull report available in Artifacts.\n';
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

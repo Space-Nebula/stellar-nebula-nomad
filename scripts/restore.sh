@@ -1,398 +1,328 @@
 #!/bin/bash
-# Disaster Recovery Script for Stellar Nebula Nomad Contract
-# Restores contract state from backup
+# Disaster Recovery Script for Stellar Nebula Nomad contract backups.
+#
+# Soroban does not expose a general "import ledger entries" API: arbitrary
+# contract state cannot be written back into a deployed contract from a backup
+# archive. This script therefore does the part that IS verifiable offline:
+#   1. verify the archive and its SHA-256 checksums (fatal on any mismatch),
+#   2. materialise the archived state/metadata/WASM into a target directory,
+#   3. verify the materialised files, and
+#   4. emit an explicit checklist for the remaining on-chain steps.
+#
+# It never claims "SUCCESS" for on-chain restoration; see generate_restore_report.
 
 set -e
 
-# Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BACKUP_DIR="${BACKUP_DIR:-$PROJECT_ROOT/backups}"
 mkdir -p "$BACKUP_DIR"
 LOG_FILE="${BACKUP_DIR}/restore.log"
 
-# Stellar configuration
 NETWORK="${STELLAR_NETWORK:-testnet}"
 CONTRACT_ID="${CONTRACT_ID:-}"
 RPC_URL="${RPC_URL:-https://soroban-testnet.stellar.org}"
+SKIP_RPC_VERIFY="${SKIP_RPC_VERIFY:-false}"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 
-# Logging functions
-log() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
-}
+log()         { echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"; }
+log_error()   { echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1" | tee -a "$LOG_FILE"; }
+log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"; }
+log_info()    { echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$LOG_FILE"; }
 
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE"
-}
-
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1" | tee -a "$LOG_FILE"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
-}
-
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$LOG_FILE"
-}
-
-# Show usage
 usage() {
     cat <<EOF
 Usage: $0 [OPTIONS]
 
-Restore Stellar Nebula Nomad contract state from backup
+Restore a Stellar Nebula Nomad backup archive.
 
 OPTIONS:
-    -b, --backup FILE       Backup file to restore from (required)
-    -c, --contract ID       Contract ID to restore to
-    -n, --network NAME      Network (testnet/mainnet)
-    -d, --dry-run          Perform dry run without actual restore
-    -v, --verify-only      Only verify backup integrity
-        --test-mode        Verify + dry-run (used by backup.sh --test-restore)
-    -h, --help             Show this help message
+    -b, --backup FILE       Backup archive to restore from (required)
+    -c, --contract ID       Target contract ID (required for a live restore)
+    -n, --network NAME      Network name (testnet/mainnet), default: testnet
+    -t, --target-dir DIR    Where to materialise the archived state
+    -d, --dry-run           Validate and report without writing any files
+    -v, --verify-only       Only verify archive integrity and checksums
+        --test-mode         Verify + dry-run (used by backup.sh --test-restore)
+    -h, --help              Show this help
 
-EXAMPLES:
-    # Restore from specific backup
-    $0 --backup backups/nebula_backup_20260428_120000.tar.gz
+MODE SEMANTICS:
+    --verify-only   archive + checksum verification only
+    --dry-run       verification + what-if report, no files written
+    (default)       verification + materialise state into --target-dir, then
+                    print the manual on-chain steps that still must be done
 
-    # Verify backup only
-    $0 --backup backups/nebula_backup_20260428_120000.tar.gz --verify-only
-
-    # Dry run
-    $0 --backup backups/nebula_backup_20260428_120000.tar.gz --dry-run
-
-ENVIRONMENT VARIABLES:
-    CONTRACT_ID            Target contract ID
-    STELLAR_NETWORK        Network (testnet/mainnet)
-    RPC_URL               Stellar RPC endpoint
-    BACKUP_DIR            Backup directory location
-
+ENVIRONMENT:
+    CONTRACT_ID, STELLAR_NETWORK, RPC_URL, BACKUP_DIR, TARGET_DIR,
+    SKIP_RPC_VERIFY=true  (skip the best-effort live contract probe),
+    WEBHOOK_URL
 EOF
     exit 1
 }
 
-# Parse command line arguments
 BACKUP_FILE=""
 DRY_RUN=false
 VERIFY_ONLY=false
+TARGET_DIR="${TARGET_DIR:-}"
 
 while [[ $# -gt 0 ]]; do
-    case $1 in
-        -b|--backup)
-            BACKUP_FILE="$2"
-            shift 2
-            ;;
-        -c|--contract)
-            CONTRACT_ID="$2"
-            shift 2
-            ;;
-        -n|--network)
-            NETWORK="$2"
-            shift 2
-            ;;
-        -d|--dry-run)
-            DRY_RUN=true
-            shift
-            ;;
-        -v|--verify-only)
-            VERIFY_ONLY=true
-            shift
-            ;;
-        --test-mode)
-            VERIFY_ONLY=true
-            DRY_RUN=true
-            shift
-            ;;
-        -h|--help)
-            usage
-            ;;
-        *)
-            log_error "Unknown option: $1"
-            usage
-            ;;
+    case "$1" in
+        -b|--backup)     BACKUP_FILE="$2"; shift 2 ;;
+        -c|--contract)   CONTRACT_ID="$2"; shift 2 ;;
+        -n|--network)    NETWORK="$2"; shift 2 ;;
+        -t|--target-dir) TARGET_DIR="$2"; shift 2 ;;
+        -d|--dry-run)    DRY_RUN=true; shift ;;
+        -v|--verify-only) VERIFY_ONLY=true; shift ;;
+        --test-mode)     VERIFY_ONLY=true; DRY_RUN=true; shift ;;
+        -h|--help)       usage ;;
+        *) log_error "Unknown option: $1"; usage ;;
     esac
 done
 
-# Validate inputs
-if [ -z "$BACKUP_FILE" ]; then
-    log_error "Backup file not specified"
-    usage
-fi
+[ -n "$BACKUP_FILE" ] || { log_error "Backup file not specified"; usage; }
+[ -f "$BACKUP_FILE" ] || { log_error "Backup file not found: $BACKUP_FILE"; exit 1; }
 
-if [ ! -f "$BACKUP_FILE" ]; then
-    log_error "Backup file not found: $BACKUP_FILE"
-    exit 1
-fi
+TEMP_DIR=""
+MATERIALISED=false
+REPORT_STATUS=""
 
-# Check prerequisites
 check_prerequisites() {
     log "Checking prerequisites..."
-    
-    if [ "$VERIFY_ONLY" = false ] && [ "$DRY_RUN" = false ] && ! command -v stellar &> /dev/null; then
-        log_error "Stellar CLI not found. Please install it first."
-        exit 1
-    fi
-    
     if [ "$VERIFY_ONLY" = false ] && [ "$DRY_RUN" = false ] && [ -z "$CONTRACT_ID" ]; then
-        log_error "CONTRACT_ID not set and not in verify-only mode"
+        log_error "CONTRACT_ID is required for a live restore (or use --dry-run)."
         exit 1
     fi
-    
     log_success "Prerequisites check passed"
 }
 
-# Extract backup
 extract_backup() {
     log "Extracting backup..."
-    
     TEMP_DIR=$(mktemp -d)
     tar -xzf "$BACKUP_FILE" -C "$TEMP_DIR" || {
-        log_error "Failed to extract backup"
-        exit 1
+        log_error "Failed to extract backup"; exit 1;
     }
-    
-    # Find extracted directory
-    BACKUP_NAME=$(ls "$TEMP_DIR" | head -n 1)
+    local count
+    count=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)
+    if [ "$count" -ne 1 ]; then
+        log_error "Expected exactly one top-level directory in archive, found $count"
+        exit 1
+    fi
+    BACKUP_NAME=$(find "$TEMP_DIR" -mindepth 1 -maxdepth 1 -type d -print -quit | xargs basename)
     EXTRACT_DIR="$TEMP_DIR/$BACKUP_NAME"
-    
     log_success "Backup extracted to $EXTRACT_DIR"
 }
 
-# Verify backup integrity
 verify_backup_integrity() {
     log "Verifying backup integrity..."
-    
-    # Check archive integrity
     tar -tzf "$BACKUP_FILE" > /dev/null 2>&1 || {
-        log_error "Backup archive is corrupted!"
-        return 1
+        log_error "Backup archive is corrupted!"; return 1;
     }
-    
-    # Verify checksums
-    cd "$EXTRACT_DIR"
-    if [ -f "verification/checksums.txt" ]; then
-        if ! sha256sum -c verification/checksums.txt; then
-            log_error "Checksum verification failed!"
-            return 1
-        fi
-        log_success "Checksum verification passed"
-    else
-        log_warning "No checksums file found, skipping verification"
+    if [ ! -f "$EXTRACT_DIR/verification/checksums.txt" ]; then
+        log_error "No checksums file found — refusing to restore an unverified archive."
+        return 1
     fi
-    cd - > /dev/null
-    
+    ( cd "$EXTRACT_DIR" && sha256sum -c verification/checksums.txt ) || {
+        log_error "Checksum verification failed!"; return 1;
+    }
+    if [ ! -f "$EXTRACT_DIR/state/contract_state.json" ]; then
+        log_error "Archive is missing state/contract_state.json"; return 1
+    fi
     log_success "Backup integrity verified"
 }
 
-# Display backup information
 display_backup_info() {
     log_info "=========================================="
     log_info "Backup Information"
     log_info "=========================================="
-    
     if [ -f "$EXTRACT_DIR/metadata/contract_info.json" ]; then
-        cat "$EXTRACT_DIR/metadata/contract_info.json" | while IFS= read -r line; do
-            log_info "$line"
-        done
+        while IFS= read -r line; do log_info "$line"; done \
+            < "$EXTRACT_DIR/metadata/contract_info.json"
+    else
+        log_warning "No metadata/contract_info.json in archive"
     fi
-    
     log_info "=========================================="
 }
 
-# Confirm restore operation
 confirm_restore() {
     if [ "$DRY_RUN" = true ]; then
-        log_warning "DRY RUN MODE - No actual changes will be made"
+        log_warning "DRY RUN MODE - No files will be written"
         return 0
     fi
-    
     log_warning "=========================================="
-    log_warning "WARNING: This will restore contract state"
+    log_warning "This will materialise archived state to: ${TARGET_DIR:-$BACKUP_DIR/restored/$BACKUP_NAME}"
     log_warning "Target Contract: $CONTRACT_ID"
     log_warning "Network: $NETWORK"
     log_warning "=========================================="
-    
-    read -p "Are you sure you want to continue? (yes/no): " -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
-        log "Restore cancelled by user"
-        exit 0
+    if [ "${ASSUME_YES:-false}" != "true" ]; then
+        read -p "Are you sure you want to continue? (yes/no): " -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
+            log "Restore cancelled by user"; exit 0
+        fi
     fi
 }
 
-# Restore contract state
 restore_contract_state() {
-    log "Restoring contract state..."
-    
+    log "Restoring archived state payload..."
     if [ "$DRY_RUN" = true ]; then
-        log_info "[DRY RUN] Would restore state from: $EXTRACT_DIR/state/contract_state.json"
+        log_info "[DRY RUN] Would materialise: $EXTRACT_DIR/state/contract_state.json"
         return 0
     fi
-    
-    local state_file="$EXTRACT_DIR/state/contract_state.json"
-    
-    if [ ! -f "$state_file" ]; then
-        log_error "State file not found: $state_file"
-        return 1
-    fi
-    
-    # Note: Actual state restoration depends on Stellar's capabilities
-    # This is a placeholder for the restoration logic
-    log_warning "State restoration requires manual intervention or custom tooling"
-    log_info "State file location: $state_file"
-    
-    log_success "Contract state restore initiated"
+
+    local dest="${TARGET_DIR:-$BACKUP_DIR/restored/$BACKUP_NAME}"
+    mkdir -p "$dest/state" "$dest/metadata" "$dest/verification"
+    cp -a "$EXTRACT_DIR/state/." "$dest/state/"
+    [ ! -d "$EXTRACT_DIR/metadata" ] || cp -a "$EXTRACT_DIR/metadata/." "$dest/metadata/"
+    [ ! -f "$EXTRACT_DIR/verification/checksums.txt" ] || \
+        cp "$EXTRACT_DIR/verification/checksums.txt" "$dest/verification/"
+
+    [ -s "$dest/state/contract_state.json" ] || {
+        log_error "Materialised state file is missing or empty"; return 1;
+    }
+    MATERIALISED=true
+    MATERIALISED_DIR="$dest"
+    log_success "State payload materialised to $dest"
+
+    log_warning "Soroban cannot import arbitrary ledger entries. On-chain steps still required:"
+    log_info "  1. Deploy the archived WASM (state/contract.wasm) or rebuild from the recorded commit."
+    log_info "  2. Re-initialize the contract from metadata/contract_info.json and state/contract_state.json."
+    log_info "  3. Replay/reconcile the exported effects, operations and snapshots in state/snapshots/."
+    log_info "  4. Re-point deployment/aliases and run scripts/verify.sh before resuming traffic."
 }
 
-# Restore snapshots
 restore_snapshots() {
     log "Restoring state snapshots..."
-    
+    local src="$EXTRACT_DIR/state/snapshots"
+    if [ ! -d "$src" ]; then
+        log_warning "No snapshots directory found in archive"
+        return 0
+    fi
     if [ "$DRY_RUN" = true ]; then
-        log_info "[DRY RUN] Would restore snapshots from: $EXTRACT_DIR/state/snapshots/"
+        log_info "[DRY RUN] Would restore snapshots from: $src"
         return 0
     fi
-    
-    local snapshot_dir="$EXTRACT_DIR/state/snapshots"
-    
-    if [ ! -d "$snapshot_dir" ]; then
-        log_warning "No snapshots directory found"
-        return 0
-    fi
-    
-    # List available snapshots
-    log_info "Available snapshots:"
-    ls -lh "$snapshot_dir" | tail -n +2 | awk '{print "  - " $9 " (" $5 ")"}'
-    
-    log_success "Snapshots ready for restoration"
+    mkdir -p "$MATERIALISED_DIR/state/snapshots"
+    cp -a "$src/." "$MATERIALISED_DIR/state/snapshots/"
+    log_success "Snapshots materialised to $MATERIALISED_DIR/state/snapshots/"
 }
 
-# Verify restored state
 verify_restored_state() {
-    log "Verifying restored state..."
-    
+    log "Verifying materialised state..."
     if [ "$DRY_RUN" = true ]; then
-        log_info "[DRY RUN] Would verify restored state"
+        log_info "[DRY RUN] Would verify materialised state"
         return 0
     fi
-    
-    # Query contract to verify it's accessible
-    stellar contract invoke \
-        --id "$CONTRACT_ID" \
-        --network "$NETWORK" \
-        --rpc-url "$RPC_URL" \
-        -- get_global_stats \
-        > /dev/null 2>&1 || {
-        log_error "Failed to query restored contract"
-        return 1
-    }
-    
-    log_success "Restored state verified"
+    [ "$MATERIALISED" = true ] || { log_error "State was not materialised"; return 1; }
+    for required in state/contract_state.json; do
+        [ -s "$MATERIALISED_DIR/$required" ] || {
+            log_error "Missing materialised file: $required"; return 1;
+        }
+    done
+    log_success "Materialised state verified"
+
+    if [ "$SKIP_RPC_VERIFY" = true ] || ! command -v stellar >/dev/null 2>&1; then
+        log_info "Skipping live RPC probe (offline operation / CLI unavailable)"
+        return 0
+    fi
+    if stellar contract invoke --id "$CONTRACT_ID" --network "$NETWORK" \
+        --rpc-url "$RPC_URL" -- get_global_stats >/dev/null 2>&1; then
+        log_success "Live contract probe succeeded"
+    else
+        # Non-fatal: a Horizon/RPC outage is Scenario 3; the local payload is
+        # still verified and can be applied once RPC returns.
+        log_warning "Live contract probe failed — RPC may be unavailable (Scenario 3). Offline payload is intact."
+    fi
 }
 
-# Generate restore report
 generate_restore_report() {
     log "Generating restore report..."
-    
     local report_file="$BACKUP_DIR/restore_report_$(date +%Y%m%d_%H%M%S).txt"
-    
+    if [ "$VERIFY_ONLY" = true ]; then
+        REPORT_STATUS="VERIFIED_ONLY"
+    elif [ "$DRY_RUN" = true ]; then
+        REPORT_STATUS="DRY_RUN"
+    else
+        REPORT_STATUS="STATE_MATERIALISED_MANUAL_ONCHAIN_STEPS_REQUIRED"
+    fi
+
     cat > "$report_file" <<EOF
 ========================================
 Disaster Recovery Report
 ========================================
 Restore Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 Backup File: $BACKUP_FILE
-Contract ID: $CONTRACT_ID
+Contract ID: ${CONTRACT_ID:-N/A}
 Network: $NETWORK
+Verify Only: $VERIFY_ONLY
 Dry Run: $DRY_RUN
-Status: SUCCESS
+Status: $REPORT_STATUS
 
 Backup Information:
 $(cat "$EXTRACT_DIR/metadata/contract_info.json" 2>/dev/null || echo "N/A")
 
 Restored Components:
-- Contract State: $([ -f "$EXTRACT_DIR/state/contract_state.json" ] && echo "YES" || echo "NO")
+- Contract State (archived): $([ -f "$EXTRACT_DIR/state/contract_state.json" ] && echo "YES" || echo "NO")
 - Contract WASM: $([ -f "$EXTRACT_DIR/state/contract.wasm" ] && echo "YES" || echo "NO")
 - Snapshots: $([ -d "$EXTRACT_DIR/state/snapshots" ] && echo "YES" || echo "NO")
+- State Materialised: $MATERIALISED (${MATERIALISED_DIR:-N/A})
+
+NOTE: On-chain state restoration is a manual step; Soroban does not support
+importing arbitrary ledger entries. See DISASTER_RECOVERY.md Scenario 1.
 
 Recovery Time: ${SECONDS}s
 ========================================
 EOF
-    
     log_success "Restore report generated: $report_file"
     cat "$report_file"
 }
 
-# Cleanup
 cleanup() {
     if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
-        rm -rf "$TEMP_DIR"
-        log "Cleaned up temporary files"
+        rm -rf "$TEMP_DIR"; log "Cleaned up temporary files"
     fi
 }
 
-# Send notification
 send_notification() {
-    local status=$1
-    local message=$2
-    
+    local status=$1 message=$2
     if [ -n "$WEBHOOK_URL" ]; then
-        curl -X POST "$WEBHOOK_URL" \
-            -H "Content-Type: application/json" \
+        curl -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" \
             -d "{\"status\": \"$status\", \"message\": \"$message\", \"contract\": \"$CONTRACT_ID\"}" \
             > /dev/null 2>&1 || log_warning "Failed to send notification"
     fi
 }
 
-# Main restore process
 main() {
     log "=========================================="
     log "Starting restore process"
     log "=========================================="
-    
     local start_time=$(date +%s)
-    
-    # Execute restore steps
+
     check_prerequisites
     extract_backup
     verify_backup_integrity
     display_backup_info
-    
+
     if [ "$VERIFY_ONLY" = true ]; then
         log_success "Verification complete - backup is valid"
+        REPORT_STATUS="VERIFIED_ONLY"
+        generate_restore_report
         cleanup
         exit 0
     fi
-    
+
     confirm_restore
     restore_contract_state
     restore_snapshots
     verify_restored_state
     generate_restore_report
-    
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-    
-    log "=========================================="
-    log_success "Restore completed successfully in ${duration}s"
-    log "=========================================="
-    
-    send_notification "success" "Restore completed successfully in ${duration}s"
-    
+
+    local duration=$(( $(date +%s) - start_time ))
+    log_success "Restore workflow completed in ${duration}s ($REPORT_STATUS)"
+    send_notification "success" "Restore workflow completed: $REPORT_STATUS in ${duration}s"
     cleanup
 }
 
-# Error handling
-trap 'log_error "Restore failed with error"; cleanup; send_notification "error" "Restore failed"; exit 1' ERR
-
-# Run main process
+trap 'log_error "Restore failed"; cleanup; send_notification "error" "Restore failed"; exit 1' ERR
 main "$@"
