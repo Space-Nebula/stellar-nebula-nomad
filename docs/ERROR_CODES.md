@@ -304,7 +304,7 @@ a runnable version.
 | [`bot_detection`](#bot-detection-boterror) | `BotError` | 6 | 1–6 | ⚠️ not built |  |
 | [`bounty_board`](#bounty-board-bountyerror) | `BountyError` | 8 | 1–8 | ✅ | ✅ |
 | [`bridge::ethereum`](#bridge-ethereum-bridgeerror) | `BridgeError` | 11 | 1–11 | ⚠️ not built |  |
-| [`bridge::stellar_ethereum`](#bridge-stellar-ethereum-bridgeerror) | `BridgeError` | 11 | 90–100 | ⚠️ not built |  |
+| [`bridge::stellar_ethereum`](#bridge-stellar-ethereum-bridgeerror) | `BridgeError` | 17 | 90–106 | ✅ |  |
 | [`bridge::validator`](#bridge-validator-validatorerror) | `ValidatorError` | 9 | 1–9 | ⚠️ not built |  |
 | [`bug_bounty_payout`](#bug-bounty-payout-bountyerror) | `BountyError` | 11 | 1–11 | ⚠️ not built |  |
 | [`cache_ttl_manager`](#cache-ttl-manager-cachettlerror) | `CacheTtlError` | 5 | 1–5 | ✅ | ✅ |
@@ -334,7 +334,7 @@ a runnable version.
 | [`event_scheduler`](#event-scheduler-eventerror) | `EventError` | 24 | 1–24 | ✅ | ✅ |
 | [`exploration_heatmap`](#exploration-heatmap-heatmaperror) | `HeatmapError` | 1 | 1–1 | ✅ | ✅ |
 | [`fleet_manager`](#fleet-manager-fleeterror) | `FleetError` | 7 | 1–7 | ⚠️ not built |  |
-| [`fractional_resources`](#fractional-resources-fractionalerror) | `FractionalError` | 10 | 1–10 | ✅ | ✅ |
+| [`fractional_resources`](#fractional-resources-fractionalerror) | `FractionalError` | 12 | 1–12 | ✅ | ✅ |
 | [`fraud_detection`](#fraud-detection-frauderror) | `FraudError` | 1 | 1–1 | ✅ | ✅ |
 | [`gas_recovery`](#gas-recovery-refunderror) | `RefundError` | 5 | 1–5 | ✅ | ✅ |
 | [`gas_sponsor`](#gas-sponsor-sponsorerror) | `SponsorError` | 12 | 1–12 | ✅ | ✅ |
@@ -629,14 +629,20 @@ Source: [`src/bridge/stellar_ethereum.rs`](../src/bridge/stellar_ethereum.rs) ·
 | 90 | `BridgePaused` | Bridge is paused. | State | The entity is in the wrong state or time window. Read its current state, then wait or take the prerequisite step first. |
 | 91 | `InvalidAmount` | Invalid amount (zero or negative). | Validation | Fix the arguments: check ranges, non-zero values, lengths and IDs before sending. |
 | 92 | `AmountExceeded` | Amount exceeds bridge limit. | ResourceLimit | Reduce the amount or batch size, top up balances or pools, or wait for the limit window to reset. |
-| 93 | `InsufficientBalance` | Insufficient balance for bridging. | ResourceLimit | Reduce the amount or batch size, top up balances or pools, or wait for the limit window to reset. |
+| 93 | `InsufficientBalance` | Not enough locked liquidity to release. | ResourceLimit | Reduce the amount or batch size, top up balances or pools, or wait for the limit window to reset. |
 | 94 | `RequestNotFound` | Request not found. | NotFound | Check the ID/key. Create or register the entity first, or refresh cached client state. |
 | 95 | `InvalidRequestState` | Request is not in a valid state for this operation. | Validation | Fix the arguments: check ranges, non-zero values, lengths and IDs before sending. |
 | 96 | `InsufficientConfirmations` | Insufficient confirmations. | ResourceLimit | Reduce the amount or batch size, top up balances or pools, or wait for the limit window to reset. |
 | 97 | `Unauthorized` | Unauthorized action. | Authorization | Sign with the account that holds the required role or ownership; check role grants. |
-| 98 | `TooManyPendingRequests` | Maximum pending requests reached. | ResourceLimit | Reduce the amount or batch size, top up balances or pools, or wait for the limit window to reset. |
-| 99 | `InvalidEthAddress` | Invalid Ethereum address format. | Validation | Fix the arguments: check ranges, non-zero values, lengths and IDs before sending. |
+| 98 | `TooManyPendingRequests` | The player has `MAX_PENDING_REQUESTS` pending requests. | ResourceLimit | Reduce the amount or batch size, top up balances or pools, or wait for the limit window to reset. |
+| 99 | `InvalidEthAddress` | Invalid Ethereum address (zero address). | Validation | Fix the arguments: check ranges, non-zero values, lengths and IDs before sending. |
 | 100 | `AssetNotRegistered` | Asset not registered. | NotFound | Check the ID/key. Create or register the entity first, or refresh cached client state. |
+| 101 | `AlreadyInitialized` | Bridge already initialized. | State | The entity is in the wrong state or time window. Read its current state, then wait or take the prerequisite step first. |
+| 102 | `InvalidConfig` | Configuration out of range or admin mismatch. | Validation | Fix the arguments: check ranges, non-zero values, lengths and IDs before sending. |
+| 103 | `AlreadyProcessed` | Ethereum transaction or message nonce already processed. | State | The entity is in the wrong state or time window. Read its current state, then wait or take the prerequisite step first. |
+| 104 | `InvalidMessage` | Message payload empty or larger than `MAX_MESSAGE_BYTES`. | Validation | Fix the arguments: check ranges, non-zero values, lengths and IDs before sending. |
+| 105 | `AssetDisabled` | Bridging is disabled for this asset. | State | The entity is in the wrong state or time window. Read its current state, then wait or take the prerequisite step first. |
+| 106 | `AssetAlreadyRegistered` | Asset already registered for this chain. | State | The entity is in the wrong state or time window. Read its current state, then wait or take the prerequisite step first. |
 
 <a id="bridge-validator-validatorerror"></a>
 ### `bridge::validator` — `ValidatorError`
@@ -1082,6 +1088,8 @@ Source: [`src/fractional_resources.rs`](../src/fractional_resources.rs) · Imple
 | 8 | `Unauthorized` | Unauthorized caller. | Authorization | Sign with the account that holds the required role or ownership; check role grants. |
 | 9 | `AlreadyFractionalized` | Resource already fractionalized. | Conflict | The action already happened. Treat it as idempotent: re-query state instead of retrying. |
 | 10 | `MaxFractionsExceeded` | Maximum fractions per transaction exceeded. | ResourceLimit | Reduce the amount or batch size, top up balances or pools, or wait for the limit window to reset. |
+| 11 | `InvalidPrice` | Listing price must be positive. | Validation | Fix the arguments: check ranges, non-zero values, lengths and IDs before sending. |
+| 12 | `NotListed` | The share is not listed for sale. | NotFound | Check the ID/key. Create or register the entity first, or refresh cached client state. |
 
 <a id="fraud-detection-frauderror"></a>
 ### `fraud_detection` — `FraudError`
@@ -1171,6 +1179,8 @@ Source: [`src/guild_economy.rs`](../src/guild_economy.rs) · Codes 19–34 were 
 | 6 | `ProposalAlreadyExecuted` | Proposal already executed | Conflict | The action already happened. Treat it as idempotent: re-query state instead of retrying. |
 | 7 | `NotAllianceMember` | Not alliance member | Authorization | The caller does not hold the required relationship, opt-in or eligibility. Sign with the right account or complete the prerequisite (opt in, verify profile, solve the CAPTCHA, buy premium). |
 | 8 | `ThresholdNotMet` | Threshold not met | State | The operation is not allowed in the current state or time window. Read the entity's state, wait for the delay or approval, or complete the prerequisite step. |
+| 13 | `InvalidTax` | Tax rate above `MAX_GUILD_TAX_BPS`, or a non-positive tribute | Validation | Fix the arguments: check ranges, non-zero values, lengths and IDs before sending. |
+| 14 | `NotFounder` | Only the alliance founder can change the tax rate | Authorization | Sign with the account that holds the required role or ownership; check role grants. |
 
 <a id="guild-quests-guildquesterror"></a>
 ### `guild_quests` — `GuildQuestError`

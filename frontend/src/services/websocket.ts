@@ -33,7 +33,9 @@ export class WebSocketClient {
   private url: string;
   private status: ConnectionStatus = 'disconnected';
   private reconnectEnabled: boolean;
+  private manuallyDisconnected = false;
   private reconnectAttempts = 0;
+  private initialReconnectDelay: number;
   private reconnectDelay: number;
   private maxReconnectDelay: number;
   private backoffFactor: number;
@@ -54,7 +56,8 @@ export class WebSocketClient {
   constructor(options: WebSocketClientOptions) {
     this.url = options.url;
     this.reconnectEnabled = options.reconnect ?? true;
-    this.reconnectDelay = options.initialReconnectDelayMs ?? 1000;
+    this.initialReconnectDelay = options.initialReconnectDelayMs ?? 1000;
+    this.reconnectDelay = this.initialReconnectDelay;
     this.maxReconnectDelay = options.maxReconnectDelayMs ?? 30000;
     this.backoffFactor = options.reconnectBackoffFactor ?? 1.5;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 10;
@@ -63,6 +66,7 @@ export class WebSocketClient {
   }
 
   public connect(): void {
+    this.manuallyDisconnected = false;
     if (
       this.socket &&
       (this.socket.readyState === WebSocket.OPEN ||
@@ -79,7 +83,7 @@ export class WebSocketClient {
       this.socket.onopen = () => {
         this.setStatus('connected');
         this.reconnectAttempts = 0;
-        this.reconnectDelay = 1000;
+        this.reconnectDelay = this.initialReconnectDelay;
         this.startHeartbeat();
 
         // Resubscribe to existing channels
@@ -108,7 +112,11 @@ export class WebSocketClient {
       this.socket.onclose = () => {
         this.stopHeartbeat();
         this.socket = null;
-        if (this.reconnectEnabled && this.reconnectAttempts < this.maxReconnectAttempts) {
+        if (
+          this.reconnectEnabled &&
+          !this.manuallyDisconnected &&
+          this.reconnectAttempts < this.maxReconnectAttempts
+        ) {
           this.scheduleReconnect();
         } else {
           this.setStatus('disconnected');
@@ -116,12 +124,14 @@ export class WebSocketClient {
       };
     } catch {
       this.setStatus('error');
-      this.scheduleReconnect();
+      if (this.reconnectEnabled && !this.manuallyDisconnected) {
+        this.scheduleReconnect();
+      }
     }
   }
 
   public disconnect(): void {
-    this.reconnectEnabled = false;
+    this.manuallyDisconnected = true;
     if (this.reconnectTimeoutId) {
       clearTimeout(this.reconnectTimeoutId);
       this.reconnectTimeoutId = null;
@@ -185,15 +195,70 @@ export class WebSocketClient {
       const parsed = JSON.parse(data);
 
       if (parsed.type === 'event' && parsed.data) {
-        this.queueThrottledEvent(parsed.data);
+        const event = this.normalizeIncomingEvent(parsed.data, parsed.type);
+        if (event) {
+          this.queueThrottledEvent(event);
+        }
       } else if (parsed.type === 'batch' && Array.isArray(parsed.events)) {
-        for (const ev of parsed.events) {
-          this.queueThrottledEvent(ev);
+        for (const rawEvent of parsed.events) {
+          const event = this.normalizeIncomingEvent(rawEvent);
+          if (event) {
+            this.queueThrottledEvent(event);
+          }
+        }
+      } else {
+        const event = this.normalizeIncomingEvent(parsed);
+        if (event) {
+          this.queueThrottledEvent(event);
         }
       }
     } catch {
       // ignore malformed message
     }
+  }
+
+  private normalizeIncomingEvent(
+    raw: unknown,
+    fallbackType?: string,
+  ): WebSocketEvent | null {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+
+    const candidate = raw as Record<string, unknown>;
+    if (candidate.type === 'pong' || candidate.type === 'ping') {
+      return null;
+    }
+
+    const type =
+      typeof candidate.type === 'string' ? candidate.type : fallbackType;
+    if (!type) {
+      return null;
+    }
+
+    const payload =
+      candidate.payload !== undefined
+        ? candidate.payload
+        : candidate.data !== undefined
+          ? candidate.data
+          : candidate;
+
+    return {
+      id:
+        typeof candidate.id === 'string'
+          ? candidate.id
+          : `${type}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      type,
+      channel:
+        typeof candidate.channel === 'string' ? candidate.channel : 'system',
+      payload,
+      sequence:
+        typeof candidate.sequence === 'number' ? candidate.sequence : 0,
+      timestamp:
+        typeof candidate.timestamp === 'number'
+          ? candidate.timestamp
+          : Date.now(),
+    };
   }
 
   private queueThrottledEvent(ev: WebSocketEvent): void {

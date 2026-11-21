@@ -40,6 +40,18 @@ pub enum NebulaGenError {
     AnomalyOutOfBounds = 5,
 }
 
+impl crate::error_standard::StandardContractError for NebulaGenError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "errors",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 /// Companion context emitted to events / logs alongside NebulaGenError.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -96,6 +108,18 @@ pub enum RateLimitError {
     /// Only the contract admin may update rate limit configuration.
     Unauthorized      = 101,
 }
+
+impl crate::error_standard::StandardContractError for RateLimitError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "errors",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -163,6 +187,18 @@ pub enum MinterError {
     SupplyOverflow      = 204,
 }
 
+impl crate::error_standard::StandardContractError for MinterError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "errors",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct MinterErrorContext {
@@ -223,6 +259,18 @@ pub enum ShipRegistryError {
     /// ship name string exceeds the maximum allowed length.
     NameTooLong           = 304,
 }
+
+impl crate::error_standard::StandardContractError for ShipRegistryError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "errors",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -294,6 +342,18 @@ pub enum BondingError {
     /// Delegated yield amount exceeds the delegator's balance.
     InsufficientBalance   = 405,
 }
+
+impl crate::error_standard::StandardContractError for BondingError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "errors",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
 
 #[contracttype]
 #[derive(Clone, Debug)]

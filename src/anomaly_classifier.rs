@@ -148,6 +148,102 @@ pub fn refine_classification(
     Ok(existing)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracttype]
+#[repr(u32)]
+pub enum AnomalyCategory {
+    Cosmic = 1,
+    Spatial = 2,
+    Temporal = 3,
+    Energetic = 4,
+    Gravitational = 5,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct AnomalyEffect {
+    pub category: AnomalyCategory,
+    pub risk_score: u32,
+    pub reward_multiplier_bps: u32,
+    pub energy_cost_delta: i32,
+    pub shield_damage: u32,
+    pub yield_bonus_pct: u32,
+}
+
+pub fn get_anomaly_effect(anomaly_type: &Symbol, confidence: u32) -> AnomalyEffect {
+    let conf = confidence.min(100);
+    if *anomaly_type == symbol_short!("blackhole") {
+        AnomalyEffect {
+            category: AnomalyCategory::Gravitational,
+            risk_score: 85 + (conf / 10),
+            reward_multiplier_bps: 200 + conf,
+            energy_cost_delta: 25,
+            shield_damage: 30,
+            yield_bonus_pct: 60 + (conf / 2),
+        }
+    } else if *anomaly_type == symbol_short!("wormhole") {
+        AnomalyEffect {
+            category: AnomalyCategory::Spatial,
+            risk_score: 55 + (conf / 10),
+            reward_multiplier_bps: 150 + (conf / 2),
+            energy_cost_delta: 10,
+            shield_damage: 15,
+            yield_bonus_pct: 35 + (conf / 4),
+        }
+    } else if *anomaly_type == symbol_short!("nebula") {
+        AnomalyEffect {
+            category: AnomalyCategory::Energetic,
+            risk_score: 25 + (conf / 10),
+            reward_multiplier_bps: 120 + (conf / 4),
+            energy_cost_delta: -5,
+            shield_damage: 5,
+            yield_bonus_pct: 20 + (conf / 5),
+        }
+    } else {
+        AnomalyEffect {
+            category: AnomalyCategory::Cosmic,
+            risk_score: 15,
+            reward_multiplier_bps: 110,
+            energy_cost_delta: 0,
+            shield_damage: 0,
+            yield_bonus_pct: 10,
+        }
+    }
+}
+
+pub fn calculate_risk_reward(env: &Env, anomaly_id: u64) -> Result<AnomalyEffect, AnomalyError> {
+    let record = get_classification(env, anomaly_id).ok_or(AnomalyError::NotFound)?;
+    Ok(get_anomaly_effect(&record.anomaly_type, record.confidence))
+}
+
+pub fn classify_nebula_anomaly(
+    env: &Env,
+    anomaly_id: u64,
+    anomaly: &crate::nebula_gen::Anomaly,
+) -> Result<ClassificationRecord, AnomalyError> {
+    use crate::nebula_gen::{AnomalyType, ResourceClass};
+
+    let type_weight = match anomaly.anomaly_type {
+        AnomalyType::DustCloud => 20u32,
+        AnomalyType::IonStorm => 45u32,
+        AnomalyType::CrystalFormation => 55u32,
+        AnomalyType::PlasmaVent => 70u32,
+        AnomalyType::DarkMatterPocket => 90u32,
+    };
+    let resource_weight = match anomaly.resource_class {
+        ResourceClass::Sparse => 15u32,
+        ResourceClass::Moderate => 35u32,
+        ResourceClass::Abundant => 65u32,
+    };
+    let rarity_weight = (anomaly.rarity.min(100)) as u32;
+
+    let mut features = Vec::new(env);
+    features.push_back(type_weight);
+    features.push_back(resource_weight);
+    features.push_back(rarity_weight);
+    classify_anomaly(env, anomaly_id, features)
+}
+
 pub fn get_classification(env: &Env, anomaly_id: u64) -> Option<ClassificationRecord> {
     env.storage()
         .instance()
@@ -170,7 +266,7 @@ mod tests {
         (env, id)
     }
 
-    // // #[test]
+    #[test]
     fn test_classify_anomaly_rejects_too_few_features() {
         let (env, contract_id) = make_env();
         env.as_contract(&contract_id, || {
@@ -179,7 +275,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_classify_anomaly_boundary_scores() {
         let (env, contract_id) = make_env();
         env.as_contract(&contract_id, || {
@@ -197,7 +293,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_classify_anomaly_saturates_on_overflow() {
         let (env, contract_id) = make_env();
         env.as_contract(&contract_id, || {
@@ -207,7 +303,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_refine_classification_missing_record() {
         let (env, contract_id) = make_env();
         env.as_contract(&contract_id, || {
@@ -216,7 +312,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_refine_classification_rejects_empty_data() {
         let (env, contract_id) = make_env();
         env.as_contract(&contract_id, || {
@@ -226,7 +322,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_classify_batch_skips_invalid_entries() {
         let (env, contract_id) = make_env();
         env.as_contract(&contract_id, || {
@@ -242,11 +338,30 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_get_classification_missing_returns_none() {
         let (env, contract_id) = make_env();
         env.as_contract(&contract_id, || {
             assert!(get_classification(&env, 42).is_none());
+        });
+    }
+
+    #[test]
+    fn test_anomaly_effects_and_nebula_integration() {
+        let (env, contract_id) = make_env();
+        env.as_contract(&contract_id, || {
+            let anomaly = crate::nebula_gen::Anomaly {
+                x: 4,
+                y: 9,
+                rarity: 80,
+                anomaly_type: crate::nebula_gen::AnomalyType::DarkMatterPocket,
+                resource_class: crate::nebula_gen::ResourceClass::Abundant,
+            };
+            let record = classify_nebula_anomaly(&env, 101, &anomaly).unwrap();
+            assert_eq!(record.anomaly_type, symbol_short!("blackhole"));
+            let effect = calculate_risk_reward(&env, 101).unwrap();
+            assert_eq!(effect.category, AnomalyCategory::Gravitational);
+            assert!(effect.reward_multiplier_bps > 200);
         });
     }
 }

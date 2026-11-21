@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useId } from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
 
 export interface ResourceDisplayProps {
   name: string;
@@ -15,15 +17,17 @@ export const ResourceDisplay: React.FC<ResourceDisplayProps> = ({
   change24h,
   maxCapacity,
 }) => {
+  const { t, formatNumber } = useI18n();
+  const nameId = useId();
   const percentage = maxCapacity ? Math.min(Math.round((amount / maxCapacity) * 100), 100) : null;
 
   return (
     <div
-      role="region"
-      aria-label={`${name} Resource: ${amount}`}
+      role="group"
+      aria-labelledby={nameId}
       style={{
-        backgroundColor: '#0F172A',
-        border: '1px solid #334155',
+        backgroundColor: colors.bgSurface,
+        border: `1px solid ${colors.border}`,
         borderRadius: '8px',
         padding: '12px 16px',
         display: 'flex',
@@ -33,15 +37,21 @@ export const ResourceDisplay: React.FC<ResourceDisplayProps> = ({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '1.2rem' }}>{icon}</span>
-          <span style={{ color: '#94A3B8', fontSize: '0.85rem', fontWeight: 600 }}>{name}</span>
+          <span aria-hidden="true" style={{ fontSize: '1.2rem' }}>
+            {icon}
+          </span>
+          <span id={nameId} style={{ color: colors.textMuted, fontSize: '0.85rem', fontWeight: 600 }}>
+            {name}
+          </span>
         </div>
         {change24h !== undefined && (
+          // The sign conveys direction, so colour is not the only cue.
           <span
+            dir="ltr"
             style={{
               fontSize: '0.75rem',
               fontWeight: 600,
-              color: change24h >= 0 ? '#10B981' : '#EF4444',
+              color: change24h >= 0 ? colors.success : colors.danger,
             }}
           >
             {change24h >= 0 ? `+${change24h}%` : `${change24h}%`}
@@ -50,23 +60,35 @@ export const ResourceDisplay: React.FC<ResourceDisplayProps> = ({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-        <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#F8FAFC' }}>
-          {amount.toLocaleString()}
+        <span style={{ fontSize: '1.25rem', fontWeight: 700, color: colors.textPrimary }}>
+          {formatNumber(amount)}
         </span>
         {maxCapacity && (
-          <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
-            / {maxCapacity.toLocaleString()}
+          <span style={{ fontSize: '0.75rem', color: colors.textMuted }}>
+            / {formatNumber(maxCapacity)}
           </span>
         )}
       </div>
 
       {percentage !== null && (
-        <div style={{ backgroundColor: '#1E293B', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
+        <div
+          role="progressbar"
+          aria-label={t('resource.capacity', { name })}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percentage}
+          style={{
+            backgroundColor: colors.bgRaised,
+            height: '6px',
+            borderRadius: '3px',
+            overflow: 'hidden',
+          }}
+        >
           <div
             style={{
               width: `${percentage}%`,
               height: '100%',
-              backgroundColor: percentage > 90 ? '#EF4444' : '#38BDF8',
+              backgroundColor: percentage > 90 ? colors.danger : colors.accent,
             }}
           />
         </div>

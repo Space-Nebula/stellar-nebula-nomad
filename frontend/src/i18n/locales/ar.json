@@ -1,0 +1,341 @@
+{
+  "common": {
+    "language": "اللغة",
+    "close": "إغلاق",
+    "cancel": "إلغاء",
+    "confirm": "تأكيد",
+    "loading": "جارٍ التحميل...",
+    "tryAgain": "حاول مرة أخرى",
+    "skipToContent": "انتقل إلى المحتوى الرئيسي",
+    "you": "(أنت)",
+    "none": "لا شيء"
+  },
+  "layout": {
+    "primaryNavigation": "التنقل الرئيسي"
+  },
+  "errors": {
+    "title": "حدث خطأ ما",
+    "unexpected": "حدث خطأ غير متوقع."
+  },
+  "toast": {
+    "dismiss": "إغلاق الإشعار"
+  },
+  "address": {
+    "label": "عنوان حساب Stellar",
+    "invalid": "تنسيق المفتاح العام لـ Stellar غير صالح (يجب أن يتكون من 56 حرفًا ويبدأ بالحرف G)"
+  },
+  "duration": {
+    "label": "مدة الرحلة الاستكشافية",
+    "hours_zero": "{{count}} ساعة",
+    "hours_one": "ساعة واحدة",
+    "hours_two": "ساعتان",
+    "hours_few": "{{count}} ساعات",
+    "hours_many": "{{count}} ساعة",
+    "hours_other": "{{count}} ساعة",
+    "days_zero": "{{count}} يوم",
+    "days_one": "يوم واحد",
+    "days_two": "يومان",
+    "days_few": "{{count}} أيام",
+    "days_many": "{{count}} يومًا",
+    "days_other": "{{count}} يوم"
+  },
+  "rarity": {
+    "label": "التصفية حسب الندرة",
+    "All": "الكل",
+    "Common": "شائع",
+    "Rare": "نادر",
+    "Epic": "ملحمي",
+    "Legendary": "أسطوري"
+  },
+  "amount": {
+    "label": "الكمية ({{resource}})",
+    "max": "الحد الأقصى"
+  },
+  "actions": {
+    "mint": "سك سفينة ({{cost}} XLM)",
+    "minting": "جارٍ السك على Soroban...",
+    "buy": "اشترِ الآن ({{price}} {{currency}})",
+    "list": "اعرض العنصر ({{price}} {{currency}})",
+    "processingBuy": "جارٍ معالجة الشراء...",
+    "processingSell": "جارٍ معالجة العرض...",
+    "upgrade": "الترقية إلى المستوى {{level}} ({{cost}})",
+    "upgradeDefaultCost": "100 وقود + 50 خام",
+    "upgrading": "جارٍ الترقية...",
+    "bond": "ربط {{amount}} مع {{guild}}",
+    "bonding": "جارٍ ربط الحصة..."
+  },
+  "achievement": {
+    "label": "إنجاز {{title}}: {{status}}",
+    "unlocked": "مفتوح",
+    "locked": "مقفل",
+    "unlockedOn": "فُتح في {{date}}"
+  },
+  "leaderboard": {
+    "label": "لوحة الصدارة",
+    "rank": "الترتيب",
+    "explorer": "المستكشف",
+    "guild": "النقابة",
+    "score": "النقاط"
+  },
+  "nebula": {
+    "label": "قطاع السديم: {{sector}}، الكثافة {{density}}",
+    "anomalyLabel": "تم رصد شذوذ",
+    "anomaly": "شذوذ",
+    "density": "كثافة السديم: {{density}}"
+  },
+  "resource": {
+    "label": "مورد {{name}}",
+    "capacity": "السعة المستخدمة من {{name}}"
+  },
+  "ship": {
+    "label": "سفينة: {{name}}، {{shipClass}} {{rarity}}",
+    "select": "اختر {{name}}",
+    "level": "المستوى {{level}}",
+    "speed": "السرعة",
+    "hull": "الهيكل",
+    "scan": "المسح",
+    "class": {
+      "Scout": "كشافة",
+      "Frigate": "فرقاطة",
+      "Cruiser": "طراد",
+      "Dreadnought": "مدرعة"
+    }
+  },
+  "oracle": {
+    "title": "أوراكل السوق",
+    "description": "أسعار إجماع مجمّعة من مصادر أوراكل مستقلة.",
+    "pricesLabel": "أسعار الموارد",
+    "consensus": "سعر الإجماع",
+    "sources_zero": "لا توجد مصادر متوافقة",
+    "sources_one": "مصدر واحد متوافق",
+    "sources_two": "مصدران متوافقان",
+    "sources_few": "{{count}} مصادر متوافقة",
+    "sources_many": "{{count}} مصدرًا متوافقًا",
+    "sources_other": "{{count}} مصدر متوافق",
+    "updated": "آخر تحديث {{time}}",
+    "status": {
+      "fresh": "تم التحقق",
+      "stale": "قديم",
+      "rejected": "مرفوض"
+    },
+    "rejectedReason": "اختلفت المصادر؛ لا يزال آخر سعر تم التحقق منه مستخدمًا.",
+    "empty": "لم تُنشر أي أسعار بعد.",
+    "resource": "المورد",
+    "sourcesHeader": "المصادر",
+    "updatedHeader": "آخر تحديث",
+    "statusHeader": "الحالة"
+  },
+  "vault": {
+    "title": "خزنة الكنز",
+    "description": "اكتشف الخزائن غير المقفلة واستخدم المفاتيح للحصول على غنائمها.",
+    "vaultsLabel": "خزائنك",
+    "vault": "الخزنة رقم {{id}}",
+    "keys_zero": "لا توجد مفاتيح خزنة",
+    "keys_one": "مفتاح خزنة واحد",
+    "keys_two": "مفتاحا خزنة",
+    "keys_few": "{{count}} مفاتيح خزنة",
+    "keys_many": "{{count}} مفتاحًا للخزنة",
+    "keys_other": "{{count}} مفتاح خزنة",
+    "lockedUntil": "مقفلة حتى {{time}}",
+    "loot": "الغنيمة: {{amount}}",
+    "discover": "اكتشاف الخزنة",
+    "discoverVault": "اكتشاف الخزنة رقم {{id}}",
+    "claim": "استلام الغنيمة",
+    "claimVault": "استلام غنيمة الخزنة رقم {{id}}",
+    "needKey": "تحتاج إلى مفتاح خزنة لاستلام هذه الغنيمة.",
+    "claimed": "تم استلام الغنيمة",
+    "locked": "مقفلة",
+    "undiscovered": "غير مكتشفة",
+    "special": {
+      "None": "",
+      "StarChart": "مكافأة خاصة: خريطة نجمية",
+      "AncientRelic": "مكافأة خاصة: أثر قديم + مفتاح إضافي"
+    },
+    "empty": "ليس لديك خزائن بعد.",
+    "principal": "الإيداع: {{amount}}"
+  },
+  "theme": {
+    "title": "المظهر",
+    "active": "السمة الحالية: {{name}}",
+    "family": "السمة",
+    "modeLabel": "وضع الألوان",
+    "mode": {
+      "dark": "داكن",
+      "light": "فاتح",
+      "system": "مطابق للجهاز"
+    },
+    "id": {
+      "nebula": "سديم",
+      "cosmic": "كوني",
+      "aurora": "شفق",
+      "highContrast": "تباين عالٍ"
+    },
+    "accessibility": "لوحة ألوان سهولة الوصول",
+    "profile": {
+      "standard": "قياسي",
+      "highContrast": "تباين عالٍ",
+      "redGreenSafe": "آمن لعمى الأحمر/الأخضر",
+      "blueYellowSafe": "آمن لعمى الأزرق/الأصفر"
+    },
+    "textSize": "حجم النص",
+    "reducedMotion": "تقليل الحركة",
+    "customColors": "ألوان مخصصة",
+    "customHint": "تُرفض الألوان التي تخفض تباين النص إلى أقل من {{ratio}}:1.",
+    "slot": {
+      "background": "الخلفية",
+      "surface": "اللوحات",
+      "text": "النص",
+      "primary": "الأزرار",
+      "accent": "اللون المميز",
+      "border": "الحدود"
+    },
+    "colorApplied": "تم تطبيق لون {{slot}}.",
+    "colorReset": "تمت إعادة تعيين لون {{slot}}.",
+    "colorRejected": "رُفض لون {{slot}}: سيجعل النص صعب القراءة.",
+    "slotIgnored": "متجاهَل في هذا الوضع (تباين منخفض)",
+    "reset": "إعادة تعيين",
+    "resetSlot": "إعادة تعيين لون {{slot}}",
+    "resetAll": "إعادة تعيين المظهر",
+    "resetDone": "تمت إعادة المظهر إلى الإعدادات الافتراضية."
+  },
+  "referral": {
+    "title": "برنامج الإحالة",
+    "description": "اربح {{reward}} من الجوهر عن كل صديق يُكمل أول مسح له. ويحصل هو على مكافأة ترحيب قدرها {{bonus}} من الجوهر.",
+    "blocked": "حساب الإحالة الخاص بك معلّق بانتظار المراجعة.",
+    "yourCode": "رمزك",
+    "copyLink": "نسخ رابط الدعوة",
+    "copied": "تم نسخ رابط الدعوة.",
+    "copyFailed": "تعذّر النسخ. حدّد الرمز وانسخه يدويًا.",
+    "generate": "احصل على رمز الإحالة",
+    "stats": {
+      "total": "المدعوون",
+      "pending": "بانتظار أول مسح",
+      "claimable": "جاهزة للمطالبة",
+      "claimed": "تمت المطالبة",
+      "earned": "الجوهر المكتسب"
+    },
+    "tier": "المستوى: {{tier}} (مكافآت ×{{multiplier}})",
+    "tierProgress": "التقدم نحو المستوى التالي",
+    "toNextTier_zero": "لا حاجة لإحالات إضافية للوصول إلى {{tier}}",
+    "toNextTier_one": "إحالة واحدة إضافية للوصول إلى {{tier}}",
+    "toNextTier_two": "إحالتان إضافيتان للوصول إلى {{tier}}",
+    "toNextTier_few": "{{count}} إحالات إضافية للوصول إلى {{tier}}",
+    "toNextTier_many": "{{count}} إحالة إضافية للوصول إلى {{tier}}",
+    "toNextTier_other": "{{count}} إحالة إضافية للوصول إلى {{tier}}",
+    "maxTier": "وصلت إلى أعلى مستوى.",
+    "tiers": {
+      "bronze": "برونزي",
+      "silver": "فضي",
+      "gold": "ذهبي",
+      "platinum": "بلاتيني",
+      "diamond": "ماسي"
+    },
+    "referees": "إحالاتك",
+    "noReferees": "لا توجد إحالات بعد. شارك رمزك للبدء.",
+    "joined": "انضم في {{date}}",
+    "claim": "مطالبة",
+    "claimFor": "المطالبة بمكافأة {{address}}",
+    "status": {
+      "pending": "بانتظار أول مسح",
+      "claimable": "جاهزة للمطالبة",
+      "claimed": "تمت المطالبة"
+    },
+    "haveCode": "هل لديك رمز إحالة؟",
+    "redeem": "استبدال",
+    "invalidCode": "تتكون الرموز من 8 أحرف وأرقام، بدون 0 أو O أو 1 أو I أو L أو U."
+  },
+  "daily": {
+    "title": "المكافآت اليومية",
+    "streak_zero": "لا توجد سلسلة",
+    "streak_one": "سلسلة يوم واحد",
+    "streak_two": "سلسلة يومين",
+    "streak_few": "سلسلة {{count}} أيام",
+    "streak_many": "سلسلة {{count}} يومًا",
+    "streak_other": "سلسلة {{count}} يوم",
+    "best_zero": "الأفضل: لا شيء",
+    "best_one": "الأفضل: يوم واحد",
+    "best_two": "الأفضل: يومان",
+    "best_few": "الأفضل: {{count}} أيام",
+    "best_many": "الأفضل: {{count}} يومًا",
+    "best_other": "الأفضل: {{count}} يوم",
+    "eventTitle": "حدث {{name}}!",
+    "eventDetail": "مكافآت ×{{multiplier}} مع {{bonus}} إضافية حتى {{date}}.",
+    "todayReward": "مكافأة اليوم",
+    "nextReward": "مكافأة الغد",
+    "amount": "{{amount}} {{kind}}",
+    "streakBonus": "يشمل مكافأة سلسلة +{{percent}}٪",
+    "claim": "استلام المكافأة",
+    "atRisk": "استلم خلال {{hours}} س {{minutes}} د للحفاظ على سلسلتك.",
+    "claimedToday": "تم الاستلام اليوم. المكافأة التالية بعد {{hours}} س {{minutes}} د.",
+    "calendar": "تقويم المكافآت لمدة 28 يومًا",
+    "day": "اليوم {{day}}",
+    "milestone": "محطة مميزة",
+    "state": {
+      "claimed": "تم الاستلام",
+      "next": "المكافأة التالية",
+      "upcoming": "قادمة"
+    },
+    "kind": {
+      "Essence": "جوهر",
+      "StellarDust": "غبار نجمي",
+      "DarkMatter": "مادة مظلمة",
+      "ExoticMatter": "مادة غريبة",
+      "Energy": "طاقة",
+      "CosmeticRoll": "سحب تجميلي"
+    }
+  },
+  "bots": {
+    "title": "قائمة مراجعة الروبوتات",
+    "filter": "عرض",
+    "filters": {
+      "open": "الحالات المفتوحة",
+      "resolved": "المحلولة",
+      "all": "الكل"
+    },
+    "summary": {
+      "open": "مفتوحة",
+      "highRisk": "خطورة عالية",
+      "cleared": "مُبرّأة",
+      "banned": "محظورة"
+    },
+    "empty": "لا توجد حالات للمراجعة.",
+    "caption": "اللاعبون المُبلّغ عنهم، الأعلى خطورة أولًا",
+    "col": {
+      "player": "اللاعب",
+      "score": "الدرجة",
+      "signals": "الإشارات",
+      "opened": "فُتحت",
+      "action": "الإجراء"
+    },
+    "case": "الحالة رقم {{id}}",
+    "response": {
+      "Allow": "لا إجراء",
+      "Monitor": "تحت المراقبة",
+      "Captcha": "يتطلب CAPTCHA",
+      "Block": "محظور مؤقتًا",
+      "Ban": "محظور"
+    },
+    "signal": {
+      "burst": "دفعة إجراءات",
+      "rateLimit": "تجاوز الحد",
+      "regularTiming": "توقيت آلي",
+      "repetitive": "حلقة متكررة",
+      "multiAccount": "حسابات متعددة",
+      "farming": "مزرعة حسابات",
+      "captchaFail": "فشل CAPTCHA",
+      "manual": "إبلاغ يدوي"
+    },
+    "status": {
+      "Open": "مفتوحة",
+      "Cleared": "مُبرّأة",
+      "Banned": "محظورة"
+    },
+    "clear": "تبرئة",
+    "clearCase": "تبرئة الحالة {{id}}",
+    "ban": "حظر",
+    "banCase": "حظر لاعب الحالة {{id}}",
+    "confirmBan": "تأكيد الحظر",
+    "confirmBanCase": "تأكيد حظر الحالة {{id}}",
+    "cancel": "إلغاء"
+  }
+}

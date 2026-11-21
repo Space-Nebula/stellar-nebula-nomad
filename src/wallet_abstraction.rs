@@ -128,6 +128,18 @@ pub enum WalletError {
     SessionKeyLimitReached = 14,
 }
 
+impl crate::error_standard::StandardContractError for WalletError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "wallet_abstraction",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 const MAX_SESSION_KEYS: u32 = 10;
 
 // ─── Public API ───────────────────────────────────────────────────────────

@@ -77,6 +77,21 @@ pub const SLOTS_PER_DISPLAY_CASE: u32 = 3;
 /// Maximum guests on a friends-only guest list.
 pub const MAX_GUESTS: u32 = 50;
 
+// ── PR #636 compatibility constants ─────────────────────────────────────────
+// These keep the symbols exported by the earlier housing branch available.
+// The canonical storage model remains the upstream (#629) one above.
+
+/// Upper bound used by the legacy display-case API.
+pub const MAX_ACHIEVEMENT_DISPLAYS: u32 = 24;
+/// Alias for [`MAX_STORAGE_EXPANSIONS`].
+pub const MAX_STORAGE_LEVEL: u32 = MAX_STORAGE_EXPANSIONS;
+/// Small-house base capacity, for legacy capacity reporting.
+pub const BASE_STORAGE_CAPACITY: u32 = 10;
+/// Alias for [`STORAGE_PER_EXPANSION`].
+pub const STORAGE_CAPACITY_PER_LEVEL: u32 = STORAGE_PER_EXPANSION;
+/// Alias for [`STORAGE_EXPANSION_BASE_COST`].
+pub const STORAGE_BASE_COST: u64 = STORAGE_EXPANSION_BASE_COST;
+
 /// Auto-increment counter for furniture IDs.
 const FURNITURE_COUNTER: Symbol = symbol_short!("fnc");
 
@@ -109,6 +124,8 @@ pub enum HousingKey {
     Banner(Address),
     /// Guest list for friends-only access.
     Guests(Address),
+    /// Motto shown with the guild banner (PR #636 compatibility).
+    GuildMotto(Address),
 }
 
 // ─── Data Types ───────────────────────────────────────────────────────────────
@@ -257,6 +274,21 @@ pub struct StorageSummary {
     pub expansions: u32,
     /// Stellar Dust cost of the next expansion (0 when maxed out).
     pub next_expansion_cost: u64,
+}
+
+/// Legacy storage expansion record exposed by PR #636. The values are derived
+/// from the canonical [`StorageSummary`]; no separate storage is written.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HouseStorage {
+    pub owner: Address,
+    /// Number of completed expansions.
+    pub level: u32,
+    /// Capacity granted by the house size alone.
+    pub base_capacity: u32,
+    /// Capacity granted by expansions and Storage-category furniture.
+    pub bonus_capacity: u32,
+    pub last_expanded_at: u64,
 }
 
 /// Everything a visitor sees when entering a house, in one read.
@@ -1389,6 +1421,75 @@ pub fn get_featured_houses(env: &Env, tier: Symbol) -> Vec<Address> {
         .persistent()
         .get(&HousingKey::Discovery(tier))
         .unwrap_or_else(|| Vec::new(env))
+}
+
+// ─── PR #636 compatibility API ───────────────────────────────────────────────
+// Thin adapters that preserve the earlier branch's public symbols while
+// delegating to the canonical upstream (#629) implementation above.
+
+/// Legacy alias for [`display_achievement`]. Returns the slot used.
+pub fn install_achievement_display(
+    env: &Env,
+    owner: Address,
+    achievement_id: u64,
+    slot: u32,
+) -> Result<u64, HousingError> {
+    display_achievement(env, owner, achievement_id, slot)?;
+    Ok(u64::from(slot))
+}
+
+/// Legacy alias for [`clear_achievement_display`]. The legacy `display_id`
+/// is interpreted as the canonical display slot index.
+pub fn remove_achievement_display(
+    env: &Env,
+    owner: Address,
+    display_id: u64,
+) -> Result<(), HousingError> {
+    let slot = u32::try_from(display_id).map_err(|_| HousingError::NoDisplayCase)?;
+    clear_achievement_display(env, owner, slot)
+}
+
+/// Hang the guild banner and store the legacy motto separately. The banner
+/// itself remains the canonical alliance-derived [`GuildBanner`].
+pub fn set_guild_banner(env: &Env, owner: Address, motto: String) -> Result<(), HousingError> {
+    display_guild_banner(env, owner.clone())?;
+    env.storage()
+        .persistent()
+        .set(&HousingKey::GuildMotto(owner), &motto);
+    Ok(())
+}
+
+/// Legacy alias for [`remove_guild_banner`], also clearing the stored motto.
+pub fn clear_guild_banner(env: &Env, owner: Address) -> Result<(), HousingError> {
+    remove_guild_banner(env, owner.clone())?;
+    env.storage()
+        .persistent()
+        .remove(&HousingKey::GuildMotto(owner));
+    Ok(())
+}
+
+/// Legacy view of storage state, derived from [`get_storage`].
+pub fn get_house_storage(env: &Env, owner: &Address) -> Option<HouseStorage> {
+    let house: HouseInstance = env
+        .storage()
+        .persistent()
+        .get(&HousingKey::House(owner.clone()))?;
+    let summary = storage_summary(env, owner, &house);
+    let base = base_storage(house.size);
+    Some(HouseStorage {
+        owner: owner.clone(),
+        level: summary.expansions,
+        base_capacity: base,
+        bonus_capacity: summary.capacity.saturating_sub(base),
+        last_expanded_at: env.ledger().timestamp(),
+    })
+}
+
+/// Legacy total-capacity accessor.
+pub fn get_storage_capacity(env: &Env, owner: &Address) -> u32 {
+    get_storage(env, owner)
+        .map(|summary| summary.capacity)
+        .unwrap_or(0)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

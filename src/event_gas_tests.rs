@@ -218,7 +218,14 @@ fn marketplace_listing_still_emits_once() {
     let (env, contract) = setup();
     let seller = Address::generate(&env);
     let (cost, events) = run(&env, &contract, "list_ship", || {
-        nft_marketplace::list_ship(&env, &seller, 1, 500).unwrap();
+        let asset = nft_marketplace::Asset {
+            category: nft_marketplace::AssetCategory::ShipNFT,
+            asset_id: 1,
+            quantity: 1,
+            rarity: nft_marketplace::Rarity::Common,
+            name: soroban_sdk::String::from_str(&env, "Ship"),
+        };
+        nft_marketplace::create_listing(&env, &seller, asset, 500, None).unwrap();
     });
     assert_eq!(events, 1, "listing must still emit");
     assert!(

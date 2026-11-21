@@ -12,7 +12,6 @@
 *.pdb
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -25,8 +24,6 @@ frontend/analytics/dist/
 mobile/.expo/
 
 # Environment
-.env
-.env.local
 .env.*.local
 
 # Local Horizon snapshots
@@ -50,3 +47,4 @@ coverage/
 mutants.out//fuzz/target
 /fuzz/corpus
 /fuzz/artifacts
+config.bat

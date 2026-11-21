@@ -1,0 +1,39 @@
+name: Setup Stellar CLI
+description: |
+  Install the Stellar CLI once and cache the resulting binary between jobs and
+  runs. Previously every job that needed `stellar` downloaded and installed it
+  from an unpinned `main` installer, adding minutes to each pipeline.
+
+inputs:
+  version:
+    description: Installer cache key. Bump to force a fresh CLI download.
+    required: false
+    default: v1
+
+runs:
+  using: composite
+  steps:
+    - name: Restore cached Stellar CLI
+      id: cache-stellar-cli
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.local/bin/stellar
+          ~/.local/bin/soroban
+        key: ${{ runner.os }}-stellar-cli-${{ inputs.version }}
+
+    - name: Install Stellar CLI
+      if: steps.cache-stellar-cli.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
+
+    - name: Verify Stellar CLI
+      shell: bash
+      run: |
+        test -x "$HOME/.local/bin/stellar" || {
+          echo "Stellar CLI was not installed into ~/.local/bin" >&2
+          exit 1
+        }
+        "$HOME/.local/bin/stellar" --version
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"

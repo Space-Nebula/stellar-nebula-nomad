@@ -1,6 +1,12 @@
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
 /// Maximum batch size for recycle/craft operations.
 pub const RECYCLE_CRAFT_BATCH_SIZE: u32 = 8;
+/// Basis points denominator (100% = 10_000 bps).
+pub const RECYCLING_BPS_DENOM: u32 = 10_000;
+/// Maximum player recycling efficiency bonus (25%).
+pub const MAX_EFFICIENCY_BONUS_BPS: u32 = 2_500;
+/// Efficiency bonus gained per recycle action (1%).
+pub const EFFICIENCY_STEP_BPS: u32 = 100;
 
 /// ─── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -11,8 +17,10 @@ pub enum RecyclingKey {
     Recipe(u64),
     /// Auto-incrementing recipe ID counter.
     RecipeCounter,
-    /// Player-specific crafting stats (optional, for efficiency multipliers).
+    /// Player-specific crafting stats (for efficiency multipliers & metrics).
     RecyclingPlayerStats(Address),
+    /// Global environmental / sustainability metrics.
+    GlobalMetrics,
 }
 
 /// ─── Errors ─────────────────────────────────────────────────────────────────
@@ -68,7 +76,27 @@ pub struct CraftingResult {
     pub recipe_id: u64,
     pub inputs_consumed: Vec<Symbol>,
     pub outputs_produced: Vec<Symbol>,
+    pub output_quantities: Vec<u32>,
+    pub efficiency_bonus_bps: u32,
     pub crafted_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct RecyclingStats {
+    pub total_recycled: u64,
+    pub items_crafted: u64,
+    pub materials_recovered: u64,
+    pub carbon_offset_units: u64,
+    pub efficiency_bonus_bps: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct SustainabilityMetrics {
+    pub total_recycled: u64,
+    pub total_materials_recovered: u64,
+    pub total_carbon_offset: u64,
 }
 
 /// ─── Public API ─────────────────────────────────────────────────────────────
@@ -137,8 +165,8 @@ fn add_recipe(
     next_id
 }
 
-/// Recycle a resource into base materials (simple 1:many conversion).
-/// For now, we treat any single resource as recyclable into dust with a fixed ratio.
+/// Recycle a resource into base materials with player efficiency bonus and
+/// environmental sustainability tracking.
 pub fn recycle_resource(
     env: &Env,
     caller: &Address,
@@ -147,11 +175,37 @@ pub fn recycle_resource(
 ) -> Result<Vec<(Symbol, u32)>, RecyclingError> {
     caller.require_auth();
 
-    // Simple placeholder: recycle any resource into dust at 50% rate.
-    let dust_amount = amount / 2;
-    if dust_amount == 0 {
+    let base_recovery = amount / 2;
+    if base_recovery == 0 {
         return Err(RecyclingError::InsufficientResources);
     }
+
+    let mut stats = get_player_recycling_stats(env, caller);
+    let bonus = ((base_recovery as u64).saturating_mul(stats.efficiency_bonus_bps as u64)
+        / RECYCLING_BPS_DENOM as u64) as u32;
+    let recovered = base_recovery.saturating_add(bonus);
+    let carbon_offset = (amount as u64).saturating_mul(2);
+
+    stats.total_recycled = stats.total_recycled.saturating_add(amount as u64);
+    stats.materials_recovered = stats.materials_recovered.saturating_add(recovered as u64);
+    stats.carbon_offset_units = stats.carbon_offset_units.saturating_add(carbon_offset);
+    stats.efficiency_bonus_bps = stats
+        .efficiency_bonus_bps
+        .saturating_add(EFFICIENCY_STEP_BPS)
+        .min(MAX_EFFICIENCY_BONUS_BPS);
+    env.storage()
+        .persistent()
+        .set(&RecyclingKey::RecyclingPlayerStats(caller.clone()), &stats);
+
+    let mut global = get_sustainability_metrics(env);
+    global.total_recycled = global.total_recycled.saturating_add(amount as u64);
+    global.total_materials_recovered = global
+        .total_materials_recovered
+        .saturating_add(recovered as u64);
+    global.total_carbon_offset = global.total_carbon_offset.saturating_add(carbon_offset);
+    env.storage()
+        .instance()
+        .set(&RecyclingKey::GlobalMetrics, &global);
 
     // Emit ResourceRecycled event
     env.events().publish(
@@ -161,15 +215,16 @@ pub fn recycle_resource(
             resource,
             amount,
             symbol_short!("dust"),
-            dust_amount,
+            recovered,
             env.ledger().timestamp(),
         ),
     );
 
-    Ok(Vec::from_array(env, [(symbol_short!("dust"), dust_amount)]))
+    Ok(Vec::from_array(env, [(symbol_short!("dust"), recovered)]))
 }
 
-/// Craft a new item using a recipe, with optional efficiency multiplier based on ship stats (placeholder).
+/// Craft a new item using a recipe, applying the player's integer-safe
+/// recycling efficiency bonus to output quantities.
 pub fn craft_new_item(
     env: &Env,
     caller: &Address,
@@ -201,20 +256,29 @@ pub fn craft_new_item(
         }
     }
 
-    // Efficiency multiplier: placeholder 1.0 (could be derived from ship stats)
-    let efficiency_multiplier = 1.0;
+    let mut stats = get_player_recycling_stats(env, caller);
+    let bonus_bps = stats.efficiency_bonus_bps;
     let mut final_outputs = Vec::new(env);
-    let output_quantities = recipe.output_quantities;
+    let mut final_quantities = Vec::new(env);
     for i in 0..recipe.outputs.len() {
-        let base_qty = output_quantities.get(i).unwrap();
-        let _boosted_qty = (base_qty as f32 * efficiency_multiplier) as u32;
+        let base_qty = recipe.output_quantities.get(i).unwrap();
+        let bonus = ((base_qty as u64).saturating_mul(bonus_bps as u64)
+            / RECYCLING_BPS_DENOM as u64) as u32;
         final_outputs.push_back(recipe.outputs.get(i).unwrap().clone());
+        final_quantities.push_back(base_qty.saturating_add(bonus));
     }
+
+    stats.items_crafted = stats.items_crafted.saturating_add(1);
+    env.storage()
+        .persistent()
+        .set(&RecyclingKey::RecyclingPlayerStats(caller.clone()), &stats);
 
     let result = CraftingResult {
         recipe_id,
         inputs_consumed: inputs.clone(),
         outputs_produced: final_outputs.clone(),
+        output_quantities: final_quantities,
+        efficiency_bonus_bps: bonus_bps,
         crafted_at: env.ledger().timestamp(),
     };
 
@@ -238,4 +302,84 @@ pub fn get_recipe(env: &Env, recipe_id: u64) -> Option<Recipe> {
     env.storage()
         .instance()
         .get(&RecyclingKey::Recipe(recipe_id))
+}
+
+/// Get a player's recycling stats and current efficiency bonus.
+pub fn get_player_recycling_stats(env: &Env, player: &Address) -> RecyclingStats {
+    env.storage()
+        .persistent()
+        .get(&RecyclingKey::RecyclingPlayerStats(player.clone()))
+        .unwrap_or(RecyclingStats {
+            total_recycled: 0,
+            items_crafted: 0,
+            materials_recovered: 0,
+            carbon_offset_units: 0,
+            efficiency_bonus_bps: 0,
+        })
+}
+
+/// Get global environmental / sustainability metrics for recycling.
+pub fn get_sustainability_metrics(env: &Env) -> SustainabilityMetrics {
+    env.storage()
+        .instance()
+        .get(&RecyclingKey::GlobalMetrics)
+        .unwrap_or(SustainabilityMetrics {
+            total_recycled: 0,
+            total_materials_recovered: 0,
+            total_carbon_offset: 0,
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl, testutils::Address as _};
+
+    #[contract]
+    struct Stub;
+    #[contractimpl]
+    impl Stub {}
+
+    #[test]
+    fn test_recycling_efficiency_and_crafting() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(Stub, ());
+        let player = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            initialize_recycling(&env);
+
+            // First recycle: 0% bonus -> 100 ore yields 50 dust, bonus grows to 100 bps
+            let out1 = recycle_resource(&env, &player, symbol_short!("ore"), 100).unwrap();
+            assert_eq!(out1.get(0).unwrap().1, 50);
+
+            // Second recycle: 100 bps (1%) bonus -> 200 ore yields 100 + 1 = 101 dust
+            let out2 = recycle_resource(&env, &player, symbol_short!("ore"), 200).unwrap();
+            assert_eq!(out2.get(0).unwrap().1, 101);
+
+            let stats = get_player_recycling_stats(&env, &player);
+            assert_eq!(stats.total_recycled, 300);
+            assert_eq!(stats.materials_recovered, 151);
+            assert_eq!(stats.carbon_offset_units, 600);
+            assert_eq!(stats.efficiency_bonus_bps, 200);
+
+            let metrics = get_sustainability_metrics(&env);
+            assert_eq!(metrics.total_recycled, 300);
+            assert_eq!(metrics.total_carbon_offset, 600);
+
+            // Craft using Recipe 1 (2 ore -> 1 dust)
+            let crafted = craft_new_item(
+                &env,
+                &player,
+                1,
+                Vec::from_array(&env, [symbol_short!("ore")]),
+                Vec::from_array(&env, [2]),
+            )
+            .unwrap();
+            assert_eq!(crafted.recipe_id, 1);
+            assert_eq!(crafted.efficiency_bonus_bps, 200);
+            assert_eq!(get_player_recycling_stats(&env, &player).items_crafted, 1);
+        });
+    }
 }

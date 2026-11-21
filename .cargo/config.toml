@@ -1,2 +1,8 @@
+# Sparse crates.io index — deterministic, fast dependency resolution on every
+# toolchain version (CI workflows also set this explicitly in `env:`).
+[registries.crates-io]
+protocol = "sparse"
+
+# Soroban requires deterministic float-to-int conversion in WASM.
 [target.wasm32v1-none]
 rustflags = ["-C", "target-feature=-nontrapping-fptoint"]

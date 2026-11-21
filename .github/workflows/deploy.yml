@@ -12,41 +12,38 @@ on:
         type: choice
         options: [futurenet, testnet]
 
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.event.inputs.network || 'futurenet' }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   SOROBAN_NETWORK: ${{ github.event.inputs.network || 'futurenet' }}
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
   # ─── Build optimized WASM ────────────────────────────────────────────────
   build:
     name: Build Release WASM
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       wasm-name: ${{ steps.find-wasm.outputs.name }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      # Same `wasm` shared key as ci.yml's build job: on a merge to main the
+      # dependency graph is already cached from the PR pipeline.
+      - uses: ./.github/actions/setup-rust
         with:
-          targets: wasm32v1-none
+          cache-key: wasm
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-deploy-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install Stellar CLI
-        run: |
-          curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-stellar-cli
 
       - name: Build WASM
-        run: stellar contract build
+        env:
+          CARGO_INCREMENTAL: 0
+        run: stellar contract build --locked || stellar contract build
 
       - name: Optimize WASM
         id: find-wasm
@@ -57,7 +54,7 @@ jobs:
           echo "Optimized size: $(stat -c%s optimized.wasm) bytes"
 
       - name: Upload optimized WASM
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: optimized-wasm
           path: optimized.wasm
@@ -68,14 +65,17 @@ jobs:
     name: Deploy to ${{ github.event.inputs.network || 'futurenet' }}
     runs-on: ubuntu-latest
     needs: build
+    timeout-minutes: 20
     environment:
       name: ${{ github.event.inputs.network || 'futurenet' }}
-      url: https://stellar.expert/explorer/futurenet
+      url: https://stellar.expert/explorer/${{ github.event.inputs.network || 'futurenet' }}
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/setup-stellar-cli
+
       - name: Download optimized WASM
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: optimized-wasm
 
@@ -94,9 +94,14 @@ jobs:
           fi
 
       - name: Import deployer identity
+        env:
+          DEPLOYER_SECRET_KEY: ${{ secrets.DEPLOYER_SECRET_KEY }}
         run: |
-          echo "${{ secrets.DEPLOYER_SECRET_KEY }}" | \
-            stellar keys add deployer --secret-key
+          if [ -z "$DEPLOYER_SECRET_KEY" ]; then
+            echo "DEPLOYER_SECRET_KEY is not configured; aborting deploy." >&2
+            exit 1
+          fi
+          printf '%s' "$DEPLOYER_SECRET_KEY" | stellar keys add deployer --secret-key
 
       - name: Deploy contract
         id: deploy
@@ -140,7 +145,7 @@ jobs:
           cat deployments/${{ env.SOROBAN_NETWORK }}-latest.json
 
       - name: Upload deployment record
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: deployment-${{ env.SOROBAN_NETWORK }}-${{ github.sha }}
           path: deployments/

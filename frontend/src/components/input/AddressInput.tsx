@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
 
 export interface AddressInputProps {
   value: string;
@@ -10,9 +12,12 @@ export interface AddressInputProps {
 export const AddressInput: React.FC<AddressInputProps> = ({
   value,
   onChange,
-  label = 'Stellar Account Address',
+  label,
   placeholder = 'G...',
 }) => {
+  const { t } = useI18n();
+  const inputId = useId();
+  const errorId = `${inputId}-error`;
   const [touched, setTouched] = useState(false);
 
   // Stellar G-address validation: 56 chars starting with G
@@ -25,30 +30,34 @@ export const AddressInput: React.FC<AddressInputProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
-      <label htmlFor="stellar-addr" style={{ fontSize: '0.8rem', color: '#94A3B8' }}>
-        {label}
+      <label htmlFor={inputId} style={{ fontSize: '0.8rem', color: colors.textMuted }}>
+        {label ?? t('address.label')}
       </label>
       <input
-        id="stellar-addr"
+        id={inputId}
         type="text"
+        dir="ltr"
+        autoComplete="off"
+        spellCheck={false}
         value={value}
         onChange={(e) => onChange(e.target.value.trim())}
         onBlur={() => setTouched(true)}
         placeholder={placeholder}
         aria-invalid={isInvalid}
+        aria-describedby={isInvalid ? errorId : undefined}
         style={{
-          backgroundColor: '#0F172A',
-          border: `1px solid ${isInvalid ? '#EF4444' : '#334155'}`,
+          backgroundColor: colors.bgSurface,
+          border: `1px solid ${isInvalid ? colors.danger : colors.textMuted}`,
           borderRadius: '6px',
           padding: '8px 12px',
-          color: '#F8FAFC',
+          color: colors.textPrimary,
           fontSize: '0.85rem',
           fontFamily: 'monospace',
         }}
       />
       {isInvalid && (
-        <span style={{ color: '#EF4444', fontSize: '0.75rem' }}>
-          Invalid Stellar public key format (must be 56 characters starting with G)
+        <span id={errorId} role="alert" style={{ color: colors.danger, fontSize: '0.75rem' }}>
+          {t('address.invalid')}
         </span>
       )}
     </div>

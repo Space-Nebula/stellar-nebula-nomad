@@ -15,11 +15,47 @@ LOG_FILE="${BACKUP_DIR}/backup.log"
 
 SCHEDULE=false
 TEST_RESTORE=false
+VERIFY_ONLY=false
+VERIFY_ARCHIVE=""
 
-for arg in "$@"; do
-    case "$arg" in
-        --schedule) SCHEDULE=true ;;
-        --test-restore) TEST_RESTORE=true ;;
+# Optional integration settings (safe defaults keep `set -e` happy)
+S3_BUCKET="${S3_BUCKET:-}"
+IPFS_UPLOAD="${IPFS_UPLOAD:-}"
+WEBHOOK_URL="${WEBHOOK_URL:-}"
+
+# Parse arguments. Unknown arguments are ignored for backward compatibility.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --schedule)
+            SCHEDULE=true
+            shift
+            ;;
+        --test-restore)
+            TEST_RESTORE=true
+            shift
+            ;;
+        --verify-only)
+            VERIFY_ONLY=true
+            VERIFY_ARCHIVE="${2:-}"
+            if [ -z "$VERIFY_ARCHIVE" ]; then
+                echo "[ERROR] --verify-only requires an archive path" >&2
+                echo "Usage: $0 [--schedule] [--test-restore] [--verify-only <archive>]" >&2
+                exit 1
+            fi
+            shift 2
+            ;;
+        --verify-only=*)
+            VERIFY_ONLY=true
+            VERIFY_ARCHIVE="${1#*=}"
+            if [ -z "$VERIFY_ARCHIVE" ]; then
+                echo "[ERROR] --verify-only requires an archive path" >&2
+                exit 1
+            fi
+            shift
+            ;;
+        *)
+            shift
+            ;;
     esac
 done
 
@@ -45,6 +81,10 @@ fi
 
 # Backup retention (days)
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
+# Never prune below this many archives, even if they are older than
+# RETENTION_DAYS. Protects the recovery window after a long outage where no new
+# backups could be taken.
+BACKUP_MIN_KEEP="${BACKUP_MIN_KEEP:-7}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -194,35 +234,53 @@ create_state_snapshots() {
 
     local snapshot_dir="$BACKUP_DIR/$BACKUP_NAME/state/snapshots"
     mkdir -p "$snapshot_dir"
+    local succeeded=0 attempted=0
 
+    attempted=$((attempted + 1))
     horizon_get "/ledgers?order=desc&limit=20" "$snapshot_dir/recent_ledgers.json" \
+        && succeeded=$((succeeded + 1)) \
         || log_warning "Failed to export recent ledgers"
 
     if [ -n "$CONTRACT_ID" ]; then
+        attempted=$((attempted + 1))
         horizon_get "/accounts/${CONTRACT_ID}/effects?order=desc&limit=200" \
             "$snapshot_dir/player_profiles.json" \
+            && succeeded=$((succeeded + 1)) \
             || log_warning "Failed to export player/account effects"
+        attempted=$((attempted + 1))
         horizon_get "/accounts/${CONTRACT_ID}/operations?order=desc&limit=200" \
             "$snapshot_dir/leaderboard.json" \
+            && succeeded=$((succeeded + 1)) \
             || log_warning "Failed to export operations snapshot"
+        attempted=$((attempted + 1))
         horizon_get "/accounts/${CONTRACT_ID}/transactions?order=desc&limit=50" \
             "$snapshot_dir/global_stats.json" \
+            && succeeded=$((succeeded + 1)) \
             || log_warning "Failed to export transaction snapshot"
     else
         echo '{"note":"CONTRACT_ID unset"}' > "$snapshot_dir/player_profiles.json"
         echo '{"note":"CONTRACT_ID unset"}' > "$snapshot_dir/leaderboard.json"
         echo '{"note":"CONTRACT_ID unset"}' > "$snapshot_dir/global_stats.json"
+        # Without a contract id the three account snapshots are not meaningful.
+        attempted=1
     fi
 
     cat > "$snapshot_dir/retention_policy.json" <<EOF
 {
   "retention_days": $RETENTION_DAYS,
+  "min_keep": $BACKUP_MIN_KEEP,
   "schedule": "daily 02:00 UTC",
-  "horizon_url": "$HORIZON_URL"
+  "horizon_url": "$HORIZON_URL",
+  "snapshots_succeeded": $succeeded,
+  "snapshots_attempted": $attempted
 }
 EOF
 
-    log_success "State snapshots created"
+    if [ "$succeeded" -eq 0 ]; then
+        log_error "No Horizon snapshot could be exported; refusing to create an empty backup."
+        return 1
+    fi
+    log_success "State snapshots created ($succeeded/$attempted succeeded)"
 }
 
 # Calculate checksums for verification
@@ -285,41 +343,170 @@ upload_to_storage() {
 
 # Clean old backups
 cleanup_old_backups() {
-    log "Cleaning up old backups (retention: $RETENTION_DAYS days)..."
-    
-    find "$BACKUP_DIR" -name "nebula_backup_*.tar.gz" -type f -mtime +$RETENTION_DAYS -delete
-    
+    log "Cleaning up old backups (retention: ${RETENTION_DAYS}d, min keep: $BACKUP_MIN_KEEP)..."
+
+    # Age-based pruning only, but never below BACKUP_MIN_KEEP archives. Sort
+    # newest-first and keep the first N regardless of age.
+    find "$BACKUP_DIR" -name "nebula_backup_*.tar.gz" -type f \
+        -printf '%T@ %p\n' | sort -rn | tail -n +$((BACKUP_MIN_KEEP + 1)) \
+        | while read -r _ts old; do
+            age_days=$(( ($(date +%s) - $(stat -c %Y "$old")) / 86400 ))
+            if [ "$age_days" -gt "$RETENTION_DAYS" ]; then
+                rm -f "$old"
+            fi
+        done
+
     local remaining=$(find "$BACKUP_DIR" -name "nebula_backup_*.tar.gz" -type f | wc -l)
     log_success "Cleanup complete. Remaining backups: $remaining"
 }
 
-# Verify backup integrity
+# Locate the backup root inside an extracted archive. Handles both the layout
+# produced by this script (single top-level backup directory) and flat archives.
+find_extracted_backup_root() {
+    local base="$1" checksum_file
+    checksum_file="$(find "$base" -type f -path '*/verification/checksums.txt' -print -quit 2>/dev/null || true)"
+    if [ -n "$checksum_file" ]; then
+        dirname "$(dirname "$checksum_file")"
+        return 0
+    fi
+    if [ -f "$base/metadata/contract_info.json" ]; then
+        printf '%s' "$base"
+        return 0
+    fi
+    return 1
+}
+
+# Verify backup integrity (used during a normal backup run).
 verify_backup() {
     log "Verifying backup integrity..."
-    
+
     local archive_file="$BACKUP_DIR/${BACKUP_NAME}.tar.gz"
-    
-    # Test archive integrity
-    tar -tzf "$archive_file" > /dev/null 2>&1 || {
+
+    if [ ! -f "$archive_file" ] || [ ! -r "$archive_file" ]; then
+        log_error "Backup archive is missing or unreadable: $archive_file"
+        return 1
+    fi
+
+    # Test gzip and tar integrity before extracting anything.
+    if ! gzip -t "$archive_file" > /dev/null 2>&1; then
+        log_error "Backup archive failed gzip integrity check!"
+        return 1
+    fi
+    if ! tar -tzf "$archive_file" > /dev/null 2>&1; then
         log_error "Backup archive is corrupted!"
         return 1
-    }
-    
-    # Extract and verify checksums
-    local temp_dir=$(mktemp -d)
-    tar -xzf "$archive_file" -C "$temp_dir"
-    
-    cd "$temp_dir/$BACKUP_NAME"
-    if ! sha256sum -c verification/checksums.txt; then
+    fi
+
+    local temp_dir root checksum_file
+    temp_dir="$(mktemp -d)"
+
+    if ! tar -xzf "$archive_file" -C "$temp_dir"; then
+        log_error "Failed to extract backup archive"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    if ! root="$(find_extracted_backup_root "$temp_dir")"; then
+        log_error "No verification/checksums.txt found in the backup archive"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    checksum_file="$root/verification/checksums.txt"
+    if [ ! -s "$checksum_file" ]; then
+        log_error "Checksum file is missing or empty: $checksum_file"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    # Run from the backup root so relative paths inside checksums.txt resolve.
+    if ! (cd "$root" && sha256sum -c verification/checksums.txt); then
         log_error "Checksum verification failed!"
         rm -rf "$temp_dir"
         return 1
     fi
-    cd - > /dev/null
-    
+
+    local required
+    for required in metadata/contract_info.json state/contract_state.json; do
+        if [ ! -s "$root/$required" ]; then
+            log_error "Required backup file missing or empty: $required"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    done
+
     rm -rf "$temp_dir"
-    
     log_success "Backup integrity verified"
+}
+
+# Verify an existing archive only (no backup is created). Used by CI.
+verify_only_mode() {
+    local archive="$1" report_dir temp_dir root checksum_file required
+
+    log "=========================================="
+    log "Verify-only mode: $archive"
+    log "=========================================="
+
+    if [ ! -f "$archive" ] || [ ! -r "$archive" ]; then
+        log_error "Backup archive is missing or unreadable: $archive"
+        return 1
+    fi
+
+    report_dir="$(cd "$(dirname "$archive")" && pwd)"
+
+    if [ -x "$SCRIPT_DIR/verify-backup.sh" ]; then
+        if bash "$SCRIPT_DIR/verify-backup.sh" \
+            --backup "$archive" --report-dir "$report_dir"; then
+            log_success "Backup verified. Reports written to $report_dir"
+            return 0
+        fi
+        log_error "Standalone verification failed for $archive"
+        return 1
+    fi
+
+    log_warning "verify-backup.sh not found or not executable; using built-in verification"
+    if ! gzip -t "$archive" > /dev/null 2>&1; then
+        log_error "Backup archive failed gzip integrity check!"
+        return 1
+    fi
+    if ! tar -tzf "$archive" > /dev/null 2>&1; then
+        log_error "Backup archive is corrupted!"
+        return 1
+    fi
+
+    temp_dir="$(mktemp -d)"
+    if ! tar -xzf "$archive" -C "$temp_dir"; then
+        log_error "Failed to extract backup archive"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    if ! root="$(find_extracted_backup_root "$temp_dir")"; then
+        log_error "No verification/checksums.txt found in the backup archive"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    checksum_file="$root/verification/checksums.txt"
+    if [ ! -s "$checksum_file" ]; then
+        log_error "Checksum file is missing or empty: $checksum_file"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    if ! (cd "$root" && sha256sum -c verification/checksums.txt); then
+        log_error "Checksum verification failed!"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    for required in metadata/contract_info.json state/contract_state.json; do
+        if [ ! -s "$root/$required" ]; then
+            log_error "Required backup file missing or empty: $required"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    done
+
+    rm -rf "$temp_dir"
+    log_success "Backup integrity verified (built-in verifier)"
+    return 0
 }
 
 # Send notification
@@ -353,6 +540,23 @@ main() {
     calculate_checksums
     compress_backup
     verify_backup
+
+    # Generate standalone validation reports (Markdown, JSON, Prometheus metrics).
+    # Backward compatible: backup still succeeds if the verifier is absent.
+    if [ -x "$SCRIPT_DIR/verify-backup.sh" ]; then
+        log "Generating backup validation reports..."
+        local verify_args=(--backup "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" --report-dir "$BACKUP_DIR")
+        if [ "$TEST_RESTORE" = true ]; then
+            verify_args+=(--dry-run)
+        fi
+        if ! bash "$SCRIPT_DIR/verify-backup.sh" "${verify_args[@]}"; then
+            log_error "Standalone backup verification failed"
+            return 1
+        fi
+    else
+        log_warning "verify-backup.sh not found or not executable; skipping validation reports"
+    fi
+
     upload_to_storage
     cleanup_old_backups
     
@@ -383,5 +587,10 @@ main() {
 # Error handling
 trap 'log_error "Backup failed with error"; send_notification "error" "Backup failed"; exit 1' ERR
 
-# Run main process
+# Run verify-only mode (no backup is created) or the normal backup process
+if [ "$VERIFY_ONLY" = true ]; then
+    verify_only_mode "$VERIFY_ARCHIVE"
+    exit $?
+fi
+
 main "$@"

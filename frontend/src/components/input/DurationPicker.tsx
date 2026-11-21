@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useId } from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
 
 export interface DurationPickerProps {
   valueHours: number;
@@ -11,21 +13,32 @@ export const DurationPicker: React.FC<DurationPickerProps> = ({
   onChange,
   options = [1, 4, 8, 12, 24, 72],
 }) => {
+  const { t } = useI18n();
+  const labelId = useId();
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      <label style={{ fontSize: '0.8rem', color: '#94A3B8' }}>Expedition Duration</label>
+    <div
+      role="group"
+      aria-labelledby={labelId}
+      style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}
+    >
+      <span id={labelId} style={{ fontSize: '0.8rem', color: colors.textMuted }}>
+        {t('duration.label')}
+      </span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
         {options.map((h) => {
           const isSelected = valueHours === h;
+          const isDays = h >= 24 && h % 24 === 0;
+          const count = isDays ? h / 24 : h;
           return (
             <button
               key={h}
               type="button"
+              aria-pressed={isSelected}
               onClick={() => onChange(h)}
               style={{
-                backgroundColor: isSelected ? '#3B82F6' : '#1E293B',
-                color: isSelected ? '#FFFFFF' : '#94A3B8',
-                border: '1px solid #334155',
+                backgroundColor: isSelected ? colors.primaryFill : colors.bgRaised,
+                color: isSelected ? colors.textOnAccent : colors.textMuted,
+                border: `1px solid ${isSelected ? colors.primaryFill : colors.textMuted}`,
                 borderRadius: '6px',
                 padding: '6px 12px',
                 fontSize: '0.8rem',
@@ -33,7 +46,7 @@ export const DurationPicker: React.FC<DurationPickerProps> = ({
                 fontWeight: 600,
               }}
             >
-              {h >= 24 ? `${h / 24}d` : `${h}h`}
+              {t(isDays ? 'duration.days' : 'duration.hours', { count })}
             </button>
           );
         })}

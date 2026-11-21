@@ -1,21 +1,30 @@
-# Local development image: Rust toolchain + cargo-watch for hot reload.
+# syntax=docker/dockerfile:1
 FROM rust:1.84-bookworm
 
+# The WASM target plus the tools the watch command uses are installed in a
+# single layer so Docker can cache them across source-code edits.
 RUN rustup target add wasm32v1-none \
     && rustup component add rustfmt clippy \
     && cargo install cargo-watch --locked
 
 WORKDIR /workspace
 
-# Pre-fetch crates when the lockfile is present so first watch is faster.
-COPY Cargo.toml ./
-COPY src ./src
-RUN cargo fetch || true
+# Copy the lockfile BEFORE the sources. With BuildKit cache mounts, dependency
+# compilation is reused whenever Cargo.lock is unchanged — previously the
+# lockfile was not copied at all, so every source edit re-resolved dependencies.
+COPY Cargo.toml Cargo.lock ./
+COPY .cargo ./.cargo
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo fetch --locked
 
 COPY . .
 
 ENV CARGO_TERM_COLOR=always
 ENV RUST_BACKTRACE=1
+# Reuse compiled artifacts across rebuilds. Incremental compilation is useful
+# for this dev/watch image; release WASM builds keep `incremental = false`.
+ENV CARGO_INCREMENTAL=1
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
-# Default: rebuild/re-test the library on file changes.
 CMD ["cargo", "watch", "-q", "-c", "-w", "src", "-w", "tests", "-x", "check", "-x", "test --lib"]

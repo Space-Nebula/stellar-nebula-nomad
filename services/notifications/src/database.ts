@@ -12,7 +12,12 @@ export class NotificationDatabase {
   private pool: Pool;
 
   constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl });
+    this.pool = new Pool({
+      connectionString: databaseUrl,
+      max: 20,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+    });
   }
 
   async init(): Promise<void> {
@@ -45,6 +50,12 @@ export class NotificationDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_notification_preferences_user
         ON notification_preferences(user_id);
+
+      CREATE INDEX IF NOT EXISTS idx_device_registrations_active_user
+        ON device_registrations(active, user_id);
+
+      CREATE INDEX IF NOT EXISTS idx_notification_preferences_lookup
+        ON notification_preferences(user_id, channel, event_type);
     `);
   }
 
@@ -72,7 +83,8 @@ export class NotificationDatabase {
 
   async getActiveDevices(userId: string): Promise<DeviceRegistration[]> {
     const result: QueryResult<StoredDeviceRegistration> = await this.pool.query(
-      `SELECT * FROM device_registrations
+      `SELECT id, user_id, device_token, platform, active, created_at, updated_at
+       FROM device_registrations
        WHERE user_id = $1 AND active = true`,
       [userId],
     );
@@ -81,7 +93,8 @@ export class NotificationDatabase {
 
   async getAllActiveDevices(): Promise<DeviceRegistration[]> {
     const result: QueryResult<StoredDeviceRegistration> = await this.pool.query(
-      `SELECT * FROM device_registrations WHERE active = true`,
+      `SELECT id, user_id, device_token, platform, active, created_at, updated_at
+       FROM device_registrations WHERE active = true`,
     );
     return result.rows.map(this.mapDeviceRow);
   }
@@ -105,7 +118,8 @@ export class NotificationDatabase {
     userId: string,
   ): Promise<NotificationPreference[]> {
     const result: QueryResult<StoredPreference> = await this.pool.query(
-      `SELECT * FROM notification_preferences WHERE user_id = $1`,
+      `SELECT id, user_id, channel, event_type, enabled, updated_at
+       FROM notification_preferences WHERE user_id = $1`,
       [userId],
     );
     return result.rows.map(this.mapPreferenceRow);

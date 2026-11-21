@@ -1,0 +1,313 @@
+{
+  "common": {
+    "language": "Language",
+    "close": "Close",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "tryAgain": "Try Again",
+    "skipToContent": "Skip to main content",
+    "you": "(you)",
+    "none": "None"
+  },
+  "layout": {
+    "primaryNavigation": "Primary navigation"
+  },
+  "errors": {
+    "title": "Something went wrong",
+    "unexpected": "An unexpected error occurred."
+  },
+  "toast": {
+    "dismiss": "Dismiss notification"
+  },
+  "address": {
+    "label": "Stellar Account Address",
+    "invalid": "Invalid Stellar public key format (must be 56 characters starting with G)"
+  },
+  "duration": {
+    "label": "Expedition Duration",
+    "hours_one": "{{count}} hour",
+    "hours_other": "{{count}} hours",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days"
+  },
+  "rarity": {
+    "label": "Filter by Rarity",
+    "All": "All",
+    "Common": "Common",
+    "Rare": "Rare",
+    "Epic": "Epic",
+    "Legendary": "Legendary"
+  },
+  "amount": {
+    "label": "Amount ({{resource}})",
+    "max": "MAX"
+  },
+  "actions": {
+    "mint": "Mint Ship ({{cost}} XLM)",
+    "minting": "Minting on Soroban...",
+    "buy": "Buy Now ({{price}} {{currency}})",
+    "list": "List Item ({{price}} {{currency}})",
+    "processingBuy": "Processing purchase...",
+    "processingSell": "Processing listing...",
+    "upgrade": "Upgrade to Lvl {{level}} ({{cost}})",
+    "upgradeDefaultCost": "100 Fuel + 50 Ore",
+    "upgrading": "Upgrading...",
+    "bond": "Bond {{amount}} with {{guild}}",
+    "bonding": "Bonding Stake..."
+  },
+  "achievement": {
+    "label": "{{title}} achievement: {{status}}",
+    "unlocked": "Unlocked",
+    "locked": "Locked",
+    "unlockedOn": "Unlocked on {{date}}"
+  },
+  "leaderboard": {
+    "label": "Leaderboard Rankings",
+    "rank": "Rank",
+    "explorer": "Explorer",
+    "guild": "Guild",
+    "score": "Score"
+  },
+  "nebula": {
+    "label": "Nebula sector: {{sector}}, density {{density}}",
+    "anomalyLabel": "anomaly detected",
+    "anomaly": "ANOMALY",
+    "density": "Nebula Density: {{density}}"
+  },
+  "resource": {
+    "label": "{{name}} resource",
+    "capacity": "{{name}} capacity used"
+  },
+  "ship": {
+    "label": "Ship: {{name}}, {{rarity}} {{shipClass}}",
+    "select": "Select {{name}}",
+    "level": "Level {{level}}",
+    "speed": "Speed",
+    "hull": "Hull",
+    "scan": "Scan",
+    "class": {
+      "Scout": "Scout",
+      "Frigate": "Frigate",
+      "Cruiser": "Cruiser",
+      "Dreadnought": "Dreadnought"
+    }
+  },
+  "oracle": {
+    "title": "Market Oracle",
+    "description": "Consensus prices aggregated from independent oracle sources.",
+    "pricesLabel": "Resource prices",
+    "consensus": "Consensus price",
+    "sources_one": "{{count}} agreeing source",
+    "sources_other": "{{count}} agreeing sources",
+    "updated": "Updated {{time}}",
+    "status": {
+      "fresh": "Validated",
+      "stale": "Stale",
+      "rejected": "Rejected"
+    },
+    "rejectedReason": "Sources disagreed; the last validated price is still in use.",
+    "empty": "No prices published yet.",
+    "resource": "Resource",
+    "sourcesHeader": "Sources",
+    "updatedHeader": "Updated",
+    "statusHeader": "Status"
+  },
+  "vault": {
+    "title": "Treasure Vault",
+    "description": "Discover unlocked vaults and spend keys to claim their loot.",
+    "vaultsLabel": "Your vaults",
+    "vault": "Vault #{{id}}",
+    "keys_one": "{{count}} vault key",
+    "keys_other": "{{count}} vault keys",
+    "lockedUntil": "Locked until {{time}}",
+    "loot": "Loot: {{amount}}",
+    "discover": "Discover vault",
+    "discoverVault": "Discover vault #{{id}}",
+    "claim": "Claim loot",
+    "claimVault": "Claim loot from vault #{{id}}",
+    "needKey": "You need a vault key to claim this loot.",
+    "claimed": "Loot claimed",
+    "locked": "Locked",
+    "undiscovered": "Undiscovered",
+    "special": {
+      "None": "",
+      "StarChart": "Special reward: Star Chart",
+      "AncientRelic": "Special reward: Ancient Relic + bonus key"
+    },
+    "empty": "You have no vaults yet.",
+    "principal": "Deposit: {{amount}}"
+  },
+  "theme": {
+    "title": "Appearance",
+    "active": "Active theme: {{name}}",
+    "family": "Theme",
+    "modeLabel": "Colour mode",
+    "mode": {
+      "dark": "Dark",
+      "light": "Light",
+      "system": "Match device"
+    },
+    "id": {
+      "nebula": "Nebula",
+      "cosmic": "Cosmic",
+      "aurora": "Aurora",
+      "highContrast": "High contrast"
+    },
+    "accessibility": "Accessibility palette",
+    "profile": {
+      "standard": "Standard",
+      "highContrast": "High contrast",
+      "redGreenSafe": "Red/green colour-blind safe",
+      "blueYellowSafe": "Blue/yellow colour-blind safe"
+    },
+    "textSize": "Text size",
+    "reducedMotion": "Reduce motion",
+    "customColors": "Custom colours",
+    "customHint": "Colours that would drop text contrast below {{ratio}}:1 are refused.",
+    "slot": {
+      "background": "Background",
+      "surface": "Panels",
+      "text": "Text",
+      "primary": "Buttons",
+      "accent": "Accent",
+      "border": "Borders"
+    },
+    "colorApplied": "{{slot}} colour applied.",
+    "colorReset": "{{slot}} colour reset.",
+    "colorRejected": "{{slot}} colour refused: it would make text hard to read.",
+    "slotIgnored": "Ignored in this mode (low contrast)",
+    "reset": "Reset",
+    "resetSlot": "Reset {{slot}} colour",
+    "resetAll": "Reset appearance",
+    "resetDone": "Appearance reset to defaults."
+  },
+  "referral": {
+    "title": "Referral Program",
+    "description": "Earn {{reward}} essence for each friend who completes their first scan. They get a {{bonus}} essence welcome bonus.",
+    "blocked": "Your referral account is suspended pending review.",
+    "yourCode": "Your code",
+    "copyLink": "Copy invite link",
+    "copied": "Invite link copied.",
+    "copyFailed": "Could not copy. Select the code and copy it manually.",
+    "generate": "Get my referral code",
+    "stats": {
+      "total": "Invited",
+      "pending": "Awaiting first scan",
+      "claimable": "Ready to claim",
+      "claimed": "Claimed",
+      "earned": "Essence earned"
+    },
+    "tier": "Tier: {{tier}} ({{multiplier}}× rewards)",
+    "tierProgress": "Progress to next tier",
+    "toNextTier_one": "{{count}} more referral to reach {{tier}}",
+    "toNextTier_other": "{{count}} more referrals to reach {{tier}}",
+    "maxTier": "Top tier reached.",
+    "tiers": {
+      "bronze": "Bronze",
+      "silver": "Silver",
+      "gold": "Gold",
+      "platinum": "Platinum",
+      "diamond": "Diamond"
+    },
+    "referees": "Your referrals",
+    "noReferees": "No referrals yet. Share your code to get started.",
+    "joined": "joined {{date}}",
+    "claim": "Claim",
+    "claimFor": "Claim reward for {{address}}",
+    "status": {
+      "pending": "Awaiting first scan",
+      "claimable": "Ready to claim",
+      "claimed": "Claimed"
+    },
+    "haveCode": "Have a referral code?",
+    "redeem": "Redeem",
+    "invalidCode": "Codes are 8 characters, letters and digits, without 0, O, 1, I, L or U."
+  },
+  "daily": {
+    "title": "Daily Rewards",
+    "streak_one": "{{count}}-day streak",
+    "streak_other": "{{count}}-day streak",
+    "best_one": "best {{count}} day",
+    "best_other": "best {{count}} days",
+    "eventTitle": "{{name}} event!",
+    "eventDetail": "Rewards ×{{multiplier}} plus {{bonus}} bonus until {{date}}.",
+    "todayReward": "Today's reward",
+    "nextReward": "Tomorrow's reward",
+    "amount": "{{amount}} {{kind}}",
+    "streakBonus": "Includes +{{percent}}% streak bonus",
+    "claim": "Claim reward",
+    "atRisk": "Claim within {{hours}}h {{minutes}}m to keep your streak.",
+    "claimedToday": "Claimed today. Next reward in {{hours}}h {{minutes}}m.",
+    "calendar": "28-day reward calendar",
+    "day": "Day {{day}}",
+    "milestone": "milestone",
+    "state": {
+      "claimed": "claimed",
+      "next": "next reward",
+      "upcoming": "upcoming"
+    },
+    "kind": {
+      "Essence": "essence",
+      "StellarDust": "stellar dust",
+      "DarkMatter": "dark matter",
+      "ExoticMatter": "exotic matter",
+      "Energy": "energy",
+      "CosmeticRoll": "cosmetic roll"
+    }
+  },
+  "bots": {
+    "title": "Bot Review Queue",
+    "filter": "Show",
+    "filters": {
+      "open": "Open cases",
+      "resolved": "Resolved",
+      "all": "All"
+    },
+    "summary": {
+      "open": "Open",
+      "highRisk": "High risk",
+      "cleared": "Cleared",
+      "banned": "Banned"
+    },
+    "empty": "No cases to review.",
+    "caption": "Flagged players, highest risk first",
+    "col": {
+      "player": "Player",
+      "score": "Score",
+      "signals": "Signals",
+      "opened": "Opened",
+      "action": "Action"
+    },
+    "case": "Case #{{id}}",
+    "response": {
+      "Allow": "No action",
+      "Monitor": "Monitoring",
+      "Captcha": "CAPTCHA required",
+      "Block": "Temporarily blocked",
+      "Ban": "Banned"
+    },
+    "signal": {
+      "burst": "Action burst",
+      "rateLimit": "Rate limit",
+      "regularTiming": "Scripted timing",
+      "repetitive": "Repetitive loop",
+      "multiAccount": "Multi-account",
+      "farming": "Account farm",
+      "captchaFail": "Failed CAPTCHA",
+      "manual": "Manual flag"
+    },
+    "status": {
+      "Open": "Open",
+      "Cleared": "Cleared",
+      "Banned": "Banned"
+    },
+    "clear": "Clear",
+    "clearCase": "Clear case {{id}}",
+    "ban": "Ban",
+    "banCase": "Ban player in case {{id}}",
+    "confirmBan": "Confirm ban",
+    "confirmBanCase": "Confirm ban for case {{id}}",
+    "cancel": "Cancel"
+  }
+}

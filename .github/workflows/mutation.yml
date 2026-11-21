@@ -3,8 +3,13 @@ name: Mutation Testing
 on:
   pull_request:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
   push:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,7 +20,8 @@ jobs:
     name: Mutation Testing (cargo-mutants)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -30,13 +36,15 @@ jobs:
           key: ${{ runner.os }}-cargo-mutants-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install cargo-mutants
-        run: cargo install cargo-mutants --locked || true
+        run: which cargo-mutants || cargo install cargo-mutants --locked || true
 
       - name: Run Mutation Tests
-        run: ./scripts/mutation-test.sh
+        run: |
+          chmod +x ./scripts/mutation-test.sh
+          ./scripts/mutation-test.sh
 
       - name: Upload Mutation Report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mutants-report

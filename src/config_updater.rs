@@ -34,6 +34,18 @@ pub enum ConfigError {
     AlreadyApproved    = 9,
 }
 
+impl crate::error_standard::StandardContractError for ConfigError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "config_updater",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ─── Data types ───────────────────────────────────────────────────────────────
 
 /// A proposed — but not yet live — config change.

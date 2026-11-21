@@ -1,4 +1,7 @@
 import React from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
+import { actionButtonStyle } from './actionButtonStyle';
 
 export interface UpgradeButtonProps {
   onUpgrade: () => void | Promise<void>;
@@ -11,37 +14,28 @@ export interface UpgradeButtonProps {
 export const UpgradeButton: React.FC<UpgradeButtonProps> = ({
   onUpgrade,
   targetLevel,
-  costDescription = '100 Fuel + 50 Ore',
+  costDescription,
   isLoading = false,
   disabled = false,
 }) => {
+  const { t, formatNumber } = useI18n();
   return (
     <button
       type="button"
       onClick={onUpgrade}
       disabled={disabled || isLoading}
       aria-busy={isLoading}
-      style={{
-        backgroundColor: '#F59E0B',
-        color: '#FFFFFF',
-        border: 'none',
-        borderRadius: '8px',
-        padding: '10px 18px',
-        fontSize: '0.9rem',
-        fontWeight: 700,
-        cursor: disabled || isLoading ? 'not-allowed' : 'pointer',
-        opacity: disabled || isLoading ? 0.6 : 1,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '6px',
-      }}
+      // White on amber fails AA (2.1:1); dark text on amber passes (8.3:1).
+      style={actionButtonStyle(colors.warningFill, colors.textOnWarning, disabled || isLoading)}
     >
-      {isLoading ? (
-        <span>Upgrading...</span>
-      ) : (
-        <span>Upgrade to Lvl {targetLevel} ({costDescription})</span>
-      )}
+      <span aria-live="polite">
+        {isLoading
+          ? t('actions.upgrading')
+          : t('actions.upgrade', {
+              level: formatNumber(targetLevel),
+              cost: costDescription ?? t('actions.upgradeDefaultCost'),
+            })}
+      </span>
     </button>
   );
 };

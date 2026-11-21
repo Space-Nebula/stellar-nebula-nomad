@@ -11,6 +11,9 @@ use crate::seasons::{get_current_season, SeasonTheme};
 /// Minimum base reward for AI-generated missions.
 pub const BASE_AI_REWARD: i128 = 200;
 
+/// Cooldown window before the same template can be rolled again for a player (1 hour).
+pub const TEMPLATE_COOLDOWN_SECS: u64 = 3_600;
+
 // ─── Data Types ───────────────────────────────────────────────────────────────
 
 /// Represents the player's playstyle classification.
@@ -292,8 +295,22 @@ pub fn generate_ai_mission_internal(env: &Env, player: Address, seed: u64) -> Ai
         .wrapping_mul(gen_count as u64 + 1)
         .wrapping_add(difficulty_bps as u64);
 
-    let template_idx = (final_seed % 9) as u32;
-    let template = get_mission_template(&profile.preferred_archetype, template_idx);
+    let now = env.ledger().timestamp();
+    let initial_idx = (final_seed % 9) as u32;
+    let mut template = get_mission_template(&profile.preferred_archetype, initial_idx);
+    for offset in 0..9u32 {
+        let candidate = get_mission_template(&profile.preferred_archetype, initial_idx + offset);
+        let cd_key = AiMissionKey::TemplateCooldown(player.clone(), candidate.template_id);
+        let cooldown_until: u64 = env.storage().persistent().get(&cd_key).unwrap_or(0);
+        if now >= cooldown_until {
+            template = candidate;
+            break;
+        }
+    }
+    env.storage().persistent().set(
+        &AiMissionKey::TemplateCooldown(player.clone(), template.template_id),
+        &(now.saturating_add(TEMPLATE_COOLDOWN_SECS)),
+    );
 
     // 4. Adapt target counts and rewards
     // target_count = base * difficulty_bps / 100 (difficulty scales up target)
@@ -335,5 +352,49 @@ pub fn generate_ai_mission_internal(env: &Env, player: Address, seed: u64) -> Ai
         reward,
         narrative_tier,
         archetype_tag,
+    }
+}
+
+/// Return a story integration hook for an archetype and narrative tier.
+pub fn get_story_hook(archetype: &PlayerArchetype, narrative_tier: &Symbol) -> &'static str {
+    if *narrative_tier == symbol_short!("legend") {
+        return "High Command has flagged an apex anomaly tied to the First Nomad's trail.";
+    }
+    match archetype {
+        PlayerArchetype::Rookie => "Academy Dispatch: complete this sortie to earn fleet clearance.",
+        PlayerArchetype::Explorer => "Cartography Guild: uncharted sectors await your sensor sweep.",
+        PlayerArchetype::Harvester => "Refinery Syndicate: volatile essence reserves are running low.",
+        PlayerArchetype::Trader => "Merchant Coalition: border outposts need reliable convoy captains.",
+        PlayerArchetype::Nomad => "Drift Archive: follow the beacon echoes across the outer rim.",
+        PlayerArchetype::Veteran => "Vanguard Command: only seasoned pilots survive this deep-space brief.",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::{Address as _, Ledger as _};
+    use soroban_sdk::{contract, contractimpl, Env};
+
+    #[contract]
+    struct Stub;
+    #[contractimpl]
+    impl Stub {}
+
+    #[test]
+    fn test_ai_mission_generation_variety_and_cooldown() {
+        let env = Env::default();
+        env.ledger().set_timestamp(10_000);
+        let cid = env.register(Stub, ());
+        let player = Address::generate(&env);
+
+        env.as_contract(&cid, || {
+            let m1 = generate_ai_mission_internal(&env, player.clone(), 42);
+            let m2 = generate_ai_mission_internal(&env, player.clone(), 42);
+            assert!(m1.reward >= BASE_AI_REWARD);
+            assert!(m1.target_count >= 1);
+            assert_ne!(m1.template_id, m2.template_id);
+            assert!(!get_story_hook(&PlayerArchetype::Explorer, &m1.narrative_tier).is_empty());
+        });
     }
 }

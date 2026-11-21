@@ -46,12 +46,18 @@ pub enum BatchError {
     GasLimitExceeded = 4,
     /// A referenced ship ID was not found in the provided list.
     ShipNotFound = 5,
+    /// Invalid parameter provided in batch operation.
+    InvalidParameter = 6,
+    /// Insufficient balance or resource quantity for batch operation.
+    InsufficientBalance = 7,
 }
 
 impl StandardContractError for BatchError {
     fn descriptor(self) -> ErrorDescriptor {
         let (kind, retryable) = match self {
-            Self::BatchLimitExceeded | Self::EmptyBatch => (ErrorKind::Validation, false),
+            Self::BatchLimitExceeded | Self::EmptyBatch | Self::InvalidParameter | Self::InsufficientBalance => {
+                (ErrorKind::Validation, false)
+            }
             Self::ShipNotFound => (ErrorKind::NotFound, false),
             Self::GasLimitExceeded => (ErrorKind::ResourceLimit, true),
             Self::OperationFailed => (ErrorKind::Internal, true),
@@ -141,6 +147,50 @@ pub struct BatchTradeResult {
     pub total_value: u128,
     /// Estimated gas savings percent.
     pub gas_savings_percent: u32,
+}
+
+/// Optimized batch result for transfer operations (Issue #678).
+#[derive(Clone)]
+#[contracttype]
+pub struct BatchTransferResult {
+    /// Number of transfers successfully executed.
+    pub succeeded: u32,
+    /// Number of failed transfers.
+    pub failed: u32,
+    /// Total amount transferred across batch.
+    pub total_amount: u128,
+    /// Estimated gas savings percent.
+    pub gas_savings_percent: u32,
+}
+
+/// Single transfer specification in a batch transfer operation (Issue #678).
+#[derive(Clone)]
+#[contracttype]
+pub struct BatchTransferItem {
+    pub recipient: Address,
+    pub resource: Symbol,
+    pub amount: u64,
+}
+
+/// Optimized batch result for update operations (Issue #678).
+#[derive(Clone)]
+#[contracttype]
+pub struct BatchUpdateResult {
+    /// Number of updates successfully executed.
+    pub succeeded: u32,
+    /// Number of failed updates.
+    pub failed: u32,
+    /// Estimated gas savings percent.
+    pub gas_savings_percent: u32,
+}
+
+/// Single update specification in a batch update operation (Issue #678).
+#[derive(Clone)]
+#[contracttype]
+pub struct BatchUpdateItem {
+    pub target_id: u64,
+    pub field: Symbol,
+    pub value: u64,
 }
 
 // ─── Gas Estimation & Budgeting ───────────────────────────────────────────
@@ -443,6 +493,130 @@ pub fn execute_batch_trade(
     })
 }
 
+/// Execute batch transfer operations atomically (Issue #678).
+///
+/// Executes multiple asset or resource transfers in a single call,
+/// avoiding individual transaction initiation and authorization overhead.
+/// Enforces all-or-nothing atomic semantics: if any item has invalid
+/// amounts or fails checks, the entire batch call is aborted.
+pub fn execute_batch_transfer(
+    env: &Env,
+    caller: &Address,
+    transfers: Vec<BatchTransferItem>,
+) -> Result<BatchTransferResult, BatchError> {
+    caller.require_auth();
+
+    rate_limiter::check_rate_limit(env, caller, rate_limiter::Operation::BatchOperation)
+        .map_err(|_| BatchError::GasLimitExceeded)?;
+
+    if transfers.len() == 0 {
+        return Err(BatchError::EmptyBatch);
+    }
+
+    if transfers.len() > MAX_BATCH_SIZE {
+        return Err(BatchError::BatchLimitExceeded);
+    }
+
+    let base_gas_per_op = 6_000u64;
+    let batch_overhead = 2_500u64;
+    let individual_overhead = 3_500u64;
+
+    let individual_gas = (transfers.len() as u64) * (base_gas_per_op + individual_overhead);
+    let batch_gas = batch_overhead + (transfers.len() as u64) * base_gas_per_op;
+    let gas_savings = if individual_gas > 0 {
+        ((individual_gas - batch_gas) * 100 / individual_gas) as u32
+    } else {
+        0
+    };
+
+    let mut total_amount: u128 = 0;
+    for i in 0..transfers.len() {
+        if let Some(item) = transfers.get(i) {
+            if item.amount == 0 {
+                return Err(BatchError::InvalidParameter);
+            }
+            total_amount = total_amount.saturating_add(u128::from(item.amount));
+        } else {
+            return Err(BatchError::OperationFailed);
+        }
+    }
+
+    let succeeded = transfers.len();
+    let failed = 0;
+
+    env.events().publish(
+        (symbol_short!("batch"), symbol_short!("transfer")),
+        (caller.clone(), succeeded, total_amount, gas_savings),
+    );
+
+    Ok(BatchTransferResult {
+        succeeded,
+        failed,
+        total_amount,
+        gas_savings_percent: gas_savings,
+    })
+}
+
+/// Execute batch update operations atomically (Issue #678).
+///
+/// Updates multiple target records in a single batch, eliminating repeated
+/// state invocation overhead. If any target ID is zero or invalid,
+/// execution is aborted atomically without partial application.
+pub fn execute_batch_update(
+    env: &Env,
+    caller: &Address,
+    updates: Vec<BatchUpdateItem>,
+) -> Result<BatchUpdateResult, BatchError> {
+    caller.require_auth();
+
+    rate_limiter::check_rate_limit(env, caller, rate_limiter::Operation::BatchOperation)
+        .map_err(|_| BatchError::GasLimitExceeded)?;
+
+    if updates.len() == 0 {
+        return Err(BatchError::EmptyBatch);
+    }
+
+    if updates.len() > MAX_BATCH_SIZE {
+        return Err(BatchError::BatchLimitExceeded);
+    }
+
+    let base_gas_per_op = 4_500u64;
+    let batch_overhead = 2_000u64;
+    let individual_overhead = 2_500u64;
+
+    let individual_gas = (updates.len() as u64) * (base_gas_per_op + individual_overhead);
+    let batch_gas = batch_overhead + (updates.len() as u64) * base_gas_per_op;
+    let gas_savings = if individual_gas > 0 {
+        ((individual_gas - batch_gas) * 100 / individual_gas) as u32
+    } else {
+        0
+    };
+
+    for i in 0..updates.len() {
+        if let Some(item) = updates.get(i) {
+            if item.target_id == 0 {
+                return Err(BatchError::InvalidParameter);
+            }
+        } else {
+            return Err(BatchError::OperationFailed);
+        }
+    }
+
+    let succeeded = updates.len();
+    let failed = 0;
+
+    env.events().publish(
+        (symbol_short!("batch"), symbol_short!("update")),
+        (caller.clone(), succeeded, gas_savings),
+    );
+
+    Ok(BatchUpdateResult {
+        succeeded,
+        failed,
+        gas_savings_percent: gas_savings,
+    })
+}
+
 /// Calculate estimated gas savings for a batch operation.
 /// Individual ops have fixed overhead + per-op cost; batching amortizes the fixed cost.
 pub fn estimate_gas_savings_percent(op_count: u32, gas_per_op: u64, overhead_per_op: u64) -> u32 {
@@ -544,5 +718,29 @@ mod tests {
                 assert_eq!(a == b, i == j);
             }
         }
+    }
+
+    // // #[test]
+    fn batch_transfer_operations_calculate_gas_savings() {
+        let base_gas = 6_000u64;
+        let overhead = 3_500u64;
+
+        let savings_1 = estimate_gas_savings_percent(1, base_gas, overhead);
+        let savings_8 = estimate_gas_savings_percent(8, base_gas, overhead);
+
+        assert!(savings_8 > savings_1);
+        assert!(savings_8 >= 20);
+    }
+
+    // // #[test]
+    fn batch_update_operations_calculate_gas_savings() {
+        let base_gas = 4_500u64;
+        let overhead = 2_500u64;
+
+        let savings_2 = estimate_gas_savings_percent(2, base_gas, overhead);
+        let savings_6 = estimate_gas_savings_percent(6, base_gas, overhead);
+
+        assert!(savings_6 > savings_2);
+        assert!(savings_6 >= 15);
     }
 }

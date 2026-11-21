@@ -27,6 +27,18 @@ pub enum BindingError {
     BurstLimitExceeded = 3,
 }
 
+impl crate::error_standard::StandardContractError for BindingError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "soul_binding",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 const MAX_BATCH_BIND: u32 = 3;
 
 #[contract]

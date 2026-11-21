@@ -65,6 +65,18 @@ pub enum BountyError {
     DuplicateReport = 12,
 }
 
+impl crate::error_standard::StandardContractError for BountyError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "bug_bounty_payout",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 fn cfg_key() -> Symbol {
     symbol_short!("b_cfg")
 }

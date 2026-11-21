@@ -272,6 +272,41 @@ pub fn dispute_bounty(env: &Env, poster: &Address, bounty_id: u64) -> Result<Bou
     Ok(bounty)
 }
 
+/// Cancels a bounty and releases its escrowed reward back to the poster.
+///
+/// Allowed while nobody has submitted proof, or once the bounty has expired
+/// without being approved. A claimed (approved) or disputed bounty cannot be
+/// cancelled. The record is removed and a `refunded` event carries the reward
+/// owed back to the poster. Returns the refunded amount.
+pub fn cancel_bounty(env: &Env, poster: &Address, bounty_id: u64) -> Result<i128, BountyError> {
+    poster.require_auth();
+    let bounty: Bounty = env
+        .storage()
+        .instance()
+        .get(&BountyKey::Bounty(bounty_id))
+        .ok_or(BountyError::BountyNotFound)?;
+    if bounty.poster != *poster {
+        return Err(BountyError::NotPoster);
+    }
+    if bounty.claimed || bounty.disputed {
+        return Err(BountyError::AlreadyClaimed);
+    }
+    let expired = env.ledger().timestamp() > bounty.expires_at;
+    if bounty.claimer.is_some() && !expired {
+        // Proof is waiting for review: approve or dispute it instead.
+        return Err(BountyError::AlreadyClaimed);
+    }
+
+    env.storage()
+        .instance()
+        .remove(&BountyKey::Bounty(bounty_id));
+    env.events().publish(
+        (symbol_short!("bounty"), symbol_short!("refunded")),
+        (poster.clone(), bounty_id, bounty.reward),
+    );
+    Ok(bounty.reward)
+}
+
 /// Get bounty by ID.
 pub fn get_bounty(env: &Env, bounty_id: u64) -> Option<Bounty> {
     env.storage().instance().get(&BountyKey::Bounty(bounty_id))

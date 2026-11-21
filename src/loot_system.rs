@@ -54,6 +54,18 @@ pub enum LootError {
     NotRequestOwner = 9,
 }
 
+impl crate::error_standard::StandardContractError for LootError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "loot_system",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 // ── Storage Keys ────────────────────────────────────────────────────────────
 
 #[contracttype]

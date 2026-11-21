@@ -1,5 +1,6 @@
 //! Battle-pass seasons, tiers, and reward claims.
 //!
+use crate::challenge_system::{self, ChallengeError};
 use crate::seasons::get_current_season;
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, String, Symbol, Vec};
 
@@ -129,6 +130,12 @@ pub enum BattlePassError {
     TierOutOfRange = 6,
     /// XP for this challenge was already granted to this player.
     ChallengeXpAlreadyGranted = 7,
+    /// No challenge exists with the supplied ID.
+    ChallengeNotFound = 8,
+    /// The challenge's target has not been reached yet.
+    ChallengeNotCompleted = 9,
+    /// The challenge window is not open (or has closed).
+    ChallengeNotActive = 10,
 }
 
 impl crate::error_standard::StandardContractError for BattlePassError {
@@ -136,10 +143,13 @@ impl crate::error_standard::StandardContractError for BattlePassError {
         use crate::error_standard::ErrorKind;
         let (kind, retryable) = match self {
             Self::NotEnoughXP => (ErrorKind::ResourceLimit, false),
-            Self::AlreadyClaimed | Self::ChallengeXpAlreadyGranted => (ErrorKind::Conflict, false),
+            Self::AlreadyClaimed
+            | Self::ChallengeXpAlreadyGranted
+            | Self::ChallengeNotCompleted => (ErrorKind::Conflict, false),
             Self::InvalidTier | Self::TierOutOfRange => (ErrorKind::Validation, false),
-            Self::NoActiveSeason => (ErrorKind::NotFound, false),
+            Self::NoActiveSeason | Self::ChallengeNotFound => (ErrorKind::NotFound, false),
             Self::PremiumRequired => (ErrorKind::Authorization, false),
+            Self::ChallengeNotActive => (ErrorKind::Conflict, false),
         };
         crate::error_standard::ErrorDescriptor {
             module: "battle_pass",
@@ -199,6 +209,33 @@ pub fn add_xp_for_challenge(
     profile_id: u64,
     challenge_id: u64,
 ) -> Result<u64, BattlePassError> {
+    grant_challenge_xp(
+        env,
+        profile_id,
+        challenge_id,
+        XP_PER_CHALLENGE_COMPLETE as u64,
+    )
+}
+
+/// Grant the exact XP reward configured on a challenge.
+///
+/// Idempotent on `(profile_id, challenge_id)`, so a retried claim cannot mint
+/// extra XP. This is the entry point used by [`claim_challenge_reward`].
+pub fn add_xp_for_challenge_reward(
+    env: &Env,
+    profile_id: u64,
+    challenge_id: u64,
+    xp_reward: u64,
+) -> Result<u64, BattlePassError> {
+    grant_challenge_xp(env, profile_id, challenge_id, xp_reward)
+}
+
+fn grant_challenge_xp(
+    env: &Env,
+    profile_id: u64,
+    challenge_id: u64,
+    gained: u64,
+) -> Result<u64, BattlePassError> {
     let season = get_current_season(env).map_err(|_| BattlePassError::NoActiveSeason)?;
 
     let dedup_key = BattlePassKey::ChallengeXpGranted(profile_id, challenge_id);
@@ -224,7 +261,6 @@ pub fn add_xp_for_challenge(
                 has_premium: false,
             });
 
-    let gained = XP_PER_CHALLENGE_COMPLETE as u64;
     state.xp += gained;
     env.storage().persistent().set(&key, &state);
 
@@ -234,6 +270,35 @@ pub fn add_xp_for_challenge(
     );
 
     Ok(state.xp)
+}
+
+/// Claim a completed challenge and credit its configured XP to the battle pass.
+///
+/// The player's authorization is checked by the challenge subsystem before the
+/// claim is marked, and battle-pass XP is deduplicated by challenge ID.
+pub fn claim_challenge_reward(
+    env: &Env,
+    player: &Address,
+    profile_id: u64,
+    challenge_id: u64,
+) -> Result<u64, BattlePassError> {
+    let xp_reward = challenge_system::claim_reward_for(env, player, profile_id, challenge_id)
+        .map_err(map_challenge_error)?;
+    add_xp_for_challenge_reward(env, profile_id, challenge_id, xp_reward)
+}
+
+fn map_challenge_error(error: ChallengeError) -> BattlePassError {
+    match error {
+        ChallengeError::ChallengeNotFound => BattlePassError::ChallengeNotFound,
+        ChallengeError::AlreadyClaimed => BattlePassError::ChallengeXpAlreadyGranted,
+        ChallengeError::NotCompleted | ChallengeError::AlreadyCompleted => {
+            BattlePassError::ChallengeNotCompleted
+        }
+        ChallengeError::ChallengeNotActive => BattlePassError::ChallengeNotActive,
+        ChallengeError::InvalidTarget | ChallengeError::InvalidDuration => {
+            BattlePassError::InvalidTier
+        }
+    }
 }
 
 /// Grant bonus XP for discovering the season's exclusive nebula type.
@@ -469,7 +534,17 @@ pub fn init_default_season_rewards(
     season_id: u64,
 ) -> Result<(), BattlePassError> {
     admin.require_auth();
+    seed_default_season_rewards(env, season_id)
+}
 
+/// Store the default reward tables without an auth check.
+///
+/// Crate-internal so season initialization/rollover can seed the new season's
+/// pass atomically after its own admin authorization.
+pub(crate) fn seed_default_season_rewards(
+    env: &Env,
+    season_id: u64,
+) -> Result<(), BattlePassError> {
     // ── Free tiers ─────────────────────────────────────────────────────────────
     for tier in 1u32..=MAX_FREE_TIERS {
         let xp_required = 100u64 + (tier as u64 - 1) * 150;

@@ -31,6 +31,18 @@ pub enum ArchiveError {
     BurstLimitExceeded = 2,
 }
 
+impl crate::error_standard::StandardContractError for ArchiveError {
+    fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
+        crate::error_standard::ErrorDescriptor {
+            module: "nebula_archive",
+            code: self as u32,
+            kind: crate::error_standard::ErrorKind::Validation,
+            retryable: false,
+        }
+    }
+}
+
+
 const MAX_ARCHIVE_BURST: u32 = 20;
 
 #[contract]

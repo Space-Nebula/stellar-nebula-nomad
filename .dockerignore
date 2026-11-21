@@ -1,0 +1,23 @@
+# Keep the Docker build context small so layer caching is effective.
+.git
+.github
+target
+backups
+coverage
+test_snapshots
+node_modules
+frontend/node_modules
+mobile/node_modules
+sdk/node_modules
+backend/*/node_modules
+services/*/node_modules
+subgraph/node_modules
+*.md
+!README.md
+*.log
+.env
+.env.*
+!.env.example
+*.wasm
+coverage.*
+benchmark-output.txt

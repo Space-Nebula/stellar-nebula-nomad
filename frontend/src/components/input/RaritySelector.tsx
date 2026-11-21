@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useId } from 'react';
+import { colors } from '../../a11y';
+import { useI18n } from '../../i18n';
 
 export type RarityType = 'All' | 'Common' | 'Rare' | 'Epic' | 'Legendary';
 
@@ -13,13 +15,21 @@ export const RaritySelector: React.FC<RaritySelectorProps> = ({
   onChange,
   includeAll = true,
 }) => {
+  const { t } = useI18n();
+  const labelId = useId();
   const rarities: RarityType[] = includeAll
     ? ['All', 'Common', 'Rare', 'Epic', 'Legendary']
     : ['Common', 'Rare', 'Epic', 'Legendary'];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      <label style={{ fontSize: '0.8rem', color: '#94A3B8' }}>Filter by Rarity</label>
+    <div
+      role="group"
+      aria-labelledby={labelId}
+      style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}
+    >
+      <span id={labelId} style={{ fontSize: '0.8rem', color: colors.textMuted }}>
+        {t('rarity.label')}
+      </span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
         {rarities.map((r) => {
           const isSelected = selected === r;
@@ -27,11 +37,12 @@ export const RaritySelector: React.FC<RaritySelectorProps> = ({
             <button
               key={r}
               type="button"
+              aria-pressed={isSelected}
               onClick={() => onChange(r)}
               style={{
-                backgroundColor: isSelected ? '#6366F1' : '#0F172A',
-                color: isSelected ? '#FFFFFF' : '#94A3B8',
-                border: '1px solid #334155',
+                backgroundColor: isSelected ? colors.selectedFill : colors.bgSurface,
+                color: isSelected ? colors.textOnAccent : colors.textMuted,
+                border: `1px solid ${isSelected ? colors.selectedFill : colors.textMuted}`,
                 borderRadius: '6px',
                 padding: '4px 10px',
                 fontSize: '0.75rem',
@@ -39,7 +50,7 @@ export const RaritySelector: React.FC<RaritySelectorProps> = ({
                 fontWeight: 600,
               }}
             >
-              {r}
+              {t(`rarity.${r}`)}
             </button>
           );
         })}

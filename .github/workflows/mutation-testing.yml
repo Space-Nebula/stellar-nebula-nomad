@@ -1,4 +1,4 @@
-name: Mutation Testing
+name: Mutation Testing Suite
 
 on:
   pull_request:
@@ -34,11 +34,12 @@ jobs:
 
       - name: Install cargo-mutants
         if: steps.cache-cargo-mutants.outputs.cache-hit != 'true'
-        run: cargo install cargo-mutants --locked
+        run: which cargo-mutants || cargo install cargo-mutants --locked
 
-      - name: Run mutation testing on changed priority modules
+      - name: Run mutation testing on prioritized modules
         run: |
-          cargo mutants --file src/access_control.rs --file src/resource_minter.rs --file src/nebula_gen.rs --file src/ship_registry.rs --file src/nomad_bonding.rs --output mutants.out
+          chmod +x ./scripts/mutation-test.sh
+          ./scripts/mutation-test.sh
 
       - name: Upload mutation testing results
         if: always()
@@ -46,3 +47,4 @@ jobs:
         with:
           name: mutants-report
           path: mutants.out/
+          retention-days: 14
