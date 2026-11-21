@@ -1,4 +1,4 @@
-/**
+/*
  * Example: PvP challenge and turn-based combat (module: pvp_combat).
  *
  *   NEBULA_CONTRACT_ID=C... npx tsx pvp-combat.ts

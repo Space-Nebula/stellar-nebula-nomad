@@ -65,6 +65,15 @@ return_self_not_must_use = "allow"
 # using `From` would add unnecessary boilerplate.
 cast_possible_truncation = "allow"
 
+# Soroban contract code uses short, domain-specific symbol names (e.g. `sym`,
+# `amt`, `cfg`) that are idiomatic in this codebase; enforcing the default
+# 3-character minimum would force awkward renames across every module.
+min_ident_chars = "allow"
+
+# Soroban contract code has many single-use helper functions where inlining
+# would hurt readability more than it helps; this is acceptable here.
+unused_self = "allow"
+
 [lints.rust]
 # Soroban contract code has many utility functions that are intentionally
 # kept available for API completeness and future use, not all of which
@@ -74,6 +83,11 @@ dead_code = "allow"
 # Soroban contract functions commonly have unused variables; this is acceptable
 # when functions are kept for API completeness or future extensions.
 unused_variables = "allow"
+
+# Unused imports are flagged by clippy as errors in CI; keep them as warnings
+# locally so `cargo clippy --fix` can remove them without failing the build,
+# while CI's `-D warnings` still enforces a clean tree.
+unused_imports = "warn"
 
 [[bench]]
 name = "gas_benchmarks"

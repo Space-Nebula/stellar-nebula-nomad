@@ -1,9 +1,7 @@
 //! Administrative tools for managed game content.
 //!
 use crate::input_validation;
-use soroban_sdk::{
-    contracterror, contracttype, symbol_short, Address, Bytes, Env, String, Symbol, Vec,
-};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Bytes, Env, String, Symbol, Vec};
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 

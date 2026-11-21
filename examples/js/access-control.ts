@@ -1,7 +1,7 @@
 /**
  * Example: admin tooling for roles and permissions (module: access_control).
  *
- *   NEBULA_CONTRACT_ID=C... PLAYER_SECRET=S...(admin) npx tsx access-control.ts <grantee G...>
+ *   NEBULA_CONTRACT_ID=C... PLAYER_SECRET=S...(admin) nzx tsx access-control.ts <grantee G...>
  *
  * Run as the contract admin. Grants the `indexer` role to an address, checks
  * it, and shows the errors a non-admin gets.
