@@ -46,4 +46,19 @@ jobs:
         run: cargo check --all-targets --locked
 
       - name: Run tests
+        run: cargo test --all
+
+      - name: Run fuzz tests
+        run: cargo test --test fuzz --test fuzz_navigation --test fuzz_trading --test fuzz_yield -- --test-threads=1
+
+      - name: Run performance benchmarks (regression gate)
+        run: cargo test --benches -- --test-threads=1 --nocapture
+
+      - name: Install Stellar CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/stellar/stellar-cli/main/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build release
+        run: stellar contract build
         run: cargo test --all --locked
