@@ -198,25 +198,34 @@ pub struct EloDecayConfig {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+/// Starting ELO rating for new players.
 pub const INITIAL_ELO: u32 = 1200;
+/// ELO K-factor controlling rating volatility.
 pub const K_FACTOR: u32 = 32;
+/// Maximum combat health points.
 pub const MAX_HP: u32 = 100;
+/// Maximum combat energy.
 pub const MAX_ENERGY: u32 = 100;
-pub const COMBAT_TIMEOUT: u64 = 3600; // 1 hour
-pub const CHALLENGE_EXPIRY: u64 = 86400; // 24 hours
+/// Combat timeout in seconds (1 hour).
+pub const COMBAT_TIMEOUT: u64 = 3600;
+/// Challenge expiry in seconds (24 hours).
+pub const CHALLENGE_EXPIRY: u64 = 86400;
 /// Largest `power` a single combat move may carry (equal to a full health bar).
 pub const MAX_MOVE_POWER: u32 = MAX_HP;
 /// Largest stake accepted on a challenge or matchmaking entry. Keeps stake
 /// arithmetic (pots, fees) far from `i128` overflow.
 pub const MAX_STAKE: i128 = 1_000_000_000_000_000_000;
 
+/// Maximum number of spectators per combat.
+pub const MAX_SPECTATORS: u32 = 50;
+/// Maximum number of players in the matchmaking queue.
+pub const MAX_QUEUE_SIZE: u32 = 100;
+
 /// Stake must be non-negative and bounded.
 fn validate_stake(stake: i128) -> Result<(), PvPError> {
     crate::input_validation::check_range(stake, 0, MAX_STAKE)
         .map_err(|_| PvPError::InvalidCombatParams)
 }
-pub const MAX_SPECTATORS: u32 = 50;
-pub const MAX_QUEUE_SIZE: u32 = 100;
 
 /// Number of seconds of inactivity before ELO decay begins (7 days).
 pub const ELO_DECAY_INACTIVITY_SECS: u64 = 604_800;
@@ -334,7 +343,7 @@ fn calculate_elo_change(winner_rating: u32, loser_rating: u32) -> (u32, u32) {
         1.0 / (1.0 + libm::pow(10.0, (winner_rating as f64 - loser_rating as f64) / 400.0));
 
     let winner_change = libm::round(K_FACTOR as f64 * (1.0 - expected_winner)) as u32;
-    let loser_change = libm::round(K_FACTOR as f64 * (0.0 - expected_loser)).abs() as u32;
+    let loser_change = libm::round(-(K_FACTOR as f64 * expected_loser)).abs() as u32;
 
     (winner_change, loser_change)
 }

