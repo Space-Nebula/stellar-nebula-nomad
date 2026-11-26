@@ -2354,7 +2354,7 @@ impl NebulaNomadContract {
     pub fn match_constellation(
         env: Env,
         observed: Vec<BytesN<32>>,
-    ) -> Result<MatchResult, ConstellationError> {
+    ) -> Result<constellation_mapper::MatchResult, ConstellationError> {
         constellation_mapper::match_constellation(&env, &observed)
     }
 
