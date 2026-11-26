@@ -95,10 +95,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-cyclonedx
-        run: cargo install cargo-cyclonedx --locked
+        run: cargo install cargo-cyclonedx --version 0.5.10 --locked
 
       - name: Generate SBOM
-        run: cargo cyclonedx --format json --output-file sbom.json
+        run: cargo cyclonedx --format json --override-filename sbom --all
+
+      - name: Validate SBOM
+        run: |
+          test -s sbom.json
+          python3 -m json.tool sbom.json > /dev/null
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v7
